@@ -32,7 +32,7 @@
 **
 */
 
-// #define NO_SWRENDER 	// set this if you want to exclude the software renderer. Without software renderer the base implementations of DrawTextureV and FillSimplePoly need to be disabled because they depend on it.
+#define NO_SWRENDER 	// set this if you want to exclude the software renderer. Without software renderer the base implementations of DrawTextureV and FillSimplePoly need to be disabled because they depend on it.
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -42,11 +42,6 @@
 #include "m_swap.h"
 #include "r_defs.h"
 #include "r_utility.h"
-#ifndef NO_SWRENDER
-#include "r_draw.h"
-#include "r_main.h"
-#include "r_things.h"
-#endif
 #include "r_data/r_translate.h"
 #include "doomstat.h"
 #include "v_palette.h"
