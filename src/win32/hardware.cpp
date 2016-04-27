@@ -47,6 +47,7 @@
 #include "doomstat.h"
 #include "m_argv.h"
 #include "version.h"
+#include "r_renderer.h"
 
 EXTERN_CVAR (Bool, ticker)
 EXTERN_CVAR (Bool, fullscreen)
