@@ -29,7 +29,7 @@ static void AddDefaultMidiDevices(FOptionValues *opt)
 #endif
 	pair[p].Text = "GUS";
 	pair[p].Value = -4.0;
-	pair[p+1].Text = "OPL Synth Emulation";
+	pair[p+1].Text = "OPL [DISABLED]";
 	pair[p+1].Value = -3.0;
 	pair[p+2].Text = "TiMidity++";
 	pair[p+2].Value = -2.0;
@@ -67,7 +67,8 @@ static void MIDIDeviceChanged(int newdev)
 #ifdef _WIN32
 UINT mididevice;
 
-CUSTOM_CVAR (Int, snd_mididevice, -1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+// default to device 0 on Windows
+CUSTOM_CVAR (Int, snd_mididevice, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
 	if (!nummididevicesset)
 		return;
@@ -173,7 +174,7 @@ CCMD (snd_listmididevices)
 	PrintMidiDevice (-5, "FluidSynth", MOD_SWSYNTH, 0);
 #endif
 	PrintMidiDevice (-4, "Gravis Ultrasound Emulation", MOD_SWSYNTH, 0);
-	PrintMidiDevice (-3, "Emulated OPL FM Synth", MOD_FMSYNTH, 0);
+	PrintMidiDevice (-3, "OPL [DISABLED]", MOD_FMSYNTH, 0);
 	PrintMidiDevice (-2, "TiMidity++", MOD_SWSYNTH, 0);
 	PrintMidiDevice (-1, "Sound System", 0, 0);
 	if (nummididevices != 0)
@@ -219,7 +220,7 @@ CCMD (snd_listmididevices)
 	Printf("%s-5. FluidSynth\n", -5 == snd_mididevice ? TEXTCOLOR_BOLD : "");
 #endif
 	Printf("%s-4. Gravis Ultrasound Emulation\n", -4 == snd_mididevice ? TEXTCOLOR_BOLD : "");
-	Printf("%s-3. Emulated OPL FM Synth\n", -3 == snd_mididevice ? TEXTCOLOR_BOLD : "");
+	Printf("%s-3. OPL [DISABLED]\n", -3 == snd_mididevice ? TEXTCOLOR_BOLD : "");
 	Printf("%s-2. TiMidity++\n", -2 == snd_mididevice ? TEXTCOLOR_BOLD : "");
 	Printf("%s-1. Sound System\n", -1 == snd_mididevice ? TEXTCOLOR_BOLD : "");
 }
