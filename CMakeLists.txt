@@ -255,8 +255,6 @@ add_subdirectory( tools )
 add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
-add_subdirectory( wadsrc_bm )
-add_subdirectory( wadsrc_lights )
 add_subdirectory( src )
 
 if( NOT WIN32 AND NOT APPLE )
