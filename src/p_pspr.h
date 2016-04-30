@@ -26,7 +26,6 @@
 
 // Basic data types.
 // Needs fixed point, and BAM angles.
-#include "tables.h"
 #include "thingdef/thingdef.h"
 
 #define WEAPONBOTTOM			128.

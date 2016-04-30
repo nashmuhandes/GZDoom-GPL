@@ -925,7 +925,6 @@ set (PCH_SOURCES
 	statistics.cpp
 	stats.cpp
 	stringtable.cpp
-	tables.cpp
 	teaminfo.cpp
 	tempfiles.cpp
 	v_blend.cpp

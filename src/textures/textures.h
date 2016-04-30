@@ -517,6 +517,12 @@ private:
 	TArray<FSwitchDef *> mSwitchDefs;
 	TArray<FDoorAnimation> mAnimatedDoors;
 	TArray<BYTE *> BuildTileFiles;
+public:
+	short sintable[2048];	// for texture warping
+	enum
+	{
+		SINMASK = 2047
+	};
 };
 
 // A texture that doesn't really exist
@@ -549,12 +555,12 @@ public:
 	FTexture *GetRedirect(bool wantwarped);
 
 	DWORD GenTime;
+	float Speed;
+	int WidthOffsetMultiplier, HeightOffsetMultiplier;  // [mxd]
 protected:
 	FTexture *SourcePic;
 	BYTE *Pixels;
 	Span **Spans;
-	float Speed;
-	int WidthOffsetMultipiler, HeightOffsetMultipiler;  // [mxd]
 
 	virtual void MakeTexture (DWORD time);
 	int NextPo2 (int v); // [mxd]

@@ -382,10 +382,10 @@ void FGLRenderer::RenderScene(int recursion)
 	}
 	else
 	{
-		// Todo: Draw lights with multipass rendering.
-		// RenderMultpassStuff();
+		// process everything that needs to handle textured dynamic lights.
+		if (haslights) RenderMultipassStuff();
 
-		// The remaining stuff which is unaffected by dynamic lights is just processed as normal.
+		// The remaining lists which are unaffected by dynamic lights are just processed as normal.
 		pass = GLPASS_PLAIN;
 	}
 
@@ -503,7 +503,7 @@ void FGLRenderer::DrawScene(bool toscreen)
 	static int recursion=0;
 
 	CreateScene();
-	GLRenderer->mCurrentPortal = NULL;	// this must be reset before any portal recursion takes place.
+	GLRenderer->mClipPortal = NULL;	// this must be reset before any portal recursion takes place.
 
 	// Up to this point in the main draw call no rendering is performed so we can wait
 	// with swapping the render buffer until now.
@@ -793,7 +793,7 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 	SetViewArea();
 
 	// We have to scale the pitch to account for the pixel stretching, because the playsim doesn't know about this and treats it as 1:1.
-	double radPitch = clamp(ViewPitch.Normalized180().Radians(), -PI / 2, PI / 2);
+	double radPitch = ViewPitch.Normalized180().Radians();
 	double angx = cos(radPitch);
 	double angy = sin(radPitch) * glset.pixelstretch;
 	double alen = sqrt(angx*angx + angy*angy);
@@ -922,7 +922,7 @@ void FGLRenderer::RenderView (player_t* player)
 	TThinkerIterator<ADynamicLight> it(STAT_DLIGHT);
 	GLRenderer->mLightCount = ((it.Next()) != NULL);
 
-	sector_t * viewsector = RenderViewpoint(player->camera, NULL, FieldOfView * 360.0f / FINEANGLES, ratio, fovratio, true, true);
+	sector_t * viewsector = RenderViewpoint(player->camera, NULL, FieldOfView.Degrees, ratio, fovratio, true, true);
 
 	All.Unclock();
 }
@@ -952,7 +952,7 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 	GLRenderer->mLightCount = ((it.Next()) != NULL);
 
 	sector_t *viewsector = RenderViewpoint(players[consoleplayer].camera, &bounds, 
-								FieldOfView * 360.0f / FINEANGLES, 1.6f, 1.6f, true, false);
+								FieldOfView.Degrees, 1.6f, 1.6f, true, false);
 	glDisable(GL_STENCIL_TEST);
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 	gl_RenderState.SetSoftLightLevel(-1);

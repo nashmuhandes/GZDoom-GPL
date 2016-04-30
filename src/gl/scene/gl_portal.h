@@ -107,7 +107,8 @@ private:
 	area_t savedviewarea;
 	bool savedshowviewer;
 	DVector3 savedviewpath[2];
-	GLPortal *NextPortal;
+	GLPortal *PrevPortal;
+	GLPortal *PrevClipPortal;
 	TArray<BYTE> savedmapsection;
 	TArray<unsigned int> mPrimIndices;
 
@@ -130,6 +131,8 @@ protected:
 	virtual const char *GetName() = 0;
 	void SaveMapSection();
 	void RestoreMapSection();
+	virtual void PushState() {}
+	virtual void PopState() {}
 
 public:
 
@@ -222,6 +225,8 @@ struct GLLinePortal : public GLPortal
 	virtual int ClipSubsector(subsector_t *sub);
 	virtual int ClipPoint(const DVector2 &pos);
 	virtual bool NeedCap() { return false; }
+	virtual void PushState();
+	virtual void PopState();
 };
 
 
@@ -341,6 +346,8 @@ protected:
 	virtual void DrawContents();
 	virtual void * GetSource() const { return origin; }
 	virtual const char *GetName();
+	virtual void PushState();
+	virtual void PopState();
 	secplane_t * origin;
 
 public:

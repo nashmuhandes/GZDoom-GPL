@@ -59,6 +59,7 @@ class FGLRenderer
 public:
 
 	OpenGLFrameBuffer *framebuffer;
+	GLPortal *mClipPortal;
 	GLPortal *mCurrentPortal;
 	int mMirrorCount;
 	int mPlaneMirrorCount;
@@ -101,6 +102,7 @@ public:
 	void Initialize();
 
 	void CreateScene();
+	void RenderMultipassStuff();
 	void RenderScene(int recursion);
 	void RenderTranslucent();
 	void DrawScene(bool toscreen = false);
