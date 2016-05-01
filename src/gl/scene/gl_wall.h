@@ -359,7 +359,7 @@ public:
 
 	void Draw(int pass);
 	void PutSprite(bool translucent);
-	void Process(AActor* thing,sector_t * sector, bool thruportal = false);
+	void Process(AActor* thing,sector_t * sector, int thruportal = false);
 	void ProcessParticle (particle_t *particle, sector_t *sector);//, int shade, int fakeside)
 	void SetThingColor(PalEntry);
 
@@ -376,5 +376,6 @@ inline float Dist2(float x1,float y1,float x2,float y2)
 
 void gl_SetDynSpriteLight(AActor *self, float x, float y, float z, subsector_t *subsec);
 void gl_SetDynSpriteLight(AActor *actor, particle_t *particle);
+void gl_RenderActorsInPortal(FGLLinePortal *glport);
 
 #endif
