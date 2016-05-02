@@ -73,6 +73,7 @@ CVAR(Float, gl_sclipthreshold, 10.0, CVAR_ARCHIVE)
 CVAR(Float, gl_sclipfactor, 1.8, CVAR_ARCHIVE)
 CVAR(Int, gl_particles_style, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // 0 = square, 1 = round, 2 = smooth
 CVAR(Int, gl_billboard_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, gl_billboard_faces_camera, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_billboard_particles, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, gl_enhanced_nv_stealth, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, gl_fuzztype, 0, CVAR_ARCHIVE)
@@ -262,40 +263,60 @@ void GLSprite::Draw(int pass)
 				//&& GLRenderer->mViewActor != NULL
 				&& (gl_billboard_mode == 1 || (actor && actor->renderflags & RF_FORCEXYBILLBOARD))));
 
+			const bool drawBillboardFacingCamera = gl_billboard_faces_camera;
+
 			gl_RenderState.Apply();
 
-			Vector v1;
-			Vector v2;
-			Vector v3;
-			Vector v4;
+			FVector3 v1;
+			FVector3 v2;
+			FVector3 v3;
+			FVector3 v4;
 
-			if (drawWithXYBillboard)
+			if (drawWithXYBillboard || drawBillboardFacingCamera)
 			{
-				// Rotate the sprite about the vector starting at the center of the sprite
-				// triangle strip and with direction orthogonal to where the player is looking
-				// in the x/y plane.
+				// Compute center of sprite
 				float xcenter = (x1 + x2)*0.5;
 				float ycenter = (y1 + y2)*0.5;
 				float zcenter = (z1 + z2)*0.5;
-				float angleRad = (270. - GLRenderer->mAngles.Yaw).Radians();
 
 				Matrix3x4 mat;
 				mat.MakeIdentity();
-				mat.Translate(xcenter, zcenter, ycenter);
-				mat.Rotate(-sin(angleRad), 0, cos(angleRad), -GLRenderer->mAngles.Pitch.Degrees);
-				mat.Translate(-xcenter, -zcenter, -ycenter);
-				v1 = mat * Vector(x1, z1, y1);
-				v2 = mat * Vector(x2, z1, y2);
-				v3 = mat * Vector(x1, z2, y1);
-				v4 = mat * Vector(x2, z2, y2);
-			}
-			else
-			{
+				mat.Translate(xcenter, zcenter, ycenter); // move to sprite center
 
-				v1 = Vector(x1, z1, y1);
-				v2 = Vector(x2, z1, y2);
-				v3 = Vector(x1, z2, y1);
-				v4 = Vector(x2, z2, y2);
+				// Order of rotations matters. Perform yaw rotation (Y, face camera) before pitch (X, tilt up/down).
+				if (drawBillboardFacingCamera) {
+					// [CMB] Rotate relative to camera XY position, not just camera direction,
+					// which is nicer in VR
+					float xrel = xcenter - GLRenderer->mViewActor->X();
+					float yrel = ycenter - GLRenderer->mViewActor->Y();
+					float absAngleDeg = RAD2DEG(atan2(-yrel, xrel));
+					float counterRotationDeg = 270. - GLRenderer->mAngles.Yaw.Degrees; // counteracts existing sprite rotation
+					float relAngleDeg = counterRotationDeg + absAngleDeg;
+
+					mat.Rotate(0, 1, 0, relAngleDeg);
+				}
+
+				if (drawWithXYBillboard)
+				{
+					// Rotate the sprite about the vector starting at the center of the sprite
+					// triangle strip and with direction orthogonal to where the player is looking
+					// in the x/y plane.
+					float angleRad = (270. - GLRenderer->mAngles.Yaw).Radians();
+
+					mat.Rotate(-sin(angleRad), 0, cos(angleRad), -GLRenderer->mAngles.Pitch.Degrees);
+				}
+				mat.Translate(-xcenter, -zcenter, -ycenter); // retreat from sprite center
+				v1 = mat * FVector3(x1, z1, y1);
+				v2 = mat * FVector3(x2, z1, y2);
+				v3 = mat * FVector3(x1, z2, y1);
+				v4 = mat * FVector3(x2, z2, y2);
+			}
+			else // traditional "Y" billboard mode
+			{
+				v1 = FVector3(x1, z1, y1);
+				v2 = FVector3(x2, z1, y2);
+				v3 = FVector3(x1, z2, y1);
+				v4 = FVector3(x2, z2, y2);
 			}
 
 			FFlatVertex *ptr;

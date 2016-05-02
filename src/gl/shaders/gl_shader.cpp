@@ -294,8 +294,11 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	modelmatrix_index = glGetUniformLocation(hShader, "ModelMatrix");
 	texturematrix_index = glGetUniformLocation(hShader, "TextureMatrix");
 
-	int tempindex = glGetUniformBlockIndex(hShader, "LightBufferUBO");
-	if (tempindex != -1) glUniformBlockBinding(hShader, tempindex, LIGHTBUF_BINDINGPOINT);
+	if (LM_SOFTWARE != gl.lightmethod && !(gl.flags & RFL_SHADER_STORAGE_BUFFER))
+	{
+		int tempindex = glGetUniformBlockIndex(hShader, "LightBufferUBO");
+		if (tempindex != -1) glUniformBlockBinding(hShader, tempindex, LIGHTBUF_BINDINGPOINT);
+	}
 
 	glUseProgram(hShader);
 
@@ -304,7 +307,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	{
 		char stringbuf[20];
 		mysnprintf(stringbuf, 20, "texture%d", i);
-		tempindex = glGetUniformLocation(hShader, stringbuf);
+		int tempindex = glGetUniformLocation(hShader, stringbuf);
 		if (tempindex > 0) glUniform1i(tempindex, i - 1);
 	}
 
@@ -430,6 +433,7 @@ static const FEffectShader effectshaders[]=
 	{ "spheremap", "shaders/glsl/main.vp", "shaders/glsl/main.fp", "shaders/glsl/func_normal.fp", "#define SPHEREMAP\n#define NO_ALPHATEST\n" },
 	{ "burn", "shaders/glsl/main.vp", "shaders/glsl/burn.fp", NULL, "#define SIMPLE\n#define NO_ALPHATEST\n" },
 	{ "stencil", "shaders/glsl/main.vp", "shaders/glsl/stencil.fp", NULL, "#define SIMPLE\n#define NO_ALPHATEST\n" },
+	{ "gammacorrection", "shaders/glsl/main.vp", "shaders/glsl/gammacorrection.fp", NULL, "#define SIMPLE\n" },
 };
 
 

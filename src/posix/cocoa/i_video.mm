@@ -57,9 +57,12 @@
 #include "v_video.h"
 #include "version.h"
 
+#include "gl/system/gl_system.h"
+#include "gl/data/gl_vertexbuffer.h"
 #include "gl/renderer/gl_renderer.h"
 #include "gl/system/gl_framebuffer.h"
 #include "gl/system/gl_interface.h"
+#include "gl/textures/gl_samplers.h"
 #include "gl/utility/gl_clock.h"
 
 #undef Class
@@ -1146,22 +1149,14 @@ void CocoaFrameBuffer::Flip()
 // ---------------------------------------------------------------------------
 
 
-static const uint32_t GAMMA_TABLE_ALPHA = 0xFF000000;
-
-
 SDLGLFB::SDLGLFB(void*, const int width, const int height, int, int, const bool fullscreen)
 : DFrameBuffer(width, height)
 , m_lock(-1)
 , m_isUpdatePending(false)
-, m_supportsGamma(true)
-, m_gammaProgram("gamma_correction")
-, m_gammaTexture(GAMMA_TABLE_SIZE, 1, true)
 {
 }
 
 SDLGLFB::SDLGLFB()
-: m_gammaProgram(nullptr)
-, m_gammaTexture(0, 0, false)
 {
 }
 
@@ -1242,24 +1237,6 @@ void SDLGLFB::SwapBuffers()
 
 void SDLGLFB::SetGammaTable(WORD* table)
 {
-	const WORD* const red   = &table[  0];
-	const WORD* const green = &table[256];
-	const WORD* const blue  = &table[512];
-
-	for (size_t i = 0; i < GAMMA_TABLE_SIZE; ++i)
-	{
-		// Convert 16 bits colors to 8 bits by dividing on 256
-
-		const uint32_t r =   red[i] >> 8;
-		const uint32_t g = green[i] >> 8;
-		const uint32_t b =  blue[i] >> 8;
-
-		m_gammaTable[i] = GAMMA_TABLE_ALPHA + (b << 16) + (g << 8) + r;
-	}
-
-	m_gammaTexture.CreateTexture(
-		reinterpret_cast<unsigned char*>(m_gammaTable),
-		GAMMA_TABLE_SIZE, 1, false, 1, 0);
 }
 
 
@@ -1275,38 +1252,38 @@ void BoundTextureSetFilter(const GLenum target, const GLint filter)
 	glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
+EXTERN_CVAR(Float, vid_brightness)
+EXTERN_CVAR(Float, vid_contrast)
+
 void BoundTextureDraw2D(const GLsizei width, const GLsizei height)
 {
-	const bool flipX = width  < 0;
-	const bool flipY = height < 0;
+	gl_RenderState.SetEffect(EFF_GAMMACORRECTION);
+	gl_RenderState.SetTextureMode(TM_OPAQUE);
+	gl_RenderState.AlphaFunc(GL_GEQUAL, 0.f);
+	gl_RenderState.SetColor(Gamma, vid_contrast, vid_brightness);
+	gl_RenderState.Apply();
 
-	const float u0 = flipX ? 1.0f : 0.0f;
-	const float v0 = flipY ? 1.0f : 0.0f;
-	const float u1 = flipX ? 0.0f : 1.0f;
-	const float v1 = flipY ? 0.0f : 1.0f;
+	static const float x  = 0.f;
+	static const float y  = 0.f;
+	const float w = float(width);
+	const float h = float(height);
 
-	const float x1 = 0.0f;
-	const float y1 = 0.0f;
-	const float x2 = abs(width );
-	const float y2 = abs(height);
+	static const float u1 = 0.f;
+	static const float v1 = 1.f;
+	static const float u2 = 1.f;
+	static const float v2 = 0.f;
 
-	glDisable(GL_BLEND);
-	glDisable(GL_ALPHA_TEST);
+	FFlatVertexBuffer* const vbo = GLRenderer->mVBO;
+	FFlatVertex* ptr = vbo->GetBuffer();
 
-	glBegin(GL_QUADS);
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	glTexCoord2f(u0, v1);
-	glVertex2f(x1, y1);
-	glTexCoord2f(u1, v1);
-	glVertex2f(x2, y1);
-	glTexCoord2f(u1, v0);
-	glVertex2f(x2, y2);
-	glTexCoord2f(u0, v0);
-	glVertex2f(x1, y2);
-	glEnd();
+	ptr->Set(x,     y,     0, u1, v1); ++ptr;
+	ptr->Set(x,     y + h, 0, u1, v2); ++ptr;
+	ptr->Set(x + w, y,     0, u2, v1); ++ptr;
+	ptr->Set(x + w, y + h, 0, u2, v2); ++ptr;
 
-	glEnable(GL_ALPHA_TEST);
-	glEnable(GL_BLEND);
+	vbo->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+
+	gl_RenderState.SetEffect(EFF_NONE);
 }
 
 bool BoundTextureSaveAsPNG(const GLenum target, const char* const path)
@@ -1390,7 +1367,7 @@ RenderTarget::RenderTarget(const GLsizei width, const GLsizei height)
 	glGenFramebuffersEXT(1, &m_ID);
 
 	Bind();
-	m_texture.CreateTexture(NULL, width, height, false, 0, 0);
+	m_texture.CreateTexture(NULL, width, height, 0, false, 0);
 	m_texture.BindToFrameBuffer();
 	Unbind();
 }
@@ -1436,19 +1413,7 @@ CocoaOpenGLFrameBuffer::CocoaOpenGLFrameBuffer(void* hMonitor, int width, int he
 , m_renderTarget(width, height)
 {
 	SetSmoothPicture(gl_smooth_rendered);
-/*
-	// Setup uniform samplers for gamma correction shader
 
-	m_gammaProgram.Load("GammaCorrection", "shaders/glsl/main.vp",
-		"shaders/glsl/gamma_correction.fp", NULL, "");
-
-	const GLuint program = m_gammaProgram.GetHandle();
-
-	glUseProgram(program);
-	glUniform1i(glGetUniformLocation(program, "backbuffer"), 0);
-	glUniform1i(glGetUniformLocation(program, "gammaTable"), 1);
-	glUseProgram(0);
-*/
 	// Fill render target with black color
 
 	m_renderTarget.Bind();
@@ -1502,9 +1467,7 @@ void CocoaOpenGLFrameBuffer::GetScreenshotBuffer(const BYTE*& buffer, int& pitch
 void CocoaOpenGLFrameBuffer::DrawRenderTarget()
 {
 	m_renderTarget.Unbind();
-
-	m_renderTarget.GetColorTexture().Bind(0, 0, 0);
-	m_gammaTexture.Bind(1, 0, 0);
+	m_renderTarget.GetColorTexture().Bind(0, 0, false);
 
 	if (rbOpts.dirty)
 	{
@@ -1518,7 +1481,6 @@ void CocoaOpenGLFrameBuffer::DrawRenderTarget()
 
 	glViewport(rbOpts.shiftX, rbOpts.shiftY, rbOpts.width, rbOpts.height);
 
-	//m_gammaProgram.Bind();
 	BoundTextureDraw2D(Width, Height);
 
 	glViewport(0, 0, Width, Height);
@@ -1528,7 +1490,7 @@ void CocoaOpenGLFrameBuffer::DrawRenderTarget()
 void CocoaOpenGLFrameBuffer::SetSmoothPicture(const bool smooth)
 {
 	FHardwareTexture& texture = m_renderTarget.GetColorTexture();
-	texture.Bind(0, 0, 0);
+	texture.Bind(0, 0, false);
 	BoundTextureSetFilter(GL_TEXTURE_2D, smooth ? GL_LINEAR : GL_NEAREST);
 }
 

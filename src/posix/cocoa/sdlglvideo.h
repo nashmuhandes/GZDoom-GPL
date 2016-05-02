@@ -68,14 +68,7 @@ protected:
 	int                 m_lock;
 	bool                m_isUpdatePending;
 
-	bool                m_supportsGamma;
-
-	FShader             m_gammaProgram;
-	FHardwareTexture    m_gammaTexture;
-
-	static const size_t GAMMA_TABLE_SIZE = 256;
-	uint32_t            m_gammaTable[GAMMA_TABLE_SIZE];
-
+	static const bool   m_supportsGamma = true;
 
 	SDLGLFB();
 
