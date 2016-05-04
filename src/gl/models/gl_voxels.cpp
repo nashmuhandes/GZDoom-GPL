@@ -213,7 +213,7 @@ FVoxelModel::FVoxelModel(FVoxel *voxel, bool owned)
 {
 	mVoxel = voxel;
 	mOwningVoxel = owned;
-	mPalette = new FVoxelTexture(voxel);
+	mPalette = TexMan.AddTexture(new FVoxelTexture(voxel));
 }
 
 //===========================================================================
@@ -224,7 +224,6 @@ FVoxelModel::FVoxelModel(FVoxel *voxel, bool owned)
 
 FVoxelModel::~FVoxelModel()
 {
-	delete mPalette;
 	if (mOwningVoxel) delete mVoxel;
 }
 
@@ -378,7 +377,7 @@ void FVoxelModel::BuildVertexBuffer()
 	{
 		Initialize();
 
-		mVBuf = new FModelVertexBuffer(true);
+		mVBuf = new FModelVertexBuffer(true, true);
 		FModelVertex *vertptr = mVBuf->LockVertexBuffer(mVertices.Size());
 		unsigned int *indxptr = mVBuf->LockIndexBuffer(mIndices.Size());
 
@@ -397,6 +396,17 @@ void FVoxelModel::BuildVertexBuffer()
 	}
 }
 
+
+//===========================================================================
+//
+// for skin precaching
+//
+//===========================================================================
+
+void FVoxelModel::AddSkins(BYTE *hitlist)
+{
+	hitlist[mPalette.GetIndex()] |= FTexture::TEX_Flat;
+}
 
 //===========================================================================
 //
@@ -443,7 +453,7 @@ void FVoxelModel::RenderFrame(FTexture * skin, int frame, int frame2, double int
 	gl_RenderState.SetMaterial(tex, CLAMP_NOFILTER, translation, -1, false);
 
 	gl_RenderState.Apply();
-	mVBuf->SetupFrame(0, 0);
+	mVBuf->SetupFrame(0, 0, 0);
 	glDrawElements(GL_TRIANGLES, mNumIndices, GL_UNSIGNED_INT, (void*)(intptr_t)0);
 }
 

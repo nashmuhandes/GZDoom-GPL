@@ -159,7 +159,7 @@ bool FDMDModel::Load(const char * path, int lumpnum, const char * buffer, int le
 	}
 
 	// Allocate and load in the data.
-	skins = new FTexture *[info.numSkins];
+	skins = new FTextureID[info.numSkins];
 
 	for (i = 0; i < info.numSkins; i++)
 	{
@@ -304,7 +304,7 @@ void FDMDModel::BuildVertexBuffer()
 		int VertexBufferSize = info.numFrames * lodInfo[0].numTriangles * 3;
 		unsigned int vindex = 0;
 
-		mVBuf = new FModelVertexBuffer(false);
+		mVBuf = new FModelVertexBuffer(false, info.numFrames == 1);
 		FModelVertex *vertptr = mVBuf->LockVertexBuffer(VertexBufferSize);
 
 		for (int i = 0; i < info.numFrames; i++)
@@ -336,7 +336,22 @@ void FDMDModel::BuildVertexBuffer()
 	}
 }
 
+//===========================================================================
+//
+// for skin precaching
+//
+//===========================================================================
 
+void FDMDModel::AddSkins(BYTE *hitlist)
+{
+	for (int i = 0; i < info.numSkins; i++)
+	{
+		if (skins[i].isValid())
+		{
+			hitlist[skins[i].GetIndex()] |= FTexture::TEX_Flat;
+		}
+	}
+}
 
 //===========================================================================
 //
@@ -364,8 +379,8 @@ void FDMDModel::RenderFrame(FTexture * skin, int frameno, int frameno2, double i
 
 	if (!skin)
 	{
-		if (info.numSkins == 0) return;
-		skin = skins[0];
+		if (info.numSkins == 0 || !skins[0].isValid()) return;
+		skin = TexMan(skins[0]);
 		if (!skin) return;
 	}
 
@@ -375,7 +390,7 @@ void FDMDModel::RenderFrame(FTexture * skin, int frameno, int frameno2, double i
 	gl_RenderState.SetInterpolationFactor((float)inter);
 
 	gl_RenderState.Apply();
-	mVBuf->SetupFrame(frames[frameno].vindex, frames[frameno2].vindex);
+	mVBuf->SetupFrame(frames[frameno].vindex, frames[frameno2].vindex, lodInfo[0].numTriangles * 3);
 	glDrawArrays(GL_TRIANGLES, 0, lodInfo[0].numTriangles * 3);
 	gl_RenderState.SetInterpolationFactor(0.f);
 }
@@ -469,7 +484,7 @@ bool FMD2Model::Load(const char * path, int lumpnum, const char * buffer, int le
 		return false;
 	}
 
-	skins = new FTexture *[info.numSkins];
+	skins = new FTextureID[info.numSkins];
 
 	for (i = 0; i < info.numSkins; i++)
 	{

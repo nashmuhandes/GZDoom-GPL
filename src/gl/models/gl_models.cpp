@@ -73,32 +73,17 @@ EXTERN_CVAR(Int, gl_fogmode)
 extern TDeletingArray<FVoxel *> Voxels;
 extern TDeletingArray<FVoxelDef *> VoxelDefs;
 
-
-class DeletingModelArray : public TArray<FModel *>
-{
-public:
-
-#if 1
-	~DeletingModelArray()
-	{
-		for(unsigned i=0;i<Size();i++)
-		{
-			delete (*this)[i];
-		}
-
-	}
-#endif
-};
-
 DeletingModelArray Models;
 
 
 void gl_LoadModels()
 {
+	/*
 	for (int i = Models.Size() - 1; i >= 0; i--)
 	{
 		Models[i]->BuildVertexBuffer();
 	}
+	*/
 }
 
 void gl_FlushModels()
@@ -111,16 +96,22 @@ void gl_FlushModels()
 
 //===========================================================================
 //
+// Uses a hardware buffer if either single frame (i.e. no interpolation needed)
+// or shading is available (interpolation is done by the vertex shader)
 //
+// If interpolation has to be done on the CPU side this will fall back
+// to CPU-side arrays.
 //
 //===========================================================================
 
-FModelVertexBuffer::FModelVertexBuffer(bool needindex)
+FModelVertexBuffer::FModelVertexBuffer(bool needindex, bool singleframe)
+	: FVertexBuffer(singleframe || gl.glslversion > 0)
 {
+	vbo_ptr = nullptr;
 	ibo_id = 0;
 	if (needindex)
 	{
-		glGenBuffers(1, &ibo_id);
+		glGenBuffers(1, &ibo_id);	// The index buffer can always be a real buffer.
 	}
 }
 
@@ -161,6 +152,10 @@ FModelVertexBuffer::~FModelVertexBuffer()
 	{
 		glDeleteBuffers(1, &ibo_id);
 	}
+	if (vbo_ptr != nullptr)
+	{
+		delete[] vbo_ptr;
+	}
 }
 
 //===========================================================================
@@ -171,9 +166,19 @@ FModelVertexBuffer::~FModelVertexBuffer()
 
 FModelVertex *FModelVertexBuffer::LockVertexBuffer(unsigned int size)
 {
-	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
-	glBufferData(GL_ARRAY_BUFFER, size * sizeof(FModelVertex), NULL, GL_STATIC_DRAW);
-	return (FModelVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, size * sizeof(FModelVertex), GL_MAP_WRITE_BIT|GL_MAP_INVALIDATE_BUFFER_BIT);
+	if (vbo_id > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+		glBufferData(GL_ARRAY_BUFFER, size * sizeof(FModelVertex), nullptr, GL_STATIC_DRAW);
+		return (FModelVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, size * sizeof(FModelVertex), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+	}
+	else
+	{
+		if (vbo_ptr != nullptr) delete[] vbo_ptr;
+		vbo_ptr = new FModelVertex[size];
+		memset(vbo_ptr, 0, size * sizeof(FModelVertex));
+		return vbo_ptr;
+	}
 }
 
 //===========================================================================
@@ -184,8 +189,11 @@ FModelVertex *FModelVertexBuffer::LockVertexBuffer(unsigned int size)
 
 void FModelVertexBuffer::UnlockVertexBuffer()
 {
-	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
-	glUnmapBuffer(GL_ARRAY_BUFFER); 
+	if (vbo_id > 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+		glUnmapBuffer(GL_ARRAY_BUFFER);
+	}
 }
 
 //===========================================================================
@@ -204,7 +212,7 @@ unsigned int *FModelVertexBuffer::LockIndexBuffer(unsigned int size)
 	}
 	else
 	{
-		return NULL;
+		return nullptr;
 	}
 }
 
@@ -216,8 +224,11 @@ unsigned int *FModelVertexBuffer::LockIndexBuffer(unsigned int size)
 
 void FModelVertexBuffer::UnlockIndexBuffer()
 {
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_id);
-	glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER); 
+	if (ibo_id > 0)
+	{
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_id);
+		glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+	}
 }
 
 
@@ -227,21 +238,44 @@ void FModelVertexBuffer::UnlockIndexBuffer()
 // This must be called after gl_RenderState.Apply!
 //
 //===========================================================================
+static TArray<FModelVertex> iBuffer;
 
-unsigned int FModelVertexBuffer::SetupFrame(unsigned int frame1, unsigned int frame2)
+unsigned int FModelVertexBuffer::SetupFrame(unsigned int frame1, unsigned int frame2, unsigned int size)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
-	if (gl.glslversion > 0)
+	if (vbo_id > 0)
 	{
-		glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FModelVertex), &VMO[frame1].x);
-		glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FModelVertex), &VMO[frame1].u);
-		glVertexAttribPointer(VATTR_VERTEX2, 3, GL_FLOAT, false, sizeof(FModelVertex), &VMO[frame2].x);
+		if (gl.glslversion > 0)
+		{
+			glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FModelVertex), &VMO[frame1].x);
+			glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FModelVertex), &VMO[frame1].u);
+			glVertexAttribPointer(VATTR_VERTEX2, 3, GL_FLOAT, false, sizeof(FModelVertex), &VMO[frame2].x);
+		}
+		else
+		{
+			// only used for single frame models so there is no vertex2 here, which has no use without a shader.
+			glVertexPointer(3, GL_FLOAT, sizeof(FModelVertex), &VMO[frame1].x);
+			glTexCoordPointer(2, GL_FLOAT, sizeof(FModelVertex), &VMO[frame1].u);
+		}
+	}
+	else if (frame1 == frame2 || size == 0 || gl_RenderState.GetInterpolationFactor() == 0.f)
+	{
+		glVertexPointer(3, GL_FLOAT, sizeof(FModelVertex), &vbo_ptr[frame1].x);
+		glTexCoordPointer(2, GL_FLOAT, sizeof(FModelVertex), &vbo_ptr[frame1].u);
 	}
 	else
 	{
-		// only used for single frame models so there is no vertex2 here, which has no use without a shader.
-		glVertexPointer(3, GL_FLOAT, sizeof(FModelVertex), &VMO[frame1].x);
-		glTexCoordPointer(2, GL_FLOAT, sizeof(FModelVertex), &VMO[frame1].u);
+		// must interpolate
+		iBuffer.Resize(size);
+		glVertexPointer(3, GL_FLOAT, sizeof(FModelVertex), &iBuffer[0].x);
+		glTexCoordPointer(2, GL_FLOAT, sizeof(FModelVertex), &vbo_ptr[frame1].u);
+		float frac = gl_RenderState.GetInterpolationFactor();
+		for (unsigned i = 0; i < size; i++)
+		{
+			iBuffer[i].x = vbo_ptr[frame1 + i].x * (1.f - frac) + vbo_ptr[frame2 + i].x * frac;
+			iBuffer[i].y = vbo_ptr[frame1 + i].y * (1.f - frac) + vbo_ptr[frame2 + i].y * frac;
+			iBuffer[i].z = vbo_ptr[frame1 + i].z * (1.f - frac) + vbo_ptr[frame2 + i].z * frac;
+		}
 	}
 	return frame1;
 }
@@ -254,7 +288,7 @@ unsigned int FModelVertexBuffer::SetupFrame(unsigned int frame1, unsigned int fr
 
 FModel::~FModel()
 {
-	if (mVBuf != NULL) delete mVBuf;
+	if (mVBuf != nullptr) delete mVBuf;
 }
 
 
@@ -266,8 +300,8 @@ static int * SpriteModelHash;
 
 static void DeleteModelHash()
 {
-	if (SpriteModelHash != NULL) delete [] SpriteModelHash;
-	SpriteModelHash = NULL;
+	if (SpriteModelHash != nullptr) delete [] SpriteModelHash;
+	SpriteModelHash = nullptr;
 }
 
 //===========================================================================
@@ -278,12 +312,15 @@ static void DeleteModelHash()
 
 static int FindGFXFile(FString & fn)
 {
+	int lump = Wads.CheckNumForFullName(fn);	// if we find something that matches the name plus the extension, return it and do not enter the substitution logic below.
+	if (lump != -1) return lump;
+
 	int best = -1;
 	int dot = fn.LastIndexOf('.');
 	int slash = fn.LastIndexOf('/');
 	if (dot > slash) fn.Truncate(dot);
 
-	static const char * extensions[] = { ".png", ".jpg", ".tga", ".pcx", NULL };
+	static const char * extensions[] = { ".png", ".jpg", ".tga", ".pcx", nullptr };
 
 	for (const char ** extp=extensions; *extp; extp++)
 	{
@@ -300,7 +337,7 @@ static int FindGFXFile(FString & fn)
 //
 //===========================================================================
 
-FTexture * LoadSkin(const char * path, const char * fn)
+FTextureID LoadSkin(const char * path, const char * fn)
 {
 	FString buffer;
 
@@ -309,11 +346,11 @@ FTexture * LoadSkin(const char * path, const char * fn)
 	int texlump = FindGFXFile(buffer);
 	if (texlump>=0)
 	{
-		return TexMan.FindTexture(Wads.GetLumpFullName(texlump), FTexture::TEX_Any, FTextureManager::TEXMAN_TryAny);
+		return TexMan.CheckForTexture(Wads.GetLumpFullName(texlump), FTexture::TEX_Any, FTextureManager::TEXMAN_TryAny);
 	}
 	else 
 	{
-		return NULL;
+		return FNullTextureID();
 	}
 }
 
@@ -344,9 +381,9 @@ static int ModelFrameHash(FSpriteModelFrame * smf)
 //
 //===========================================================================
 
-static FModel * FindModel(const char * path, const char * modelfile)
+static unsigned FindModel(const char * path, const char * modelfile)
 {
-	FModel * model = NULL;
+	FModel * model = nullptr;
 	FString fullname;
 
 	fullname.Format("%s%s", path, modelfile);
@@ -355,12 +392,12 @@ static FModel * FindModel(const char * path, const char * modelfile)
 	if (lump<0)
 	{
 		Printf("FindModel: '%s' not found\n", fullname.GetChars());
-		return NULL;
+		return -1;
 	}
 
-	for(int i = 0; i< (int)Models.Size(); i++)
+	for(unsigned i = 0; i< Models.Size(); i++)
 	{
-		if (!Models[i]->mFileName.CompareNoCase(fullname)) return Models[i];
+		if (!Models[i]->mFileName.CompareNoCase(fullname)) return i;
 	}
 
 	int len = Wads.LumpLength(lump);
@@ -380,32 +417,31 @@ static FModel * FindModel(const char * path, const char * modelfile)
 		model = new FMD3Model;
 	}
 
-	if (model != NULL)
+	if (model != nullptr)
 	{
 		if (!model->Load(path, lump, buffer, len))
 		{
 			delete model;
-			return NULL;
+			return -1;
 		}
 	}
 	else
 	{
 		// try loading as a voxel
 		FVoxel *voxel = R_LoadKVX(lump);
-		if (voxel != NULL)
+		if (voxel != nullptr)
 		{
 			model = new FVoxelModel(voxel, true);
 		}
 		else
 		{
 			Printf("LoadModel: Unknown model format in '%s'\n", fullname.GetChars());
-			return NULL;
+			return -1;
 		}
 	}
 	// The vertex buffer cannot be initialized here because this gets called before OpenGL is initialized
 	model->mFileName = fullname;
-	Models.Push(model);
-	return model;
+	return Models.Push(model);
 }
 
 //===========================================================================
@@ -444,8 +480,9 @@ void gl_InitModels()
 	{
 		FVoxelModel *md = (FVoxelModel*)Models[VoxelDefs[i]->Voxel->VoxelIndex];
 		memset(&smf, 0, sizeof(smf));
-		smf.models[0] = md;
-		smf.skins[0] = md->GetPaletteTexture();
+		smf.modelIDs[1] = smf.modelIDs[2] = smf.modelIDs[3] = -1;
+		smf.modelIDs[0] = VoxelDefs[i]->Voxel->VoxelIndex;
+		smf.skinIDs[0] = md->GetPaletteTexture();
 		smf.xscale = smf.yscale = smf.zscale = VoxelDefs[i]->Scale;
 		smf.angleoffset = VoxelDefs[i]->AngleOffset.Degrees;
 		if (VoxelDefs[i]->PlacedSpin != 0)
@@ -474,6 +511,7 @@ void gl_InitModels()
 	}
 
 	memset(&smf, 0, sizeof(smf));
+	smf.modelIDs[0] = smf.modelIDs[1] = smf.modelIDs[2] = smf.modelIDs[3] = -1;
 	while ((Lump = Wads.FindLump("MODELDEF", &lastLump)) != -1)
 	{
 		FScanner sc(Lump);
@@ -483,10 +521,11 @@ void gl_InitModels()
 			{
 				sc.MustGetString();
 				memset(&smf, 0, sizeof(smf));
+				smf.modelIDs[1] = smf.modelIDs[2] = smf.modelIDs[3] = -1;
 				smf.xscale=smf.yscale=smf.zscale=1.f;
 
 				smf.type = PClass::FindClass(sc.String);
-				if (!smf.type || smf.type->Defaults == NULL) 
+				if (!smf.type || smf.type->Defaults == nullptr) 
 				{
 					sc.ScriptError("MODELDEF: Unknown actor type '%s'\n", sc.String);
 				}
@@ -505,15 +544,15 @@ void gl_InitModels()
 					else if (sc.Compare("model"))
 					{
 						sc.MustGetNumber();
-						index=sc.Number;
-						if (index<0 || index>=MAX_MODELS_PER_FRAME)
+						index = sc.Number;
+						if (index < 0 || index >= MAX_MODELS_PER_FRAME)
 						{
 							sc.ScriptError("Too many models in %s", smf.type->TypeName.GetChars());
 						}
 						sc.MustGetString();
 						FixPathSeperator(sc.String);
-						smf.models[index] = FindModel(path.GetChars(), sc.String);
-						if (!smf.models[index])
+						smf.modelIDs[index] = FindModel(path.GetChars(), sc.String);
+						if (smf.modelIDs[index] == -1)
 						{
 							Printf("%s: model not found in %s\n", sc.String, path.GetChars());
 						}
@@ -521,11 +560,11 @@ void gl_InitModels()
 					else if (sc.Compare("scale"))
 					{
 						sc.MustGetFloat();
-						smf.xscale=sc.Float;
+						smf.xscale = sc.Float;
 						sc.MustGetFloat();
-						smf.yscale=sc.Float;
+						smf.yscale = sc.Float;
 						sc.MustGetFloat();
-						smf.zscale=sc.Float;
+						smf.zscale = sc.Float;
 					}
 					// [BB] Added zoffset reading. 
 					// Now it must be considered deprecated.
@@ -631,12 +670,12 @@ void gl_InitModels()
 						FixPathSeperator(sc.String);
 						if (sc.Compare(""))
 						{
-							smf.skins[index]=NULL;
+							smf.skinIDs[index]=FNullTextureID();
 						}
 						else
 						{
-							smf.skins[index]=LoadSkin(path.GetChars(), sc.String);
-							if (smf.skins[index] == NULL)
+							smf.skinIDs[index] = LoadSkin(path.GetChars(), sc.String);
+							if (!smf.skinIDs[index].isValid())
 							{
 								Printf("Skin '%s' not found in '%s'\n",
 									sc.String, smf.type->TypeName.GetChars());
@@ -678,9 +717,10 @@ void gl_InitModels()
 						if (isframe)
 						{
 							sc.MustGetString();
-							if (smf.models[index]!=NULL) 
+							if (smf.modelIDs[index] != -1)
 							{
-								smf.modelframes[index] = smf.models[index]->FindFrame(sc.String);
+								FModel *model = Models[smf.modelIDs[index]];
+								smf.modelframes[index] = model->FindFrame(sc.String);
 								if (smf.modelframes[index]==-1) sc.ScriptError("Unknown frame '%s' in %s", sc.String, smf.type->TypeName.GetChars());
 							}
 							else smf.modelframes[index] = -1;
@@ -765,7 +805,7 @@ FSpriteModelFrame * gl_FindModelFrame(const PClass * ti, int sprite, int frame, 
 		if (frame < sprdef->numframes)
 		{
 			spriteframe_t *sprframe = &SpriteFrames[sprdef->spriteframes + frame];
-			if (sprframe->Voxel != NULL)
+			if (sprframe->Voxel != nullptr)
 			{
 				int index = sprframe->Voxel->VoxeldefIndex;
 				if (dropped && sprframe->Voxel->DroppedSpin !=sprframe->Voxel->PlacedSpin) index++;
@@ -773,7 +813,7 @@ FSpriteModelFrame * gl_FindModelFrame(const PClass * ti, int sprite, int frame, 
 			}
 		}
 	}
-	return NULL;
+	return nullptr;
 }
 
 
@@ -792,7 +832,7 @@ void gl_RenderFrameModels( const FSpriteModelFrame *smf,
 {
 	// [BB] Frame interpolation: Find the FSpriteModelFrame smfNext which follows after smf in the animation
 	// and the scalar value inter ( element of [0,1) ), both necessary to determine the interpolated frame.
-	FSpriteModelFrame * smfNext = NULL;
+	FSpriteModelFrame * smfNext = nullptr;
 	double inter = 0.;
 	if( gl_interpolate_model_frames && !(smf->flags & MDL_NOINTERPOLATION) )
 	{
@@ -839,17 +879,17 @@ void gl_RenderFrameModels( const FSpriteModelFrame *smf,
 
 	for(int i=0; i<MAX_MODELS_PER_FRAME; i++)
 	{
-		FModel * mdl = smf->models[i];
-
-		if (mdl!=NULL)
+		if (smf->modelIDs[i] != -1)
 		{
+			FModel * mdl = Models[smf->modelIDs[i]];
+			FTexture *tex = smf->skinIDs[i].isValid()? TexMan(smf->skinIDs[i]) : nullptr;
 			mdl->BuildVertexBuffer();
 			gl_RenderState.SetVertexBuffer(mdl->mVBuf);
 
 			if ( smfNext && smf->modelframes[i] != smfNext->modelframes[i] )
-				mdl->RenderFrame(smf->skins[i], smf->modelframes[i], smfNext->modelframes[i], inter, translation);
+				mdl->RenderFrame(tex, smf->modelframes[i], smfNext->modelframes[i], inter, translation);
 			else
-				mdl->RenderFrame(smf->skins[i], smf->modelframes[i], smf->modelframes[i], 0.f, translation);
+				mdl->RenderFrame(tex, smf->modelframes[i], smf->modelframes[i], 0.f, translation);
 
 			gl_RenderState.SetVertexBuffer(GLRenderer->mVBO);
 		}
@@ -949,12 +989,12 @@ void gl_RenderModel(GLSprite * spr)
 	gl_RenderState.mModelMatrix.rotate(-smf->rolloffset, 1, 0, 0);
 
 	// consider the pixel stretching. For non-voxels this must be factored out here
-	float stretch = (smf->models[0] != NULL ? smf->models[0]->getAspectFactor() : 1.f) / glset.pixelstretch;
+	float stretch = (smf->modelIDs[0] != -1 ? Models[smf->modelIDs[0]]->getAspectFactor() : 1.f) / glset.pixelstretch;
 	gl_RenderState.mModelMatrix.scale(1, stretch, 1);
 
 
 	gl_RenderState.EnableModelMatrix(true);
-	gl_RenderFrameModels( smf, spr->actor->state, spr->actor->tics, spr->actor->GetClass(), NULL, translation );
+	gl_RenderFrameModels( smf, spr->actor->state, spr->actor->tics, spr->actor->GetClass(), nullptr, translation );
 	gl_RenderState.EnableModelMatrix(false);
 
 	glDepthFunc(GL_LESS);
@@ -975,7 +1015,7 @@ void gl_RenderHUDModel(pspdef_t *psp, float ofsX, float ofsY)
 	FSpriteModelFrame *smf = gl_FindModelFrame(playermo->player->ReadyWeapon->GetClass(), psp->state->sprite, psp->state->GetFrame(), false);
 
 	// [BB] No model found for this sprite, so we can't render anything.
-	if ( smf == NULL )
+	if ( smf == nullptr )
 		return;
 
 	glDepthFunc(GL_LEQUAL);
@@ -1012,7 +1052,7 @@ void gl_RenderHUDModel(pspdef_t *psp, float ofsX, float ofsY)
 	gl_RenderState.mViewMatrix.rotate(-smf->rolloffset, 1, 0, 0);
 	gl_RenderState.ApplyMatrices();
 
-	gl_RenderFrameModels( smf, psp->state, psp->tics, playermo->player->ReadyWeapon->GetClass(), NULL, 0 );
+	gl_RenderFrameModels( smf, psp->state, psp->tics, playermo->player->ReadyWeapon->GetClass(), nullptr, 0 );
 
 	glDepthFunc(GL_LESS);
 	if (!( playermo->RenderStyle == LegacyRenderStyles[STYLE_Normal] ))
@@ -1027,11 +1067,11 @@ void gl_RenderHUDModel(pspdef_t *psp, float ofsX, float ofsY)
 
 bool gl_IsHUDModelForPlayerAvailable (player_t * player)
 {
-	if ( (player == NULL) || (player->ReadyWeapon == NULL) || (player->psprites[0].state == NULL) )
+	if ( (player == nullptr) || (player->ReadyWeapon == nullptr) || (player->psprites[0].state == nullptr) )
 		return false;
 
 	FState* state = player->psprites[0].state;
 	FSpriteModelFrame *smf = gl_FindModelFrame(player->ReadyWeapon->GetClass(), state->sprite, state->GetFrame(), false);
-	return ( smf != NULL );
+	return ( smf != nullptr );
 }
 

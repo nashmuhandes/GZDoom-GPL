@@ -300,7 +300,7 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int clampmode, int transla
 		translation = GLTranslationPalette::GetInternalTranslation(translation);
 	}
 
-	bool needmipmap = (clampmode <= CLAMP_XY) || !(gl.flags & RFL_SAMPLER_OBJECTS);
+	bool needmipmap = (clampmode <= CLAMP_XY);
 
 	FHardwareTexture *hwtex = CreateHwTexture();
 
@@ -345,9 +345,9 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int clampmode, int transla
 			}
 			delete[] buffer;
 		}
-		if (!needmipmap) clampmode = CLAMP_XY_NOMIP;
 		if (tex->bHasCanvas) static_cast<FCanvasTexture*>(tex)->NeedUpdate();
-		if (lastSampler != clampmode || lastTranslation != translation)
+		if (translation != lastTranslation) lastSampler = 254;
+		if (lastSampler != clampmode)
 			lastSampler = GLRenderer->mSamplerManager->Bind(texunit, clampmode, lastSampler);
 		lastTranslation = translation;
 		return hwtex; 
