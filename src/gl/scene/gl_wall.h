@@ -119,6 +119,13 @@ public:
 		RWF_NORENDER = 8,
 	};
 
+	enum
+	{
+		LOLFT,
+		UPLFT,
+		UPRGT,
+		LORGT,
+	};
 
 	friend struct GLDrawList;
 	friend class GLPortal;
@@ -126,7 +133,7 @@ public:
 	GLSeg glseg;
 	vertex_t * vertexes[2];				// required for polygon splitting
 	float ztop[2],zbottom[2];
-	texcoord uplft, uprgt, lolft, lorgt;
+	texcoord tcs[4];
 	float alpha;
 	FMaterial *gltexture;
 
@@ -177,13 +184,14 @@ private:
 	void CheckTexturePosition();
 
 	void RenderFogBoundaryCompat();
+	void RenderLightsCompat(int pass);
 
 	void Put3DWall(lightlist_t * lightlist, bool translucent);
 	void SplitWallComplex(sector_t * frontsector, bool translucent, float maplightbottomleft, float maplightbottomright);
 	void SplitWall(sector_t * frontsector, bool translucent);
 
 	void SetupLights();
-	bool PrepareLight(texcoord * tcs, ADynamicLight * light);
+	bool PrepareLight(ADynamicLight * light, int pass);
 	void RenderWall(int textured, unsigned int *store = NULL);
 	void RenderTextured(int rflags);
 
@@ -236,10 +244,10 @@ private:
 	void RenderMirrorSurface();
 	void RenderTranslucentWall();
 
-	void SplitLeftEdge(texcoord * tcs, FFlatVertex *&ptr);
-	void SplitRightEdge(texcoord * tcs, FFlatVertex *&ptr);
-	void SplitUpperEdge(texcoord * tcs, FFlatVertex *&ptr);
-	void SplitLowerEdge(texcoord * tcs, FFlatVertex *&ptr);
+	void SplitLeftEdge (FFlatVertex *&ptr);
+	void SplitRightEdge(FFlatVertex *&ptr);
+	void SplitUpperEdge(FFlatVertex *&ptr);
+	void SplitLowerEdge(FFlatVertex *&ptr);
 
 public:
 
@@ -288,7 +296,6 @@ public:
 	GLSectorPlane plane;
 	int lightlevel;
 	bool stack;
-	bool foggy;
 	bool ceiling;
 	BYTE renderflags;
 	int vboindex;
@@ -296,9 +303,13 @@ public:
 
 	int dynlightindex;
 
+	// compatibility fallback stuff.
+	void DrawSubsectorLights(subsector_t * sub, int pass);
+	void DrawLightsCompat(int pass);
+	bool PutFlatCompat(bool fog);
+
 	void SetupSubsectorLights(int pass, subsector_t * sub, int *dli = NULL);
 	void DrawSubsector(subsector_t * sub);
-	void DrawSubsectorLights(subsector_t * sub, int pass);
 	void DrawSkyboxSector(int pass, bool processlights);
 	void DrawSubsectors(int pass, bool processlights, bool istrans);
 	void ProcessLights(bool istrans);

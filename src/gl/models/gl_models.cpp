@@ -170,7 +170,10 @@ FModelVertex *FModelVertexBuffer::LockVertexBuffer(unsigned int size)
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
 		glBufferData(GL_ARRAY_BUFFER, size * sizeof(FModelVertex), nullptr, GL_STATIC_DRAW);
-		return (FModelVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, size * sizeof(FModelVertex), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+		if (gl.version >= 3.0)
+			return (FModelVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, size * sizeof(FModelVertex), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+		else
+			return (FModelVertex*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	}
 	else
 	{
@@ -208,7 +211,10 @@ unsigned int *FModelVertexBuffer::LockIndexBuffer(unsigned int size)
 	{
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_id);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, size * sizeof(unsigned int), NULL, GL_STATIC_DRAW);
-		return (unsigned int*)glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, 0, size * sizeof(unsigned int), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+		if (gl.version >= 3.0)
+			return (unsigned int*)glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, 0, size * sizeof(unsigned int), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+		else
+			return (unsigned int*)glMapBuffer(GL_ELEMENT_ARRAY_BUFFER, GL_WRITE_ONLY);
 	}
 	else
 	{
@@ -519,6 +525,7 @@ void gl_InitModels()
 		{
 			if (sc.Compare("model"))
 			{
+				path = "";
 				sc.MustGetString();
 				memset(&smf, 0, sizeof(smf));
 				smf.modelIDs[1] = smf.modelIDs[2] = smf.modelIDs[3] = -1;
@@ -529,7 +536,6 @@ void gl_InitModels()
 				{
 					sc.ScriptError("MODELDEF: Unknown actor type '%s'\n", sc.String);
 				}
-				GetDefaultByType(smf.type)->hasmodel=true;
 				sc.MustGetStringName("{");
 				while (!sc.CheckString("}"))
 				{
@@ -743,6 +749,7 @@ void gl_InitModels()
 							if (map[c]) continue;
 							smf.frame=c;
 							SpriteModelFrames.Push(smf);
+							GetDefaultByType(smf.type)->hasmodel = true;
 							map[c]=1;
 						}
 					}
@@ -933,16 +940,19 @@ void gl_RenderModel(GLSprite * spr)
 		const double x = spr->actor->Vel.X;
 		const double y = spr->actor->Vel.Y;
 		const double z = spr->actor->Vel.Z;
-		
-		// [BB] Calculate the pitch using spherical coordinates.
-		if(z || x || y) pitch = float(atan( z/sqrt(x*x+y*y) ) / M_PI * 180);
-				
-        // Correcting pitch if model is moving backwards
-        if(x || y) 
+
+		if (spr->actor->Vel.LengthSquared() > EQUAL_EPSILON)
 		{
-			if((x * cos(angle * M_PI / 180) + y * sin(angle * M_PI / 180)) / sqrt(x * x + y * y) < 0) pitch *= -1;
+			// [BB] Calculate the pitch using spherical coordinates.
+			if (z || x || y) pitch = float(atan(z / sqrt(x*x + y*y)) / M_PI * 180);
+
+			// Correcting pitch if model is moving backwards
+			if (fabs(x) > EQUAL_EPSILON || fabs(y) > EQUAL_EPSILON)
+			{
+				if ((x * cos(angle * M_PI / 180) + y * sin(angle * M_PI / 180)) / sqrt(x * x + y * y) < 0) pitch *= -1;
+			}
+			else pitch = fabs(pitch);
 		}
-		else pitch = fabs(pitch);
 	}
 
 	if( smf->flags & MDL_ROTATING )
@@ -964,7 +974,7 @@ void gl_RenderModel(GLSprite * spr)
 	// Applying model transformations:
 	// 1) Applying actor angle, pitch and roll to the model
 	gl_RenderState.mModelMatrix.rotate(-angle, 0, 1, 0);
-	gl_RenderState.mModelMatrix.rotate(pitch, 0, 0, 1);
+	gl_RenderState.mModelMatrix.rotate(-pitch, 0, 0, 1);
 	gl_RenderState.mModelMatrix.rotate(-roll, 1, 0, 0);
 	
 	// 2) Applying Doomsday like rotation of the weapon pickup models

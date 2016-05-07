@@ -95,7 +95,7 @@ FGLRenderer::FGLRenderer(OpenGLFrameBuffer *fb)
 	mSkyVBO = NULL;
 	gl_spriteindex = 0;
 	mShaderManager = NULL;
-	glpart2 = glpart = mirrortexture = NULL;
+	gllight = glpart2 = glpart = mirrortexture = NULL;
 	mLights = NULL;
 }
 
@@ -112,6 +112,7 @@ void FGLRenderer::Initialize()
 	}
 	else mVAOID = 0;
 
+	gllight = FTexture::CreateTexture(Wads.GetNumForFullName("glstuff/gllight.png"), FTexture::TEX_MiscPatch);
 	glpart2 = FTexture::CreateTexture(Wads.GetNumForFullName("glstuff/glpart2.png"), FTexture::TEX_MiscPatch);
 	glpart = FTexture::CreateTexture(Wads.GetNumForFullName("glstuff/glpart.png"), FTexture::TEX_MiscPatch);
 	mirrortexture = FTexture::CreateTexture(Wads.GetNumForFullName("glstuff/mirror.png"), FTexture::TEX_MiscPatch);
@@ -350,7 +351,7 @@ void FGLRenderer::DrawTexture(FTexture *img, DrawParms &parms)
 				if (pal) translation = -pal->GetIndex();
 			}
 		}
-		gl_RenderState.SetMaterial(gltex, CLAMP_XY_NOMIP, translation, 0, !!(parms.style.Flags & STYLEF_RedIsAlpha));
+		gl_RenderState.SetMaterial(gltex, CLAMP_XY_NOMIP, translation, -1, !!(parms.style.Flags & STYLEF_RedIsAlpha));
 
 		u1 = gltex->GetUL();
 		v1 = gltex->GetVT();
