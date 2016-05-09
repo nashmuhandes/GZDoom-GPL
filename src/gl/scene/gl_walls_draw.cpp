@@ -442,10 +442,16 @@ void GLWall::Draw(int pass)
 			RenderTranslucentWall();
 			break;
 		}
+		break;
 
 	case GLPASS_LIGHTTEX:
 	case GLPASS_LIGHTTEX_ADDITIVE:
 		RenderLightsCompat(pass);
+		break;
+
+	case GLPASS_TEXONLY:
+		gl_RenderState.SetMaterial(gltexture, flags & 3, 0, -1, false);
+		RenderWall(RWF_TEXTURED);
 		break;
 	}
 }
