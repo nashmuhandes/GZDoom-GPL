@@ -4391,6 +4391,7 @@ void AActor::Deactivate (AActor *activator)
 void AActor::Destroy ()
 {
 	ClearRenderSectorList();
+	ClearRenderLineList();
 
 	// [RH] Destroy any inventory this actor is carrying
 	DestroyAllInventory ();

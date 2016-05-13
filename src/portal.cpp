@@ -229,6 +229,10 @@ FArchive &operator<< (FArchive &arc, FSectorPortal &port)
 		<< port.mDestination
 		<< port.mDisplacement
 		<< port.mPlaneZ;
+	if (arc.IsLoading())
+	{
+		port.mSkybox = nullptr;
+	}
 	return arc;
 }
 
