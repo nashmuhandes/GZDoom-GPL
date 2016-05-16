@@ -460,6 +460,8 @@ void AActor::LinkToWorld(bool spawningmapthing, sector_t *sector)
 
 		P_CollectConnectedGroups(Sector->PortalGroup, Pos(), Top(), radius, check);
 
+		BlockNode = NULL;
+		FBlockNode **alink = &this->BlockNode;
 		for (int i = -1; i < (int)check.Size(); i++)
 		{
 			DVector3 pos = i==-1? Pos() : PosRelative(check[i] & ~FPortalGroupArray::FLAT);
@@ -471,11 +473,9 @@ void AActor::LinkToWorld(bool spawningmapthing, sector_t *sector)
 
 			if (x1 >= bmapwidth || x2 < 0 || y1 >= bmapheight || y2 < 0)
 			{ // thing is off the map
-				BlockNode = NULL;
 			}
 			else
 			{ // [RH] Link into every block this actor touches, not just the center one
-				FBlockNode **alink = &this->BlockNode;
 				x1 = MAX(0, x1);
 				y1 = MAX(0, y1);
 				x2 = MIN(bmapwidth - 1, x2);
