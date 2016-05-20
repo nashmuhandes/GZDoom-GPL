@@ -914,7 +914,6 @@ void D_Display ()
 			} while (diff < 1);
 			wipestart = nowtime;
 			done = screen->WipeDo (1);
-			S_UpdateMusic();		// OpenAL needs this to keep the music running, thanks to a complete lack of a sane streaming implementation using callbacks. :(
 			C_DrawConsole (hw2d);	// console and
 			M_Drawer ();			// menu are drawn even on top of wipes
 			screen->Update ();		// page flip or blit buffer
@@ -1013,7 +1012,6 @@ void D_DoomLoop ()
 			// Update display, next frame, with current state.
 			I_StartTic ();
 			D_Display ();
-			S_UpdateMusic();	// OpenAL needs this to keep the music running, thanks to a complete lack of a sane streaming implementation using callbacks. :(
 			if (wantToRestart)
 			{
 				wantToRestart = false;
