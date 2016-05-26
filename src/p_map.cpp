@@ -6498,7 +6498,7 @@ void AActor::UpdateRenderSectorList()
 		while (!sec->PortalBlocksMovement(sector_t::ceiling))
 		{
 			double planeh = sec->GetPortalPlaneZ(sector_t::ceiling);
-			if (planeh < lasth) break;	// broken setup.
+			if (planeh <= lasth) break;	// broken setup.
 			if (Top() + SPRITE_SPACE < planeh) break;
 			lasth = planeh;
 			DVector2 newpos = Pos() + sec->GetPortalDisplacement(sector_t::ceiling);
@@ -6509,7 +6509,7 @@ void AActor::UpdateRenderSectorList()
 		while (!sec->PortalBlocksMovement(sector_t::floor))
 		{
 			double planeh = sec->GetPortalPlaneZ(sector_t::floor);
-			if (planeh > lasth) break;	// broken setup.
+			if (planeh >= lasth) break;	// broken setup.
 			if (Z() - SPRITE_SPACE > planeh) break;
 			lasth = planeh;
 			DVector2 newpos = Pos() + sec->GetPortalDisplacement(sector_t::floor);
