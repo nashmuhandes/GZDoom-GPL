@@ -95,6 +95,7 @@ static FRandom pr_spawnitemex ("SpawnItemEx");
 static FRandom pr_burst ("Burst");
 static FRandom pr_monsterrefire ("MonsterRefire");
 static FRandom pr_teleport("A_Teleport");
+static FRandom pr_bfgselfdamage("BFGSelfDamage");
 
 //==========================================================================
 //
@@ -119,7 +120,6 @@ bool ACustomInventory::CallStateChain (AActor *actor, FState *state)
 	ret[0].PointerAt((void **)&nextstate);
 	ret[1].IntAt(&retval);
 
-	this->flags5 |= MF5_INSTATECALL;
 	FState *savedstate = this->state;
 
 	while (state != NULL)
@@ -132,8 +132,9 @@ bool ACustomInventory::CallStateChain (AActor *actor, FState *state)
 			VMFrameStack stack;
 			PPrototype *proto = state->ActionFunc->Proto;
 			VMReturn *wantret;
+			FStateParamInfo stp = { state, STATE_StateChain, PSP_WEAPON };
 
-			params[2] = VMValue(state, ATAG_STATE);
+			params[2] = VMValue(&stp, ATAG_STATEINFO);
 			retval = true;		// assume success
 			wantret = NULL;		// assume no return value wanted
 			numret = 0;
@@ -189,7 +190,6 @@ bool ACustomInventory::CallStateChain (AActor *actor, FState *state)
 		}
 		state = nextstate;
 	}
-	this->flags5 &= ~MF5_INSTATECALL;
 	this->state = savedstate;
 	return !!result;
 }
@@ -312,6 +312,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, GetDistance)
 			DVector3 diff = self->Vec3To(target);
 			if (checkz)
 				diff.Z += (target->Height - self->Height) / 2;
+			else
+				diff.Z = 0.;
 
 			ret->SetFloat(diff.Length());
 		}
@@ -507,6 +509,69 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, GetCrouchFactor)
 		else
 		{
 			ret->SetFloat(mobj->player->crouchfactor);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+//==========================================================================
+//
+// GetCVar
+//
+// NON-ACTION function that works like ACS's GetCVar.
+//
+//==========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, GetCVar)
+{
+	if (numret > 0)
+	{
+		assert(ret != nullptr);
+		PARAM_SELF_PROLOGUE(AActor);
+		PARAM_STRING(cvarname);
+
+		FBaseCVar *cvar = GetCVar(self, cvarname);
+		if (cvar == nullptr)
+		{
+			ret->SetFloat(0);
+		}
+		else
+		{
+			ret->SetFloat(cvar->GetGenericRep(CVAR_Float).Float);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+//==========================================================================
+//
+// GetPlayerInput
+//
+// NON-ACTION function that works like ACS's GetPlayerInput.
+// Takes a pointer as anyone may or may not be a player.
+//==========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, GetPlayerInput)
+{
+	if (numret > 0)
+	{
+		assert(ret != nullptr);
+		PARAM_SELF_PROLOGUE(AActor);
+		PARAM_INT		(inputnum);
+		PARAM_INT_OPT	(ptr)		{ ptr = AAPTR_DEFAULT; }
+
+		AActor *mobj = COPY_AAPTR(self, ptr);
+
+		//Need a player.
+		if (!mobj || !mobj->player)
+		{
+			ret->SetInt(0);
+		}
+		else
+		{
+			ret->SetInt(P_Thing_CheckInputNum(mobj->player, inputnum));
 		}
 		return 1;
 	}
@@ -1306,6 +1371,72 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RadiusThrust)
 
 //==========================================================================
 //
+// A_RadiusDamageSelf
+//
+//==========================================================================
+enum
+{
+	RDSF_BFGDAMAGE = 1,
+};
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RadiusDamageSelf)
+{
+	PARAM_ACTION_PROLOGUE;
+	PARAM_INT_OPT(damage) { damage = 128; }
+	PARAM_FLOAT_OPT(distance) { distance = 128; }
+	PARAM_INT_OPT(flags) { flags = 0; }
+	PARAM_CLASS_OPT(flashtype, AActor) { flashtype = NULL; }
+
+	int 				i;
+	int 				damageSteps;
+	int 				actualDamage;
+	double 				actualDistance;
+
+	actualDistance = self->Distance3D(self->target);
+	if (actualDistance < distance)
+	{
+		// [XA] Decrease damage with distance. Use the BFG damage
+		//      calculation formula if the flag is set (essentially
+		//      a generalization of SMMU's BFG11K behavior, used
+		//      with fraggle's blessing.)
+		damageSteps = damage - int(damage * actualDistance / distance);
+		if (flags & RDSF_BFGDAMAGE)
+		{
+			actualDamage = 0;
+			for (i = 0; i < damageSteps; ++i)
+				actualDamage += (pr_bfgselfdamage() & 7) + 1;
+		}
+		else
+		{
+			actualDamage = damageSteps;
+		}
+
+		// optional "flash" effect -- spawn an actor on
+		// the player to indicate bad things happened.
+		AActor *flash = NULL;
+		if(flashtype != NULL)
+			flash = Spawn(flashtype, self->target->PosPlusZ(self->target->Height / 4), ALLOW_REPLACE);
+
+		int dmgFlags = 0;
+		FName dmgType = NAME_BFGSplash;
+
+		if (flash != NULL)
+		{
+			if (flash->flags5 & MF5_PUFFGETSOWNER) flash->target = self->target;
+			if (flash->flags3 & MF3_FOILINVUL) dmgFlags |= DMG_FOILINVUL;
+			if (flash->flags7 & MF7_FOILBUDDHA) dmgFlags |= DMG_FOILBUDDHA;
+			dmgType = flash->DamageType;
+		}
+
+		int newdam = P_DamageMobj(self->target, self, self->target, actualDamage, dmgType, dmgFlags);
+		P_TraceBleed(newdam > 0 ? newdam : actualDamage, self->target, self);
+	}
+
+	return 0;
+}
+
+//==========================================================================
+//
 // Execute a line special / script
 //
 //==========================================================================
@@ -1644,7 +1775,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfNoAmmo)
 	PARAM_ACTION_PROLOGUE;
 	PARAM_STATE(jump);
 
-	if (!ACTION_CALL_FROM_WEAPON())
+	if (!ACTION_CALL_FROM_PSPRITE() || self->player->ReadyWeapon == nullptr)
 	{
 		ACTION_RETURN_STATE(NULL);
 	}
@@ -1693,7 +1824,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireBullets)
 	DAngle bslope = 0.;
 	int laflags = (flags & FBF_NORANDOMPUFFZ)? LAF_NORANDOMPUFFZ : 0;
 
-	if ((flags & FBF_USEAMMO) && weapon && ACTION_CALL_FROM_WEAPON())
+	if ((flags & FBF_USEAMMO) && weapon && ACTION_CALL_FROM_PSPRITE())
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true))
 			return 0;	// out of ammo
@@ -1784,7 +1915,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireCustomMissile)
 	FTranslatedLineTarget t;
 
 		// Only use ammo if called from a weapon
-	if (useammo && ACTION_CALL_FROM_WEAPON() && weapon)
+	if (useammo && ACTION_CALL_FROM_PSPRITE() && weapon)
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true))
 			return 0;	// out of ammo
@@ -1876,7 +2007,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 	pitch = P_AimLineAttack (self, angle, range, &t);
 
 	// only use ammo when actually hitting something!
-	if ((flags & CPF_USEAMMO) && t.linetarget && weapon && ACTION_CALL_FROM_WEAPON())
+	if ((flags & CPF_USEAMMO) && t.linetarget && weapon && ACTION_CALL_FROM_PSPRITE())
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true))
 			return 0;	// out of ammo
@@ -1966,6 +2097,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 	PARAM_CLASS_OPT	(spawnclass, AActor){ spawnclass = NULL; }
 	PARAM_FLOAT_OPT	(spawnofs_z)		{ spawnofs_z = 0; }
 	PARAM_INT_OPT	(SpiralOffset)		{ SpiralOffset = 270; }
+	PARAM_INT_OPT	(limit)				{ limit = 0; }
 	
 	if (range == 0) range = 8192;
 	if (sparsity == 0) sparsity=1.0;
@@ -1976,7 +2108,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 	AWeapon *weapon = self->player->ReadyWeapon;
 
 	// only use ammo when actually hitting something!
-	if (useammo && weapon != NULL && ACTION_CALL_FROM_WEAPON())
+	if (useammo && weapon != NULL && ACTION_CALL_FROM_PSPRITE())
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true))
 			return 0;	// out of ammo
@@ -2006,6 +2138,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 	p.drift = driftspeed;
 	p.spawnclass = spawnclass;
 	p.SpiralOffset = SpiralOffset;
+	p.limit = limit;
 	P_RailAttack(&p);
 	return 0;
 }
@@ -2043,6 +2176,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 	PARAM_CLASS_OPT	(spawnclass, AActor){ spawnclass = NULL; }
 	PARAM_FLOAT_OPT	(spawnofs_z)		{ spawnofs_z = 0; }
 	PARAM_INT_OPT	(SpiralOffset)		{ SpiralOffset = 270; }
+	PARAM_INT_OPT	(limit)				{ limit = 0; }
 
 	if (range == 0) range = 8192.;
 	if (sparsity == 0) sparsity = 1;
@@ -2125,6 +2259,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 	p.drift = driftspeed;
 	p.spawnclass = spawnclass;
 	p.SpiralOffset = SpiralOffset;
+	p.limit = 0;
 	P_RailAttack(&p);
 
 	self->SetXYZ(savedpos);
@@ -2560,7 +2695,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnItem)
 		ACTION_RETURN_BOOL(true);
 	}
 
-	if (ACTION_CALL_FROM_WEAPON())
+	if (ACTION_CALL_FROM_PSPRITE())
 	{
 		// Used from a weapon, so use some ammo
 		AWeapon *weapon = self->player->ReadyWeapon;
@@ -2685,7 +2820,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 	{
 		ACTION_RETURN_BOOL(true);
 	}
-	if (ACTION_CALL_FROM_WEAPON())
+	if (ACTION_CALL_FROM_PSPRITE())
 	{
 		// Used from a weapon, so use some ammo
 		AWeapon *weapon = self->player->ReadyWeapon;
@@ -3147,6 +3282,7 @@ enum SPFflag
 	SPF_RELVEL =			1 << 2,
 	SPF_RELACCEL =			1 << 3,
 	SPF_RELANG =			1 << 4,
+	SPF_NOTIMEFREEZE =		1 << 5,
 };
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnParticle)
@@ -3155,7 +3291,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnParticle)
 	PARAM_COLOR		(color);
 	PARAM_INT_OPT	(flags)			{ flags = 0; }
 	PARAM_INT_OPT	(lifetime)		{ lifetime = 35; }
-	PARAM_INT_OPT	(size)			{ size = 1; }
+	PARAM_FLOAT_OPT	(size)			{ size = 1.; }
 	PARAM_ANGLE_OPT	(angle)			{ angle = 0.; }
 	PARAM_FLOAT_OPT	(xoff)			{ xoff = 0; }
 	PARAM_FLOAT_OPT	(yoff)			{ yoff = 0; }
@@ -3168,11 +3304,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnParticle)
 	PARAM_FLOAT_OPT	(accelz)		{ accelz = 0; }
 	PARAM_FLOAT_OPT	(startalpha)	{ startalpha = 1.; }
 	PARAM_FLOAT_OPT	(fadestep)		{ fadestep = -1.; }
+	PARAM_FLOAT_OPT (sizestep)		{ sizestep = 0.; }
 
 	startalpha = clamp(startalpha, 0., 1.);
 	if (fadestep > 0) fadestep = clamp(fadestep, 0., 1.);
-	size = clamp<int>(size, 0, 65535);			// Clamp to word
-
+	size = fabs(size);
 	if (lifetime != 0)
 	{
 		if (flags & SPF_RELANG) angle += self->Angles.Yaw;
@@ -3199,7 +3335,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnParticle)
 			acc.X = accelx * c + accely * s;
 			acc.Y = accelx * s - accely * c;
 		}
-		P_SpawnParticle(self->Vec3Offset(pos), vel, acc, color, !!(flags & SPF_FULLBRIGHT), startalpha, lifetime, size, fadestep);
+		P_SpawnParticle(self->Vec3Offset(pos), vel, acc, color, startalpha, lifetime, size, fadestep, sizestep, flags);
 	}
 	return 0;
 }
@@ -5737,19 +5873,21 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetTics)
 	PARAM_ACTION_PROLOGUE;
 	PARAM_INT(tics_to_set);
 
-	if (stateowner != self && self->player != NULL && stateowner->IsKindOf(RUNTIME_CLASS(AWeapon)))
-	{ // Is this a weapon? Need to check psp states for a match, then. Blah.
-		for (int i = 0; i < NUMPSPRITES; ++i)
+	if (ACTION_CALL_FROM_PSPRITE())
+	{
+		DPSprite *pspr = self->player->FindPSprite(stateinfo->mPSPIndex);
+		if (pspr != nullptr)
 		{
-			if (self->player->psprites[i].state == callingstate)
-			{
-				self->player->psprites[i].tics = tics_to_set;
-				return 0;
-			}
+			pspr->Tics = tics_to_set;
+			return 0;
 		}
 	}
-	// Just set tics for self.
-	self->tics = tics_to_set;
+	else if (ACTION_CALL_FROM_ACTOR())
+	{
+		// Just set tics for self.
+		self->tics = tics_to_set;
+	}
+	// for inventory state chains this needs to be ignored.
 	return 0;
 }
 
@@ -6900,10 +7038,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FaceMovementDirection)
 	{
 		DAngle current = mobj->Angles.Pitch;
 		const DVector2 velocity = mobj->Vel.XY();
-		DAngle pitch = VecToAngle(velocity.Length(), -mobj->Vel.Z);
+		DAngle pitch = VecToAngle(velocity.Length(), mobj->Vel.Z);
 		if (pitchlimit > 0)
 		{
-			DAngle pdelta = deltaangle(current, pitch);
+			DAngle pdelta = deltaangle(-current, pitch);
 
 			if (fabs(pdelta) > pitchlimit)
 			{
@@ -6930,3 +7068,4 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FaceMovementDirection)
 	}
 	ACTION_RETURN_BOOL(true);
 }
+

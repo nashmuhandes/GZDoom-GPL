@@ -13,11 +13,11 @@ class FFlatVertexBuffer;
 class FSkyVertexBuffer;
 class OpenGLFrameBuffer;
 struct FDrawInfo;
-struct pspdef_t;
 class FShaderManager;
 class GLPortal;
 class FLightBuffer;
 class FSamplerManager;
+class DPSprite;
 
 inline float DEG2RAD(float deg)
 {
@@ -53,6 +53,12 @@ struct GL_IRECT
 	}
 };
 
+enum
+{
+	DM_MAINVIEW,
+	DM_OFFSCREEN,
+	DM_PORTAL
+};
 
 class FGLRenderer
 {
@@ -106,10 +112,10 @@ public:
 	void RenderMultipassStuff();
 	void RenderScene(int recursion);
 	void RenderTranslucent();
-	void DrawScene(bool toscreen = false);
+	void DrawScene(int drawmode);
 	void DrawBlend(sector_t * viewsector);
 
-	void DrawPSprite (player_t * player,pspdef_t *psp,float sx, float sy, bool hudModelStep, int OverrideShader, bool alphatexture);
+	void DrawPSprite (player_t * player,DPSprite *psp,float sx, float sy, bool hudModelStep, int OverrideShader, bool alphatexture);
 	void DrawPlayerSprites(sector_t * viewsector, bool hudModelStep);
 	void DrawTargeterSprites();
 

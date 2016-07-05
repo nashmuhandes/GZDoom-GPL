@@ -557,7 +557,8 @@ bool AActor::SetState (FState *newstate, bool nofunction)
 		if (!nofunction)
 		{
 			FState *returned_state;
-			if (newstate->CallAction(this, this, &returned_state))
+			FStateParamInfo stp = { newstate, STATE_Actor, PSP_WEAPON };
+			if (newstate->CallAction(this, this, &stp, &returned_state))
 			{
 				// Check whether the called action function resulted in destroying the actor
 				if (ObjectFlags & OF_EuthanizeMe)
@@ -998,12 +999,10 @@ void AActor::ClearInventory()
 			invp = &inv->Inventory;
 		}
 	}
-	if (player != NULL)
+	if (player != nullptr)
 	{
-		player->ReadyWeapon = NULL;
+		player->ReadyWeapon = nullptr;
 		player->PendingWeapon = WP_NOCHANGE;
-		player->psprites[ps_weapon].state = NULL;
-		player->psprites[ps_flash].state = NULL;
 	}
 }
 
@@ -2790,10 +2789,10 @@ void P_NightmareRespawn (AActor *mobj)
 	mo->Prev.Z = z;		// Do not interpolate Z position if we changed it since spawning.
 
 	// spawn a teleport fog at old spot because of removal of the body?
-	P_SpawnTeleportFog(mobj, mobj->PosPlusZ(TELEFOGHEIGHT), true, true);
+	P_SpawnTeleportFog(mobj, mobj->Pos(), true, true);
 
 	// spawn a teleport fog at the new spot
-	P_SpawnTeleportFog(mobj, DVector3(mobj->SpawnPoint, z + TELEFOGHEIGHT), false, true);
+	P_SpawnTeleportFog(mobj, DVector3(mobj->SpawnPoint, z), false, true);
 
 	// remove the old monster
 	mobj->Destroy ();
@@ -3869,7 +3868,8 @@ bool AActor::CheckNoDelay()
 			// For immediately spawned objects with the NoDelay flag set for their
 			// Spawn state, explicitly call the current state's function.
 			FState *newstate;
-			if (state->CallAction(this, this, &newstate))
+			FStateParamInfo stp = { state, STATE_Actor, PSP_WEAPON };
+			if (state->CallAction(this, this, &stp, &newstate))
 			{
 				if (ObjectFlags & OF_EuthanizeMe)
 				{
@@ -4686,7 +4686,7 @@ APlayerPawn *P_SpawnPlayer (FPlayerStart *mthing, int playernum, int flags)
 
 	if (multiplayer)
 	{
-		Spawn ("TeleportFog", mobj->Vec3Angle(20., mobj->Angles.Yaw, TELEFOGHEIGHT), ALLOW_REPLACE);
+		P_SpawnTeleportFog(mobj, mobj->Vec3Angle(20., mobj->Angles.Yaw, 0.), false, true);
 	}
 
 	// "Fix" for one of the starts on exec.wad MAP01: If you start inside the ceiling,

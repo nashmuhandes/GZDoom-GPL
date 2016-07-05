@@ -3968,6 +3968,7 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 
 	case APROP_Friction:
 		actor->Friction = ACSToDouble(value);
+		break;
 
 	case APROP_MaxStepHeight:
 		actor->MaxStepHeight = ACSToDouble(value);
@@ -4189,31 +4190,6 @@ bool DLevelScript::DoCheckActorTexture(int tid, AActor *activator, int string, b
 	return tex == TexMan[secpic];
 }
 
-enum
-{
-	// These are the original inputs sent by the player.
-	INPUT_OLDBUTTONS,
-	INPUT_BUTTONS,
-	INPUT_PITCH,
-	INPUT_YAW,
-	INPUT_ROLL,
-	INPUT_FORWARDMOVE,
-	INPUT_SIDEMOVE,
-	INPUT_UPMOVE,
-
-	// These are the inputs, as modified by P_PlayerThink().
-	// Most of the time, these will match the original inputs, but
-	// they can be different if a player is frozen or using a
-	// chainsaw.
-	MODINPUT_OLDBUTTONS,
-	MODINPUT_BUTTONS,
-	MODINPUT_PITCH,
-	MODINPUT_YAW,
-	MODINPUT_ROLL,
-	MODINPUT_FORWARDMOVE,
-	MODINPUT_SIDEMOVE,
-	MODINPUT_UPMOVE
-};
 
 int DLevelScript::GetPlayerInput(int playernum, int inputnum)
 {
@@ -4240,28 +4216,7 @@ int DLevelScript::GetPlayerInput(int playernum, int inputnum)
 		return 0;
 	}
 
-	switch (inputnum)
-	{
-	case INPUT_OLDBUTTONS:		return p->original_oldbuttons;		break;
-	case INPUT_BUTTONS:			return p->original_cmd.buttons;		break;
-	case INPUT_PITCH:			return p->original_cmd.pitch;		break;
-	case INPUT_YAW:				return p->original_cmd.yaw;			break;
-	case INPUT_ROLL:			return p->original_cmd.roll;		break;
-	case INPUT_FORWARDMOVE:		return p->original_cmd.forwardmove;	break;
-	case INPUT_SIDEMOVE:		return p->original_cmd.sidemove;	break;
-	case INPUT_UPMOVE:			return p->original_cmd.upmove;		break;
-
-	case MODINPUT_OLDBUTTONS:	return p->oldbuttons;				break;
-	case MODINPUT_BUTTONS:		return p->cmd.ucmd.buttons;			break;
-	case MODINPUT_PITCH:		return p->cmd.ucmd.pitch;			break;
-	case MODINPUT_YAW:			return p->cmd.ucmd.yaw;				break;
-	case MODINPUT_ROLL:			return p->cmd.ucmd.roll;			break;
-	case MODINPUT_FORWARDMOVE:	return p->cmd.ucmd.forwardmove;		break;
-	case MODINPUT_SIDEMOVE:		return p->cmd.ucmd.sidemove;		break;
-	case MODINPUT_UPMOVE:		return p->cmd.ucmd.upmove;			break;
-
-	default:					return 0;							break;
-	}
+	return P_Thing_CheckInputNum(p, inputnum);
 }
 
 enum
@@ -4656,7 +4611,11 @@ static int DoGetCVar(FBaseCVar *cvar, bool is_string)
 {
 	UCVarValue val;
 
-	if (is_string)
+	if (cvar == nullptr)
+	{
+		return 0;
+	}
+	else if (is_string)
 	{
 		val = cvar->GetGenericRep(CVAR_String);
 		return GlobalACSStrings.AddString(val.String);
@@ -4670,44 +4629,6 @@ static int DoGetCVar(FBaseCVar *cvar, bool is_string)
 	{
 		val = cvar->GetGenericRep(CVAR_Int);
 		return val.Int;
-	}
-}
-
-static int GetUserCVar(int playernum, const char *cvarname, bool is_string)
-{
-	if ((unsigned)playernum >= MAXPLAYERS || !playeringame[playernum])
-	{
-		return 0;
-	}
-	FBaseCVar **cvar_p = players[playernum].userinfo.CheckKey(FName(cvarname, true));
-	FBaseCVar *cvar;
-	if (cvar_p == NULL || (cvar = *cvar_p) == NULL || (cvar->GetFlags() & CVAR_IGNORE))
-	{
-		return 0;
-	}
-	return DoGetCVar(cvar, is_string);
-}
-
-static int GetCVar(AActor *activator, const char *cvarname, bool is_string)
-{
-	FBaseCVar *cvar = FindCVar(cvarname, NULL);
-	// Either the cvar doesn't exist, or it's for a mod that isn't loaded, so return 0.
-	if (cvar == NULL || (cvar->GetFlags() & CVAR_IGNORE))
-	{
-		return 0;
-	}
-	else
-	{
-		// For userinfo cvars, redirect to GetUserCVar
-		if (cvar->GetFlags() & CVAR_USERINFO)
-		{
-			if (activator == NULL || activator->player == NULL)
-			{
-				return 0;
-			}
-			return GetUserCVar(int(activator->player - players), cvarname, is_string);
-		}
-		return DoGetCVar(cvar, is_string);
 	}
 }
 
@@ -5395,7 +5316,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, SDWORD *args)
 		case ACSF_GetCVarString:
 			if (argCount == 1)
 			{
-				return GetCVar(activator, FBehavior::StaticLookupString(args[0]), true);
+				return DoGetCVar(GetCVar(activator, FBehavior::StaticLookupString(args[0])), true);
 			}
 			break;
 
@@ -5416,14 +5337,14 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, SDWORD *args)
 		case ACSF_GetUserCVar:
 			if (argCount == 2)
 			{
-				return GetUserCVar(args[0], FBehavior::StaticLookupString(args[1]), false);
+				return DoGetCVar(GetUserCVar(args[0], FBehavior::StaticLookupString(args[1])), false);
 			}
 			break;
 
 		case ACSF_GetUserCVarString:
 			if (argCount == 2)
 			{
-				return GetUserCVar(args[0], FBehavior::StaticLookupString(args[1]), true);
+				return DoGetCVar(GetUserCVar(args[0], FBehavior::StaticLookupString(args[1])), true);
 			}
 			break;
 
@@ -6047,7 +5968,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			PalEntry color = args[0];
 			bool fullbright = argCount > 1 ? !!args[1] : false;
 			int lifetime = argCount > 2 ? args[2] : 35;
-			int size = argCount > 3 ? args[3] : 1;
+			double size = argCount > 3 ? args[3] : 1.;
 			int x = argCount > 4 ? args[4] : 0;
 			int y = argCount > 5 ? args[5] : 0;
 			int z = argCount > 6 ? args[6] : 0;
@@ -6059,17 +5980,18 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			int accelz = argCount > 12 ? args[12] : 0;
 			int startalpha = argCount > 13 ? args[13] : 0xFF; // Byte trans			
 			int fadestep = argCount > 14 ? args[14] : -1;
+			double endsize = argCount > 15 ? args[15] : -1.;
 
 			startalpha = clamp<int>(startalpha, 0, 255); // Clamp to byte
 			lifetime = clamp<int>(lifetime, 0, 255); // Clamp to byte
 			fadestep = clamp<int>(fadestep, -1, 255); // Clamp to byte inc. -1 (indicating automatic)
-			size = clamp<int>(size, 0, 65535); // Clamp to word
+			size = fabs(size);
 
 			if (lifetime != 0)
 				P_SpawnParticle(DVector3(ACSToDouble(x), ACSToDouble(y), ACSToDouble(z)), 
 								DVector3(ACSToDouble(xvel), ACSToDouble(yvel), ACSToDouble(zvel)),
 								DVector3(ACSToDouble(accelx), ACSToDouble(accely), ACSToDouble(accelz)),
-								color, fullbright, startalpha/255., lifetime, size, fadestep/255.);
+								color, startalpha/255., lifetime, size, endsize, fadestep/255., fullbright);
 		}
 		break;
 
@@ -8126,6 +8048,17 @@ scriptwait:
 			break;
 
 // [BC] Start ST PCD's
+		case PCD_ISNETWORKGAME:
+			PushToStack(netgame);
+			break;
+
+		case PCD_PLAYERTEAM:
+			if ( activator && activator->player )
+				PushToStack( activator->player->userinfo.GetTeam() );
+			else
+				PushToStack( 0 );
+			break;
+
 		case PCD_PLAYERHEALTH:
 			if (activator)
 				PushToStack (activator->health);
@@ -8162,7 +8095,7 @@ scriptwait:
 			break;
 
 		case PCD_SINGLEPLAYER:
-			PushToStack (!netgame);
+			PushToStack (!multiplayer);
 			break;
 // [BC] End ST PCD's
 
@@ -9130,7 +9063,7 @@ scriptwait:
 			break;
 
 		case PCD_GETCVAR:
-			STACK(1) = GetCVar(activator, FBehavior::StaticLookupString(STACK(1)), false);
+			STACK(1) = DoGetCVar(GetCVar(activator, FBehavior::StaticLookupString(STACK(1))), false);
 			break;
 
 		case PCD_SETHUDSIZE:
@@ -9606,8 +9539,12 @@ scriptwait:
 			break;
 
 		case PCD_CONSOLECOMMAND:
+		case PCD_CONSOLECOMMANDDIRECT:
 			Printf (TEXTCOLOR_RED GAMENAME " doesn't support execution of console commands from scripts\n");
-			sp -= 3;
+			if (pcd == PCD_CONSOLECOMMAND)
+				sp -= 3;
+			else
+				pc += 3;
 			break;
  		}
  	}

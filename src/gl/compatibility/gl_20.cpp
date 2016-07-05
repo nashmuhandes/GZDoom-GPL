@@ -456,7 +456,7 @@ bool gl_SetupLightTexture()
 {
 	if (GLRenderer->gllight == nullptr) return false;
 	FMaterial * pat = FMaterial::ValidateTexture(GLRenderer->gllight, false);
-	pat->Bind(CLAMP_XY_NOMIP, 0);
+	gl_RenderState.SetMaterial(pat, CLAMP_XY_NOMIP, 0, -1, false);
 	return true;
 }
 
@@ -484,7 +484,7 @@ bool GLWall::PutWallCompat(int passflag)
 	}
 	else if (sub)
 	{
-		if (sub->lighthead != nullptr) return false;
+		if (sub->lighthead == nullptr) return false;
 	}
 
 	bool foggy = !gl_isBlack(Colormap.FadeColor) || (level.flags&LEVEL_HASFADETABLE) || gl_lights_additive;
@@ -673,7 +673,7 @@ void GLFlat::DrawLightsCompat(int pass)
 
 			while (node)
 			{
-				DrawSubsectorLights(sub, pass);
+				DrawSubsectorLights(node->sub, pass);
 				node = node->next;
 			}
 		}

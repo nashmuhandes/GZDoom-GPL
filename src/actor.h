@@ -284,7 +284,7 @@ enum ActorFlag4
 enum ActorFlag5
 {
 	MF5_DONTDRAIN		= 0x00000001,	// cannot be drained health from.
-	MF5_INSTATECALL		= 0x00000002,	// This actor is being run through CallStateChain
+	/*		FREE SLOT	  0x00000002*/
 	MF5_NODROPOFF		= 0x00000004,	// cannot drop off under any circumstances.
 	MF5_NOFORWARDFALL	= 0x00000008,	// Does not make any actor fall forward by being damaged by this
 	MF5_COUNTSECRET		= 0x00000010,	// From Doom 64: actor acts like a secret
@@ -408,9 +408,11 @@ enum ActorRenderFlag
 	RF_SPRITETYPEMASK	= 0x7000,	// ---Different sprite types, not all implemented
 	RF_FACESPRITE		= 0x0000,	// Face sprite
 	RF_WALLSPRITE		= 0x1000,	// Wall sprite
-	RF_FLOORSPRITE		= 0x2000,	// Floor sprite
+	RF_FLATSPRITE		= 0x2000,	// Flat sprite
 	RF_VOXELSPRITE		= 0x3000,	// Voxel object
 	RF_INVISIBLE		= 0x8000,	// Don't bother drawing this actor
+	RF_ROLLSPRITE		= 0x40000,	//[marrub]roll the sprite billboard
+	RF_DONTFLIP			= 0x80000,	// Don't flip it when viewed from behind.
 
 	RF_FORCEYBILLBOARD		= 0x10000,	// [BB] OpenGL only: draw with y axis billboard, i.e. anchored to the floor (overrides gl_billboard_mode setting)
 	RF_FORCEXYBILLBOARD		= 0x20000,	// [BB] OpenGL only: draw with xy axis billboard, i.e. unanchored (overrides gl_billboard_mode setting)

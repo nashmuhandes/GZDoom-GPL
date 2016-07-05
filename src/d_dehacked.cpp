@@ -807,11 +807,12 @@ void SetDehParams(FState *state, int codepointer)
 		VMFunctionBuilder buildit;
 		// Allocate registers used to pass parameters in.
 		// self, stateowner, state (all are pointers)
-		buildit.Registers[REGT_POINTER].Get(3);
+		buildit.Registers[REGT_POINTER].Get(NAP);
 		// Emit code to pass the standard action function parameters.
-		buildit.Emit(OP_PARAM, 0, REGT_POINTER, 0);
-		buildit.Emit(OP_PARAM, 0, REGT_POINTER, 1);
-		buildit.Emit(OP_PARAM, 0, REGT_POINTER, 2);
+		for (int i = 0; i < NAP; i++)
+		{
+			buildit.Emit(OP_PARAM, 0, REGT_POINTER, i);
+		}
 		// Emit code for action parameters.
 		int argcount = MBFCodePointerFactories[codepointer](buildit, value1, value2);
 		buildit.Emit(OP_TAIL_K, buildit.GetConstantAddress(sym->Variants[0].Implementation, ATAG_OBJECT), NAP + argcount, 0);
@@ -2114,7 +2115,7 @@ static int PatchCodePtrs (int dummy)
 				else
 				{
 					TArray<DWORD> &args = sym->Variants[0].ArgFlags;
-					if ((sym->Flags & (VARF_Method | VARF_Action)) != (VARF_Method | VARF_Action) || (args.Size() > 3 && !(args[3] & VARF_Optional)))
+					if ((sym->Flags & (VARF_Method | VARF_Action)) != (VARF_Method | VARF_Action) || (args.Size() > NAP && !(args[NAP] & VARF_Optional)))
 					{
 						Printf("Frame %d: Incompatible code pointer '%s'\n", frame, Line2);
 						sym = NULL;
@@ -2726,7 +2727,7 @@ static bool LoadDehSupp ()
 						else
 						{
 							TArray<DWORD> &args = sym->Variants[0].ArgFlags;
-							if ((sym->Flags & (VARF_Method|VARF_Action)) != (VARF_Method | VARF_Action) || (args.Size() > 3 && !(args[3] & VARF_Optional)))
+							if ((sym->Flags & (VARF_Method|VARF_Action)) != (VARF_Method | VARF_Action) || (args.Size() > NAP && !(args[NAP] & VARF_Optional)))
 							{
 								sc.ScriptMessage("Incompatible code pointer '%s'", sc.String);
 							}
@@ -3123,22 +3124,29 @@ bool ADehackedPickup::TryPickup (AActor *&toucher)
 
 const char *ADehackedPickup::PickupMessage ()
 {
-	return RealPickup->PickupMessage ();
+	if (RealPickup != nullptr)
+		return RealPickup->PickupMessage ();
+	else return "";
 }
 
 bool ADehackedPickup::ShouldStay ()
 {
-	return RealPickup->ShouldStay ();
+	if (RealPickup != nullptr)
+		return RealPickup->ShouldStay ();
+	else return true;
 }
 
 bool ADehackedPickup::ShouldRespawn ()
 {
-	return RealPickup->ShouldRespawn ();
+	if (RealPickup != nullptr)
+		return RealPickup->ShouldRespawn ();
+	else return false;
 }
 
 void ADehackedPickup::PlayPickupSound (AActor *toucher)
 {
-	RealPickup->PlayPickupSound (toucher);
+	if (RealPickup != nullptr)
+		RealPickup->PlayPickupSound (toucher);
 }
 
 void ADehackedPickup::DoPickupSpecial (AActor *toucher)
@@ -3146,19 +3154,19 @@ void ADehackedPickup::DoPickupSpecial (AActor *toucher)
 	Super::DoPickupSpecial (toucher);
 	// If the real pickup hasn't joined the toucher's inventory, make sure it
 	// doesn't stick around.
-	if (RealPickup->Owner != toucher)
+	if (RealPickup != nullptr && RealPickup->Owner != toucher)
 	{
 		RealPickup->Destroy ();
 	}
-	RealPickup = NULL;
+	RealPickup = nullptr;
 }
 
 void ADehackedPickup::Destroy ()
 {
-	if (RealPickup != NULL)
+	if (RealPickup != nullptr)
 	{
 		RealPickup->Destroy ();
-		RealPickup = NULL;
+		RealPickup = nullptr;
 	}
 	Super::Destroy ();
 }
