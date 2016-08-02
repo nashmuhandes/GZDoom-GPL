@@ -111,7 +111,7 @@ void I_InitGraphics ()
 	val.Bool = !!Args->CheckParm ("-devparm");
 	ticker.SetGenericRepDefault (val, CVAR_Bool);
 	
-	//currentrenderer = vid_renderer;
+	currentrenderer = vid_renderer;
 	if (currentrenderer==1) Video = new SDLGLVideo(0);
 	else Video = new SDLVideo (0);
 	
@@ -130,7 +130,7 @@ static void I_DeleteRenderer()
 
 void I_CreateRenderer()
 {
-	//currentrenderer = vid_renderer;
+	currentrenderer = vid_renderer;
 	if (Renderer == NULL)
 	{
 		Renderer = gl_CreateInterface();
