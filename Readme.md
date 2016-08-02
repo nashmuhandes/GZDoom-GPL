@@ -12,7 +12,7 @@ Licenses
 
 * **[DUMB License](http://dumb.sourceforge.net/index.php?page=licences "DUMB - Dynamic Universal Music Bibliotheque")**
   * foo_DUMB
-* **[General Public License version 2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html "GNU General Public License v2.0 - GNU Project - Free Software Foundation")**
+* **[General Public License version 2 (or later)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html "GNU General Public License v2.0 - GNU Project - Free Software Foundation")**
   * Doom
 * **[GZDoom License](https://github.com/nashmuhandes/GZDoom-GPL/blob/master/docs/GZDoom%20License.md "GZDoom License")**
   * OpenGL renderer
