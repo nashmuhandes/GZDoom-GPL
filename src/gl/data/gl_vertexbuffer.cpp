@@ -71,16 +71,75 @@ FVertexBuffer::~FVertexBuffer()
 	}
 }
 
+
+void FSimpleVertexBuffer::BindVBO()
+{
+	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+	if (gl.glslversion > 0)
+	{
+		glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FSimpleVertex), &VSiO->x);
+		glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FSimpleVertex), &VSiO->u);
+		glVertexAttribPointer(VATTR_COLOR, 4, GL_UNSIGNED_BYTE, true, sizeof(FSimpleVertex), &VSiO->color);
+		glEnableVertexAttribArray(VATTR_VERTEX);
+		glEnableVertexAttribArray(VATTR_TEXCOORD);
+		glEnableVertexAttribArray(VATTR_COLOR);
+		glDisableVertexAttribArray(VATTR_VERTEX2);
+	}
+	else
+	{
+		glVertexPointer(3, GL_FLOAT, sizeof(FSimpleVertex), &VSiO->x);
+		glTexCoordPointer(2, GL_FLOAT, sizeof(FSimpleVertex), &VSiO->u);
+		glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(FSimpleVertex), &VSiO->color);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+	}
+}
+
+void FSimpleVertexBuffer::EnableColorArray(bool on)
+{
+	if (on)
+	{
+		if (gl.glslversion > 0)
+		{
+			glEnableVertexAttribArray(VATTR_COLOR);
+		}
+		else
+		{
+			glEnableClientState(GL_COLOR_ARRAY);
+		}
+	}
+	else
+	{
+		if (gl.glslversion > 0)
+		{
+			glDisableVertexAttribArray(VATTR_COLOR);
+		}
+		else
+		{
+			glDisableClientState(GL_COLOR_ARRAY);
+		}
+	}
+}
+
+
+void FSimpleVertexBuffer::set(FSimpleVertex *verts, int count)
+{
+	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+	gl_RenderState.SetVertexBuffer(this);
+	glBufferData(GL_ARRAY_BUFFER, count * sizeof(*verts), verts, GL_STREAM_DRAW);
+}
+
 //==========================================================================
 //
 //
 //
 //==========================================================================
 
-FFlatVertexBuffer::FFlatVertexBuffer()
-: FVertexBuffer(!!(gl.flags & RFL_BUFFER_STORAGE))
+FFlatVertexBuffer::FFlatVertexBuffer(int width, int height)
+: FVertexBuffer(gl.buffermethod == BM_PERSISTENT)
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
+	if (gl.buffermethod == BM_PERSISTENT)
 	{
 		unsigned int bytesize = BUFFER_SIZE * sizeof(FFlatVertex);
 		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
@@ -91,19 +150,45 @@ FFlatVertexBuffer::FFlatVertexBuffer()
 	{
 		// The fallback path uses immediate mode rendering and does not set up an actual vertex buffer
 		vbo_shadowdata.Reserve(BUFFER_SIZE);
-		map = &vbo_shadowdata[0];
+		map = new FFlatVertex[BUFFER_SIZE];
 	}
-	mNumReserved = mIndex = mCurIndex = 0;
+	mIndex = mCurIndex = 0;
+	mNumReserved = 12;
+	vbo_shadowdata.Resize(mNumReserved);
+
+	// the first quad is reserved for handling coordinates through uniforms.
+	vbo_shadowdata[0].Set(1, 0, 0, 0, 0);
+	vbo_shadowdata[1].Set(2, 0, 0, 0, 0);
+	vbo_shadowdata[2].Set(3, 0, 0, 0, 0);
+	vbo_shadowdata[3].Set(4, 0, 0, 0, 0);
+
+	// and the second one for the fullscreen quad used for blend overlays.
+	vbo_shadowdata[4].Set(0, 0, 0, 0, 0);
+	vbo_shadowdata[5].Set(0, (float)height, 0, 0, 0);
+	vbo_shadowdata[6].Set((float)width, 0, 0, 0, 0);
+	vbo_shadowdata[7].Set((float)width, (float)height, 0, 0, 0);
+
+	// and this is for the postprocessing copy operation
+	vbo_shadowdata[8].Set(-1.0f, -1.0f, 0, 0.0f, 0.0f);
+	vbo_shadowdata[9].Set(-1.0f, 1.0f, 0, 0.0f, 1.f);
+	vbo_shadowdata[10].Set(1.0f, -1.0f, 0, 1.f, 0.0f);
+	vbo_shadowdata[11].Set(1.0f, 1.0f, 0, 1.f, 1.f);
+
 }
 
 FFlatVertexBuffer::~FFlatVertexBuffer()
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
+	if (vbo_id != 0)
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
 		glUnmapBuffer(GL_ARRAY_BUFFER);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
+	else
+	{
+		delete[] map;
+	}
+	map = nullptr;
 }
 
 
@@ -116,14 +201,15 @@ void FFlatVertexBuffer::BindVBO()
 		{
 			glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FFlatVertex), &VTO->x);
 			glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FFlatVertex), &VTO->u);
-			glEnableVertexAttribArray(VATTR_VERTEX);
-			glEnableVertexAttribArray(VATTR_TEXCOORD);
 		}
 		else
 		{
-			glDisableVertexAttribArray(VATTR_VERTEX);
-			glDisableVertexAttribArray(VATTR_TEXCOORD);
+			// If we cannot use a hardware buffer, use an old-style client array.
+			glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FFlatVertex), &map->x);
+			glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FFlatVertex), &map->u);
 		}
+		glEnableVertexAttribArray(VATTR_VERTEX);
+		glEnableVertexAttribArray(VATTR_TEXCOORD);
 		glDisableVertexAttribArray(VATTR_COLOR);
 		glDisableVertexAttribArray(VATTR_VERTEX2);
 	}
@@ -133,40 +219,6 @@ void FFlatVertexBuffer::BindVBO()
 		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 		glDisableClientState(GL_COLOR_ARRAY);
 	}
-}
-
-//==========================================================================
-//
-// immediate mode fallback for drivers without GL_ARB_buffer_storage
-//
-// No single core method is performant enough  to handle this adequately
-// so we have to resort to immediate mode instead...
-//
-//==========================================================================
-
-void FFlatVertexBuffer::ImmRenderBuffer(unsigned int primtype, unsigned int offset, unsigned int count)
-{
-	// this will only get called if we can't acquire a persistently mapped buffer.
-#ifndef CORE_PROFILE
-	glBegin(primtype);
-	if (gl.glslversion > 0)
-	{
-		for (unsigned int i = 0; i < count; i++)
-		{
-			glVertexAttrib2fv(VATTR_TEXCOORD, &map[offset + i].u);
-			glVertexAttrib3fv(VATTR_VERTEX, &map[offset + i].x);
-		}
-	}
-	else	// no shader means no vertex attributes, so use the old stuff instead.
-	{
-		for (unsigned int i = 0; i < count; i++)
-		{
-			glTexCoord2fv(&map[offset + i].u);
-			glVertex3fv(&map[offset + i].x);
-		}
-	}
-	glEnd();
-#endif
 }
 
 //==========================================================================
@@ -346,24 +398,10 @@ void FFlatVertexBuffer::UpdatePlaneVertices(sector_t *sec, int plane)
 
 void FFlatVertexBuffer::CreateVBO()
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
-	{
-		vbo_shadowdata.Resize(mNumReserved);
-		CreateFlatVBO();
-		mCurIndex = mIndex = vbo_shadowdata.Size();
-		memcpy(map, &vbo_shadowdata[0], vbo_shadowdata.Size() * sizeof(FFlatVertex));
-	}
-	else if (sectors)
-	{
-		// set all VBO info to invalid values so that we can save some checks in the rendering code
-		for(int i=0;i<numsectors;i++)
-		{
-			sectors[i].vboindex[3] = sectors[i].vboindex[2] = 
-			sectors[i].vboindex[1] = sectors[i].vboindex[0] = -1;
-			sectors[i].vboheight[1] = sectors[i].vboheight[0] = FLT_MIN;
-		}
-	}
-
+	vbo_shadowdata.Resize(mNumReserved);
+	CreateFlatVBO();
+	mCurIndex = mIndex = vbo_shadowdata.Size();
+	memcpy(map, &vbo_shadowdata[0], vbo_shadowdata.Size() * sizeof(FFlatVertex));
 }
 
 //==========================================================================
@@ -395,12 +433,9 @@ void FFlatVertexBuffer::CheckPlanes(sector_t *sector)
 
 void FFlatVertexBuffer::CheckUpdate(sector_t *sector)
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
-	{
-		CheckPlanes(sector);
-		sector_t *hs = sector->GetHeightSec();
-		if (hs != NULL) CheckPlanes(hs);
-		for (unsigned i = 0; i < sector->e->XFloor.ffloors.Size(); i++)
-			CheckPlanes(sector->e->XFloor.ffloors[i]->model);
-	}
+	CheckPlanes(sector);
+	sector_t *hs = sector->GetHeightSec();
+	if (hs != NULL) CheckPlanes(hs);
+	for (unsigned i = 0; i < sector->e->XFloor.ffloors.Size(); i++)
+		CheckPlanes(sector->e->XFloor.ffloors[i]->model);
 }

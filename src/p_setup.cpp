@@ -1960,7 +1960,7 @@ void P_SetLineID (int i, line_t *ld)
 			break;
 			
 		case Plane_Align:
-			setid = ld->args[2];
+			if (!(ib_compatflags & BCOMPATF_NOSLOPEID)) setid = ld->args[2];
 			break;
 			
 		case Static_Init:

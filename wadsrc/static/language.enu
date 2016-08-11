@@ -2069,6 +2069,8 @@ CMPTMNU_SILENTINSTANTFLOORS	= "Inst. moving floors are not silent";
 CMPTMNU_SECTORSOUNDS		= "Sector sounds use center as source";
 CMPTMNU_SOUNDCUTOFF			= "Sounds stop when actor vanishes";
 CMPTMNU_SOUNDTARGET			= "Use original sound target handling";
+CMPTMNU_TELEPORT			= "Scripted teleports don't trigger sector actions";
+CMPTMNU_PUSHWINDOW			= "Non-blocking lines can be pushed";
 
 // Sound Options
 SNDMNU_TITLE			= "SOUND OPTIONS";
@@ -2197,6 +2199,7 @@ OPTVAL_PLAYER				= "Player";
 OPTVAL_MAP					= "Map";
 OPTVAL_SCALETO640X400		= "Scale to 640x400";
 OPTVAL_PIXELDOUBLE			= "Pixel double";
+OPTVAL_PIXELQUADRUPLE		= "Pixel quadruple";
 OPTVAL_CURRENTWEAPON		= "Current weapon";
 OPTVAL_AVAILABLEWEAPONS		= "Available weapons";
 OPTVAL_ALLWEAPONS			= "All weapons";
@@ -2231,6 +2234,7 @@ OPTVAL_ANIMATED				= "Animated";
 OPTVAL_ROTATED				= "Rotated";
 OPTVAL_MAPDEFINEDCOLORSONLY = "Map defined colors only";
 OPTVAL_DOUBLE				= "Double";
+OPTVAL_QUADRUPLE			= "Quadruple";
 OPTVAL_ITEMPICKUP			= "Item Pickup";
 OPTVAL_OBITUARIES			= "Obituaries";
 OPTVAL_CRITICALMESSAGES		= "Critical Messages";
@@ -2621,6 +2625,7 @@ GLPREFMNU_VRQUADSTEREO 			= "Enable Quad Stereo";
 GLPREFMNU_MULTISAMPLE			= "Multisample";
 GLPREFMNU_TONEMAP				= "Tonemap Mode";
 GLPREFMNU_BLOOM					= "Bloom effect";
+GLPREFMNU_LENS					= "Lens distortion effect";
 
 // Option Values
 OPTVAL_SMART 				= "Smart";

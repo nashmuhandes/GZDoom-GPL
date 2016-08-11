@@ -1,6 +1,6 @@
 /*
-** gl_tonemapshader.cpp
-** Converts a HDR texture to 0-1 range by applying a tonemap operator
+** gl_lensshader.cpp
+** Lens distortion with chromatic aberration shader
 **
 **---------------------------------------------------------------------------
 ** Copyright 2016 Magnus Norddahl
@@ -47,32 +47,22 @@
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_framebuffer.h"
 #include "gl/system/gl_cvars.h"
-#include "gl/shaders/gl_tonemapshader.h"
+#include "gl/shaders/gl_lensshader.h"
 
-void FTonemapShader::Bind()
+void FLensShader::Bind()
 {
-	auto &shader = mShader[gl_tonemap];
-	if (!shader)
+	if (!mShader)
 	{
-		shader.Compile(FShaderProgram::Vertex, "shaders/glsl/screenquad.vp", "", 330);
-		shader.Compile(FShaderProgram::Fragment, "shaders/glsl/tonemap.fp", GetDefines(gl_tonemap), 330);
-		shader.SetFragDataLocation(0, "FragColor");
-		shader.Link("shaders/glsl/tonemap");
-		shader.SetAttribLocation(0, "PositionInProjection");
-		SceneTexture.Init(shader, "InputTexture");
-		Exposure.Init(shader, "ExposureAdjustment");
+		mShader.Compile(FShaderProgram::Vertex, "shaders/glsl/screenquad.vp", "", 330);
+		mShader.Compile(FShaderProgram::Fragment, "shaders/glsl/lensdistortion.fp", "", 330);
+		mShader.SetFragDataLocation(0, "FragColor");
+		mShader.Link("shaders/glsl/lensdistortion");
+		mShader.SetAttribLocation(0, "PositionInProjection");
+		InputTexture.Init(mShader, "InputTexture");
+		AspectRatio.Init(mShader, "Aspect");
+		Scale.Init(mShader, "Scale");
+		LensDistortionCoefficient.Init(mShader, "k");
+		CubicDistortionValue.Init(mShader, "kcube");
 	}
-	shader.Bind();
-}
-
-const char *FTonemapShader::GetDefines(int mode)
-{
-	switch (mode)
-	{
-	default:
-	case Linear:     return "#define LINEAR\n";
-	case Reinhard:   return "#define REINHARD\n";
-	case HejlDawson: return "#define HEJLDAWSON\n";
-	case Uncharted2: return "#define UNCHARTED2\n";
-	}
+	mShader.Bind();
 }

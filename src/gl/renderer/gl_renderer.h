@@ -23,7 +23,9 @@ class FBloomExtractShader;
 class FBloomCombineShader;
 class FBlurShader;
 class FTonemapShader;
+class FLensShader;
 class FPresentShader;
+class F2DDrawer;
 
 inline float DEG2RAD(float deg)
 {
@@ -90,6 +92,7 @@ public:
 	FBloomCombineShader *mBloomCombineShader;
 	FBlurShader *mBlurShader;
 	FTonemapShader *mTonemapShader;
+	FLensShader *mLensShader;
 	FPresentShader *mPresentShader;
 
 	FTexture *gllight;
@@ -105,6 +108,7 @@ public:
 	FFlatVertexBuffer *mVBO;
 	FSkyVertexBuffer *mSkyVBO;
 	FLightBuffer *mLights;
+	F2DDrawer *m2DDrawer;
 
 	GL_IRECT mScreenViewport;
 	GL_IRECT mOutputViewportLB;
@@ -125,7 +129,7 @@ public:
 	void SetViewAngle(DAngle viewangle);
 	void SetupView(float viewx, float viewy, float viewz, DAngle viewangle, bool mirror, bool planemirror);
 
-	void Initialize();
+	void Initialize(int width, int height);
 
 	void CreateScene();
 	void RenderMultipassStuff();
@@ -140,12 +144,6 @@ public:
 
 	void Begin2D();
 	void ClearBorders();
-	void DrawTexture(FTexture *img, DrawParms &parms);
-	void DrawLine(int x1, int y1, int x2, int y2, int palcolor, uint32 color);
-	void DrawPixel(int x1, int y1, int palcolor, uint32 color);
-	void Dim(PalEntry color, float damount, int x1, int y1, int w, int h);
-	void FlatFill (int left, int top, int right, int bottom, FTexture *src, bool local_origin);
-	void Clear(int left, int top, int right, int bottom, int palcolor, uint32 color);
 
 	void ProcessLowerMiniseg(seg_t *seg, sector_t * frontsector, sector_t * backsector);
 	void ProcessSprite(AActor *thing, sector_t *sector, bool thruportal);
@@ -155,11 +153,13 @@ public:
 	unsigned char *GetTextureBuffer(FTexture *tex, int &w, int &h);
 	void SetupLevel();
 
+	void RenderScreenQuad();
 	void SetFixedColormap (player_t *player);
 	void WriteSavePic (player_t *player, FILE *file, int width, int height);
 	void EndDrawScene(sector_t * viewsector);
 	void BloomScene();
 	void TonemapScene();
+	void LensDistortScene();
 	void CopyToBackbuffer(const GL_IRECT *bounds, bool applyGamma);
 	void Flush() { CopyToBackbuffer(nullptr, true); }
 
@@ -170,6 +170,9 @@ public:
 
 	bool StartOffscreen();
 	void EndOffscreen();
+
+	void StartSimplePolys();
+	void FinishSimplePolys();
 
 	void FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
 		double originx, double originy, double scalex, double scaley,

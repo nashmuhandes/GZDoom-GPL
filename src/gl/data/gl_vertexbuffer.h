@@ -36,11 +36,39 @@ struct FFlatVertex
 		u = uu;
 		v = vv;
 	}
-	void BindVBO();
+};
+
+struct FSimpleVertex
+{
+	float x, z, y;	// world position
+	float u, v;		// texture coordinates
+	PalEntry color;
+
+	void Set(float xx, float zz, float yy, float uu = 0, float vv = 0, PalEntry col = 0xffffffff)
+	{
+		x = xx;
+		z = zz;
+		y = yy;
+		u = uu;
+		v = vv;
+		color = col;
+	}
 };
 
 #define VTO ((FFlatVertex*)NULL)
+#define VSiO ((FSimpleVertex*)NULL)
 
+class FSimpleVertexBuffer : public FVertexBuffer
+{
+	TArray<FSimpleVertex> mBuffer;
+public:
+	FSimpleVertexBuffer()
+	{
+	}
+	void BindVBO();
+	void set(FSimpleVertex *verts, int count);
+	void EnableColorArray(bool on);
+};
 
 class FFlatVertexBuffer : public FVertexBuffer
 {
@@ -54,12 +82,10 @@ class FFlatVertexBuffer : public FVertexBuffer
 	static const unsigned int BUFFER_SIZE = 2000000;
 	static const unsigned int BUFFER_SIZE_TO_USE = 1999500;
 
-	void ImmRenderBuffer(unsigned int primtype, unsigned int offset, unsigned int count);
-
 public:
 	TArray<FFlatVertex> vbo_shadowdata;	// this is kept around for updating the actual (non-readable) buffer and as stand-in for pre GL 4.x
 
-	FFlatVertexBuffer();
+	FFlatVertexBuffer(int width, int height);
 	~FFlatVertexBuffer();
 
 	void BindVBO();
@@ -85,14 +111,7 @@ public:
 	void RenderArray(unsigned int primtype, unsigned int offset, unsigned int count)
 	{
 		drawcalls.Clock();
-		if (gl.flags & RFL_BUFFER_STORAGE)
-		{
-			glDrawArrays(primtype, offset, count);
-		}
-		else
-		{
-			ImmRenderBuffer(primtype, offset, count);
-		}
+		glDrawArrays(primtype, offset, count);
 		drawcalls.Unclock();
 	}
 
@@ -103,16 +122,6 @@ public:
 		RenderArray(primtype, offset, count);
 		if (poffset) *poffset = offset;
 		if (pcount) *pcount = count;
-	}
-
-	void RenderScreenQuad(float maxU = 1.0f, float maxV = 1.0f)
-	{
-		FFlatVertex *ptr = GetBuffer();
-		ptr->Set(-1.0f, -1.0f, 0, 0.0f, 0.0f); ptr++;
-		ptr->Set(-1.0f, 1.0f, 0, 0.0f, maxV); ptr++;
-		ptr->Set(1.0f, -1.0f, 0, maxU, 0.0f); ptr++;
-		ptr->Set(1.0f, 1.0f, 0, maxU, maxV); ptr++;
-		RenderCurrent(ptr, GL_TRIANGLE_STRIP);
 	}
 
 #endif
@@ -146,6 +155,16 @@ struct FSkyVertex
 		color = col;
 	}
 
+	void SetXYZ(float xx, float yy, float zz, float uu = 0, float vv = 0, PalEntry col = 0xffffffff)
+	{
+		x = xx;
+		y = yy;
+		z = zz;
+		u = uu;
+		v = vv;
+		color = col;
+	}
+
 };
 
 class FSkyVertexBuffer : public FVertexBuffer
@@ -167,6 +186,10 @@ private:
 
 	int mRows, mColumns;
 
+	// indices for sky cubemap faces
+	int mFaceStart[7];
+	int mSideStart;
+
 	void SkyVertex(int r, int c, bool yflip);
 	void CreateSkyHemisphere(int hemi);
 	void CreateDome();
@@ -178,6 +201,11 @@ public:
 	virtual ~FSkyVertexBuffer();
 	void RenderDome(FMaterial *tex, int mode);
 	void BindVBO();
+	int FaceStart(int i)
+	{
+		if (i >= 0 && i < 7) return mFaceStart[i];
+		else return mSideStart;
+	}
 
 };
 
