@@ -143,6 +143,8 @@ void FGLRenderer::BloomScene()
 	mBloomExtractShader->Bind();
 	mBloomExtractShader->SceneTexture.Set(0);
 	mBloomExtractShader->Exposure.Set(mCameraExposure);
+	mBloomExtractShader->Scale.Set(mSceneViewport.width / (float)mScreenViewport.width, mSceneViewport.height / (float)mScreenViewport.height);
+	mBloomExtractShader->Offset.Set(mSceneViewport.left / (float)mScreenViewport.width, mSceneViewport.top / (float)mScreenViewport.height);
 	RenderScreenQuad();
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -152,8 +154,8 @@ void FGLRenderer::BloomScene()
 	{
 		const auto &level = mBuffers->BloomLevels[i];
 		const auto &next = mBuffers->BloomLevels[i + 1];
-		mBlurShader->BlurHorizontal(mVBO, blurAmount, sampleCount, level.VTexture, level.HFramebuffer, level.Width, level.Height);
-		mBlurShader->BlurVertical(mVBO, blurAmount, sampleCount, level.HTexture, next.VFramebuffer, next.Width, next.Height);
+		mBlurShader->BlurHorizontal(this, blurAmount, sampleCount, level.VTexture, level.HFramebuffer, level.Width, level.Height);
+		mBlurShader->BlurVertical(this, blurAmount, sampleCount, level.HTexture, next.VFramebuffer, next.Width, next.Height);
 	}
 
 	// Blur and upscale:
@@ -162,8 +164,8 @@ void FGLRenderer::BloomScene()
 		const auto &level = mBuffers->BloomLevels[i];
 		const auto &next = mBuffers->BloomLevels[i - 1];
 
-		mBlurShader->BlurHorizontal(mVBO, blurAmount, sampleCount, level.VTexture, level.HFramebuffer, level.Width, level.Height);
-		mBlurShader->BlurVertical(mVBO, blurAmount, sampleCount, level.HTexture, level.VFramebuffer, level.Width, level.Height);
+		mBlurShader->BlurHorizontal(this, blurAmount, sampleCount, level.VTexture, level.HFramebuffer, level.Width, level.Height);
+		mBlurShader->BlurVertical(this, blurAmount, sampleCount, level.HTexture, level.VFramebuffer, level.Width, level.Height);
 
 		// Linear upscale:
 		glBindFramebuffer(GL_FRAMEBUFFER, next.VFramebuffer);
@@ -177,12 +179,12 @@ void FGLRenderer::BloomScene()
 		RenderScreenQuad();
 	}
 
-	mBlurShader->BlurHorizontal(mVBO, blurAmount, sampleCount, level0.VTexture, level0.HFramebuffer, level0.Width, level0.Height);
-	mBlurShader->BlurVertical(mVBO, blurAmount, sampleCount, level0.HTexture, level0.VFramebuffer, level0.Width, level0.Height);
+	mBlurShader->BlurHorizontal(this, blurAmount, sampleCount, level0.VTexture, level0.HFramebuffer, level0.Width, level0.Height);
+	mBlurShader->BlurVertical(this, blurAmount, sampleCount, level0.HTexture, level0.VFramebuffer, level0.Width, level0.Height);
 
 	// Add bloom back to scene texture:
 	mBuffers->BindCurrentFB();
-	glViewport(mOutputViewport.left, mOutputViewport.top, mOutputViewport.width, mOutputViewport.height);
+	glViewport(mSceneViewport.left, mSceneViewport.top, mSceneViewport.width, mSceneViewport.height);
 	glEnable(GL_BLEND);
 	glBlendEquation(GL_FUNC_ADD);
 	glBlendFunc(GL_ONE, GL_ONE);
@@ -193,6 +195,7 @@ void FGLRenderer::BloomScene()
 	mBloomCombineShader->Bind();
 	mBloomCombineShader->BloomTexture.Set(0);
 	RenderScreenQuad();
+	glViewport(mScreenViewport.left, mScreenViewport.top, mScreenViewport.width, mScreenViewport.height);
 }
 
 //-----------------------------------------------------------------------------
@@ -243,7 +246,7 @@ void FGLRenderer::LensDistortScene()
 		0.0f
 	};
 
-	float aspect = mOutputViewport.width / mOutputViewport.height;
+	float aspect = mSceneViewport.width / mSceneViewport.height;
 
 	// Scale factor to keep sampling within the input texture
 	float r2 = aspect * aspect * 0.25 + 0.25f;
@@ -283,72 +286,33 @@ void FGLRenderer::CopyToBackbuffer(const GL_IRECT *bounds, bool applyGamma)
 	if (FGLRenderBuffers::IsEnabled())
 	{
 		FGLPostProcessState savedState;
-
 		mBuffers->BindOutputFB();
 
-		int x, y, width, height;
+		GL_IRECT box;
 		if (bounds)
 		{
-			x = bounds->left;
-			y = bounds->top;
-			width = bounds->width;
-			height = bounds->height;
+			box = *bounds;
 		}
 		else
 		{
-			// Calculate letterbox
-			int clientWidth = framebuffer->GetClientWidth();
-			int clientHeight = framebuffer->GetClientHeight();
-			float scaleX = clientWidth / (float)mScreenViewport.width;
-			float scaleY = clientHeight / (float)mScreenViewport.height;
-			float scale = MIN(scaleX, scaleY);
-			width = (int)round(mScreenViewport.width * scale);
-			height = (int)round(mScreenViewport.height * scale);
-			x = (clientWidth - width) / 2;
-			y = (clientHeight - height) / 2;
-
-			// Black bars around the box:
-			glViewport(0, 0, clientWidth, clientHeight);
-			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-			glEnable(GL_SCISSOR_TEST);
-			if (y > 0)
-			{
-				glScissor(0, 0, clientWidth, y);
-				glClear(GL_COLOR_BUFFER_BIT);
-			}
-			if (clientHeight - y - height > 0)
-			{
-				glScissor(0, y + height, clientWidth, clientHeight - y - height);
-				glClear(GL_COLOR_BUFFER_BIT);
-			}
-			if (x > 0)
-			{
-				glScissor(0, y, x, height);
-				glClear(GL_COLOR_BUFFER_BIT);
-			}
-			if (clientWidth - x - width > 0)
-			{
-				glScissor(x + width, y, clientWidth - x - width, height);
-				glClear(GL_COLOR_BUFFER_BIT);
-			}
+			ClearBorders();
+			box = mOutputLetterbox;
 		}
-		glDisable(GL_SCISSOR_TEST);
 
 		// Present what was rendered:
-		glViewport(x, y, width, height);
-		glDisable(GL_BLEND);
+		glViewport(box.left, box.top, box.width, box.height);
 
 		mPresentShader->Bind();
 		mPresentShader->InputTexture.Set(0);
 		if (!applyGamma || framebuffer->IsHWGammaActive())
 		{
-			mPresentShader->Gamma.Set(1.0f);
+			mPresentShader->InvGamma.Set(1.0f);
 			mPresentShader->Contrast.Set(1.0f);
 			mPresentShader->Brightness.Set(0.0f);
 		}
 		else
 		{
-			mPresentShader->Gamma.Set(clamp<float>(Gamma, 0.1f, 4.f));
+			mPresentShader->InvGamma.Set(1.0f / clamp<float>(Gamma, 0.1f, 4.f));
 			mPresentShader->Contrast.Set(clamp<float>(vid_contrast, 0.1f, 3.f));
 			mPresentShader->Brightness.Set(clamp<float>(vid_brightness, -0.8f, 0.8f));
 		}
@@ -358,4 +322,48 @@ void FGLRenderer::CopyToBackbuffer(const GL_IRECT *bounds, bool applyGamma)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		RenderScreenQuad();
 	}
+	else if (!bounds)
+	{
+		FGLPostProcessState savedState;
+		ClearBorders();
+	}
+}
+
+//-----------------------------------------------------------------------------
+//
+// Fills the black bars around the screen letterbox
+//
+//-----------------------------------------------------------------------------
+
+void FGLRenderer::ClearBorders()
+{
+	const auto &box = mOutputLetterbox;
+
+	int clientWidth = framebuffer->GetClientWidth();
+	int clientHeight = framebuffer->GetClientHeight();
+
+	glViewport(0, 0, clientWidth, clientHeight);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glEnable(GL_SCISSOR_TEST);
+	if (box.top > 0)
+	{
+		glScissor(0, 0, clientWidth, box.top);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+	if (clientHeight - box.top - box.height > 0)
+	{
+		glScissor(0, box.top + box.height, clientWidth, clientHeight - box.top - box.height);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+	if (box.left > 0)
+	{
+		glScissor(0, box.top, box.left, box.height);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+	if (clientWidth - box.left - box.width > 0)
+	{
+		glScissor(box.left + box.width, box.top, clientWidth - box.left - box.width, box.height);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+	glDisable(GL_SCISSOR_TEST);
 }
