@@ -42,7 +42,7 @@ vec3 Tonemap(vec3 color)
 	return (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06); // no sRGB needed
 }
 
-#else
+#elif defined(UNCHARTED2)
 
 vec3 Uncharted2Tonemap(vec3 x)
 {
@@ -63,12 +63,36 @@ vec3 Tonemap(vec3 color)
 	return sRGB(curr * whiteScale);
 }
 
+#elif defined(PALETTE)
+
+uniform sampler2D PaletteLUT;
+
+vec3 Tonemap(vec3 color)
+{
+	ivec3 c = ivec3(clamp(color.rgb, vec3(0.0), vec3(1.0)) * 255.0 + 0.5);
+#if __VERSION__ < 130
+	int index = (c.r / 4 * 64 + c.g / 4) * 64 + c.b / 4;
+	float tx = mod(index, 512) / 512.0;
+	float ty = float(index / 512) / 512.0;
+	return texture2D(PaletteLUT, vec2(tx, ty)).rgb;
+#else
+	int index = ((c.r >> 2) * 64 + (c.g >> 2)) * 64 + (c.b >> 2);
+	int tx = index % 512;
+	int ty = index / 512;
+	return texelFetch(PaletteLUT, ivec2(tx, ty), 0).rgb;
+#endif
+}
+
+#else
+#error "Tonemap mode define is missing"
 #endif
 
 void main()
 {
 	vec3 color = texture(InputTexture, TexCoord).rgb;
+#ifndef PALETTE
 	color = color * ExposureAdjustment;
 	color = Linear(color); // needed because gzdoom's scene texture is not linear at the moment
+#endif
 	FragColor = vec4(Tonemap(color), 1.0);
 }

@@ -770,6 +770,7 @@ set( FASTMATH_SOURCES
 	gl/utility/gl_cycler.cpp
 	gl/utility/gl_geometric.cpp
 	gl/renderer/gl_2ddrawer.cpp
+	gl/renderer/gl_quaddrawer.cpp
 	gl/renderer/gl_renderer.cpp
 	gl/renderer/gl_renderstate.cpp
 	gl/renderer/gl_renderbuffers.cpp
