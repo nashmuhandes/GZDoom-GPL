@@ -111,6 +111,7 @@ FGLRenderer::FGLRenderer(OpenGLFrameBuffer *fb)
 	gllight = glpart2 = glpart = mirrortexture = NULL;
 	mLights = NULL;
 	m2DDrawer = nullptr;
+	mTonemapPalette = nullptr;
 }
 
 void gl_LoadModels();
@@ -288,9 +289,8 @@ void FGLRenderer::SetupLevel()
 
 void FGLRenderer::Begin2D()
 {
-	if (FGLRenderBuffers::IsEnabled())
+	if (mBuffers->Setup(mScreenViewport.width, mScreenViewport.height, mSceneViewport.width, mSceneViewport.height))
 	{
-		mBuffers->Setup(mScreenViewport.width, mScreenViewport.height, mSceneViewport.width, mSceneViewport.height);
 		if (mDrawingScene2D)
 			mBuffers->BindSceneFB();
 		else

@@ -386,7 +386,7 @@ short *SoundRenderer::DecodeSample(int outlen, const void *coded, int sizebytes,
     decoder->getInfo(&srate, &chans, &type);
     if(chans != ChannelConfig_Mono || type != SampleType_Int16)
     {
-        DPrintf("Sample is not 16-bit mono\n");
+        DPrintf(DMSG_WARNING, "Sample is not 16-bit mono\n");
         delete decoder;
         return samples;
     }
@@ -522,7 +522,7 @@ std::pair<SoundHandle,bool> SoundRenderer::LoadSoundVoc(BYTE *sfxdata, int lengt
 				break;
 			default: // Unknown block type
 				okay = false;
-				DPrintf ("Unknown VOC block type %i\n", blocktype);
+				DPrintf (DMSG_ERROR, "Unknown VOC block type %i\n", blocktype);
 				break;
 			}
 			// Move to next block
