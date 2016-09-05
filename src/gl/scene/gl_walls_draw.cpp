@@ -124,7 +124,7 @@ void GLWall::SetupLights()
 			float y = node->lightsource->Y();
 			float z = node->lightsource->Z();
 			float dist = fabsf(p.DistToPoint(x, z, y));
-			float radius = (node->lightsource->GetRadius() * gl_lights_size);
+			float radius = node->lightsource->GetRadius();
 			float scale = 1.0f / ((2.f * radius) - dist);
 
 			if (radius > 0.f && dist < radius)
@@ -158,7 +158,7 @@ void GLWall::SetupLights()
 				}
 				if (outcnt[0]!=4 && outcnt[1]!=4 && outcnt[2]!=4 && outcnt[3]!=4) 
 				{
-					gl_GetLight(seg->frontsector->PortalGroup, p, node->lightsource, true, false, lightdata);
+					gl_GetLight(seg->frontsector->PortalGroup, p, node->lightsource, true, lightdata);
 				}
 			}
 		}
@@ -216,9 +216,8 @@ void GLWall::RenderWall(int textured)
 	}
 	else if (vertcount == 0)
 	{
-		// in case we get here without valid vertex data and no ability to create them now,
-		// use the quad drawer as fallback (without edge splitting.)
-		// This can only happen in one special situation, when a translucent line got split during sorting.
+		// This should never happen but in case it actually does, use the quad drawer as fallback (without edge splitting.)
+		// This way it at least gets drawn.
 		FQuadDrawer qd;
 		qd.Set(0, glseg.x1, zbottom[0], glseg.y1, tcs[LOLFT].u, tcs[LOLFT].v);
 		qd.Set(1, glseg.x1, ztop[0], glseg.y1, tcs[UPLFT].u, tcs[UPLFT].v);
@@ -242,7 +241,7 @@ void GLWall::RenderFogBoundary()
 {
 	if (gl_fogmode && gl_fixedcolormap == 0)
 	{
-		if (gl.glslversion > 0.f)
+		if (!gl.legacyMode)
 		{
 			int rel = rellight + getExtraLight();
 			gl_SetFog(lightlevel, rel, &Colormap, false);
@@ -276,7 +275,7 @@ void GLWall::RenderMirrorSurface()
 	Vector v(glseg.y2-glseg.y1, 0 ,-glseg.x2+glseg.x1);
 	v.Normalize();
 
-	if (gl.glslversion >= 0.f)
+	if (!gl.legacyMode)
 	{
 		// we use texture coordinates and texture matrix to pass the normal stuff to the shader so that the default vertex buffer format can be used as is.
 		tcs[LOLFT].u = tcs[LORGT].u = tcs[UPLFT].u = tcs[UPRGT].u = v.X();

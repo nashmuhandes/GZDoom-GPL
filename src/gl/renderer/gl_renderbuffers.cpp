@@ -55,7 +55,7 @@
 #include "doomerrors.h"
 
 CVAR(Int, gl_multisample, 1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
-CVAR(Bool, gl_renderbuffers, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+CVAR(Bool, gl_renderbuffers, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 
 //==========================================================================
 //
@@ -149,6 +149,14 @@ void FGLRenderBuffers::DeleteFrameBuffer(GLuint &handle)
 
 bool FGLRenderBuffers::Setup(int width, int height, int sceneWidth, int sceneHeight)
 {
+	if (gl_renderbuffers != BuffersActive)
+	{
+		if (BuffersActive)
+			glBindFramebuffer(GL_FRAMEBUFFER, mOutputFB);
+		BuffersActive = gl_renderbuffers;
+		GLRenderer->mShaderManager->ResetFixedColormap();
+	}
+
 	if (!IsEnabled())
 		return false;
 		
@@ -216,19 +224,10 @@ void FGLRenderBuffers::CreateScene(int width, int height, int samples)
 	ClearScene();
 
 	if (samples > 1)
-		mSceneMultisample = CreateRenderBuffer("SceneMultisample", GetHdrFormat(), samples, width, height);
+		mSceneMultisample = CreateRenderBuffer("SceneMultisample", GL_RGBA16F, samples, width, height);
 
-	if ((gl.flags & RFL_NO_DEPTHSTENCIL) != 0)
-	{
-		mSceneDepth = CreateRenderBuffer("SceneDepth", GL_DEPTH_COMPONENT24, samples, width, height);
-		mSceneStencil = CreateRenderBuffer("SceneStencil", GL_STENCIL_INDEX8, samples, width, height);
-		mSceneFB = CreateFrameBuffer("SceneFB", samples > 1 ? mSceneMultisample : mPipelineTexture[0], mSceneDepth, mSceneStencil, samples > 1);
-	}
-	else
-	{
-		mSceneDepthStencil = CreateRenderBuffer("SceneDepthStencil", GL_DEPTH24_STENCIL8, samples, width, height);
-		mSceneFB = CreateFrameBuffer("SceneFB", samples > 1 ? mSceneMultisample : mPipelineTexture[0], mSceneDepthStencil, samples > 1);
-	}
+	mSceneDepthStencil = CreateRenderBuffer("SceneDepthStencil", GL_DEPTH24_STENCIL8, samples, width, height);
+	mSceneFB = CreateFrameBuffer("SceneFB", samples > 1 ? mSceneMultisample : mPipelineTexture[0], mSceneDepthStencil, samples > 1);
 }
 
 //==========================================================================
@@ -243,7 +242,7 @@ void FGLRenderBuffers::CreatePipeline(int width, int height)
 
 	for (int i = 0; i < NumPipelineTextures; i++)
 	{
-		mPipelineTexture[i] = Create2DTexture("PipelineTexture", GetHdrFormat(), width, height);
+		mPipelineTexture[i] = Create2DTexture("PipelineTexture", GL_RGBA16F, width, height);
 		mPipelineFB[i] = CreateFrameBuffer("PipelineFB", mPipelineTexture[i]);
 	}
 }
@@ -270,25 +269,14 @@ void FGLRenderBuffers::CreateBloom(int width, int height)
 		level.Width = MAX(bloomWidth / 2, 1);
 		level.Height = MAX(bloomHeight / 2, 1);
 
-		level.VTexture = Create2DTexture("Bloom.VTexture", GetHdrFormat(), level.Width, level.Height);
-		level.HTexture = Create2DTexture("Bloom.HTexture", GetHdrFormat(), level.Width, level.Height);
+		level.VTexture = Create2DTexture("Bloom.VTexture", GL_RGBA16F, level.Width, level.Height);
+		level.HTexture = Create2DTexture("Bloom.HTexture", GL_RGBA16F, level.Width, level.Height);
 		level.VFramebuffer = CreateFrameBuffer("Bloom.VFramebuffer", level.VTexture);
 		level.HFramebuffer = CreateFrameBuffer("Bloom.HFramebuffer", level.HTexture);
 
 		bloomWidth = level.Width;
 		bloomHeight = level.Height;
 	}
-}
-
-//==========================================================================
-//
-// Fallback support for older OpenGL where RGBA16F might not be available
-//
-//==========================================================================
-
-GLuint FGLRenderBuffers::GetHdrFormat()
-{
-	return ((gl.flags & RFL_NO_RGBA16F) != 0) ? GL_RGBA8 : GL_RGBA16F;
 }
 
 //==========================================================================
@@ -559,7 +547,8 @@ void FGLRenderBuffers::BindOutputFB()
 
 bool FGLRenderBuffers::IsEnabled()
 {
-	return gl_renderbuffers && gl.glslversion != 0 && !FailedCreate;
+	return BuffersActive && !gl.legacyMode && !FailedCreate;
 }
 
 bool FGLRenderBuffers::FailedCreate = false;
+bool FGLRenderBuffers::BuffersActive = false;

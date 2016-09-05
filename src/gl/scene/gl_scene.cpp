@@ -409,7 +409,7 @@ void FGLRenderer::RenderScene(int recursion)
 
 	// this is the only geometry type on which decals can possibly appear
 	gl_drawinfo->drawlists[GLDL_PLAINWALLS].DrawDecals();
-	if (gl.lightmethod == LM_SOFTWARE)
+	if (gl.legacyMode)
 	{
 		// also process the render lists with walls and dynamic lights
         gl_drawinfo->dldrawlists[GLLDL_WALLS_PLAIN].DrawDecals();
@@ -635,12 +635,14 @@ void FGLRenderer::DrawBlend(sector_t * viewsector)
 		V_AddBlend (player->BlendR, player->BlendG, player->BlendB, player->BlendA, blend);
 	}
 
+	gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	if (blend[3]>0.0f)
 	{
-		gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		gl_RenderState.SetColor(blend[0], blend[1], blend[2], blend[3]);
 		gl_FillScreen();
 	}
+	gl_RenderState.ResetColor();
+	gl_RenderState.EnableTexture(true);
 }
 
 
@@ -676,16 +678,17 @@ void FGLRenderer::EndDrawScene(sector_t * viewsector)
 	{
 		DrawPlayerSprites (viewsector, false);
 	}
-	int cm = gl_RenderState.GetFixedColormap();
+	if (gl.legacyMode)
+	{
+		gl_RenderState.DrawColormapOverlay();
+	}
+
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 	gl_RenderState.SetSoftLightLevel(-1);
 	DrawTargeterSprites();
-	DrawBlend(viewsector);
-	if (gl.glslversion == 0.0)
+	if (!FGLRenderBuffers::IsEnabled())
 	{
-		gl_RenderState.SetFixedColormap(cm);
-		gl_RenderState.DrawColormapOverlay();
-		gl_RenderState.SetFixedColormap(CM_DEFAULT);
+		DrawBlend(viewsector);
 	}
 
 	// Restore standard rendering state
@@ -768,7 +771,7 @@ void FGLRenderer::SetFixedColormap (player_t *player)
 
 sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, float fov, float ratio, float fovratio, bool mainview, bool toscreen)
 {       
-	sector_t * retval;
+	sector_t * lviewsector;
 	mSceneClearColor[0] = 0.0f;
 	mSceneClearColor[1] = 0.0f;
 	mSceneClearColor[2] = 0.0f;
@@ -815,11 +818,11 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 	}
 
 	// 'viewsector' will not survive the rendering so it cannot be used anymore below.
-	retval = viewsector;
+	lviewsector = viewsector;
 
 	// Render (potentially) multiple views for stereo 3d
 	float viewShift[3];
-	const s3d::Stereo3DMode& stereo3dMode = s3d::Stereo3DMode::getCurrentMode();
+	const s3d::Stereo3DMode& stereo3dMode = mainview && toscreen? s3d::Stereo3DMode::getCurrentMode() : s3d::Stereo3DMode::getMonoMode();
 	stereo3dMode.SetUp();
 	for (int eye_ix = 0; eye_ix < stereo3dMode.eye_count(); ++eye_ix)
 	{
@@ -845,13 +848,19 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 		clipper.SafeAddClipRangeRealAngles(ViewAngle.BAMs() + a1, ViewAngle.BAMs() - a1);
 
 		ProcessScene(toscreen);
-		if (mainview && toscreen) EndDrawScene(retval);	// do not call this for camera textures.
-		if (mainview)
+		if (mainview && toscreen) EndDrawScene(lviewsector);	// do not call this for camera textures.
+		if (mainview && FGLRenderBuffers::IsEnabled())
 		{
-			if (FGLRenderBuffers::IsEnabled()) mBuffers->BlitSceneToTexture();
+			mBuffers->BlitSceneToTexture();
 			BloomScene();
 			TonemapScene();
+			ColormapScene();
 			LensDistortScene();
+
+			// This should be done after postprocessing, not before.
+			mBuffers->BindCurrentFB();
+			glViewport(mScreenViewport.left, mScreenViewport.top, mScreenViewport.width, mScreenViewport.height);
+			DrawBlend(lviewsector);
 		}
 		mDrawingScene2D = false;
 		eye->TearDown();
@@ -860,7 +869,7 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 
 	gl_frameCount++;	// This counter must be increased right before the interpolations are restored.
 	interpolator.RestoreInterpolations ();
-	return retval;
+	return lviewsector;
 }
 
 //-----------------------------------------------------------------------------
@@ -896,7 +905,7 @@ void FGLRenderer::RenderView (player_t* player)
 
 	P_FindParticleSubsectors ();
 
-	if (gl.lightmethod != LM_SOFTWARE) GLRenderer->mLights->Clear();
+	if (!gl.legacyMode) GLRenderer->mLights->Clear();
 
 	// NoInterpolateView should have no bearing on camera textures, but needs to be preserved for the main view below.
 	bool saved_niv = NoInterpolateView;
@@ -951,7 +960,7 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 	SetFixedColormap(player);
 	gl_RenderState.SetVertexBuffer(mVBO);
 	GLRenderer->mVBO->Reset();
-	if (gl.lightmethod != LM_SOFTWARE) GLRenderer->mLights->Clear();
+	if (!gl.legacyMode) GLRenderer->mLights->Clear();
 
 	// Check if there's some lights. If not some code can be skipped.
 	TThinkerIterator<ADynamicLight> it(STAT_DLIGHT);
@@ -963,7 +972,10 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 	gl_RenderState.SetSoftLightLevel(-1);
 	screen->Begin2D(false);
-	DrawBlend(viewsector);
+	if (!FGLRenderBuffers::IsEnabled())
+	{
+		DrawBlend(viewsector);
+	}
 	CopyToBackbuffer(&bounds, false);
 	glFlush();
 
@@ -1305,29 +1317,16 @@ void FGLInterface::RenderTextureView (FCanvasTexture *tex, AActor *Viewpoint, in
 	gl_fixedcolormap=CM_DEFAULT;
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 
-	bool usefb = gl_usefb || gltex->GetWidth() > screen->GetWidth() || gltex->GetHeight() > screen->GetHeight();
-	if (!usefb)
+	if (gl.legacyMode)
 	{
+		// In legacy mode, fail if the requested texture is too large.
+		if (gltex->GetWidth() > screen->GetWidth() || gltex->GetHeight() > screen->GetHeight()) return;
 		glFlush();
 	}
 	else
 	{
-#if defined(_WIN32) && (defined(_MSC_VER) || defined(__INTEL_COMPILER))
-		__try
-#endif
-		{
-			GLRenderer->StartOffscreen();
-			gltex->BindToFrameBuffer();
-		}
-#if defined(_WIN32) && (defined(_MSC_VER) || defined(__INTEL_COMPILER))
-		__except(1)
-		{
-			usefb = false;
-			gl_usefb = false;
-			GLRenderer->EndOffscreen();
-			glFlush();
-		}
-#endif
+		GLRenderer->StartOffscreen();
+		gltex->BindToFrameBuffer();
 	}
 
 	GL_IRECT bounds;
@@ -1337,7 +1336,7 @@ void FGLInterface::RenderTextureView (FCanvasTexture *tex, AActor *Viewpoint, in
 
 	GLRenderer->RenderViewpoint(Viewpoint, &bounds, FOV, (float)width/height, (float)width/height, false, false);
 
-	if (!usefb)
+	if (gl.legacyMode)
 	{
 		glFlush();
 		gl_RenderState.SetMaterial(gltex, 0, 0, -1, false);

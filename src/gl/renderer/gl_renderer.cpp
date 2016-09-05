@@ -67,6 +67,7 @@
 #include "gl/shaders/gl_bloomshader.h"
 #include "gl/shaders/gl_blurshader.h"
 #include "gl/shaders/gl_tonemapshader.h"
+#include "gl/shaders/gl_colormapshader.h"
 #include "gl/shaders/gl_lensshader.h"
 #include "gl/shaders/gl_presentshader.h"
 #include "gl/textures/gl_texture.h"
@@ -97,21 +98,30 @@ CVAR(Bool, gl_scale_viewport, true, 0);
 FGLRenderer::FGLRenderer(OpenGLFrameBuffer *fb) 
 {
 	framebuffer = fb;
-	mClipPortal = NULL;
-	mCurrentPortal = NULL;
+	mClipPortal = nullptr;
+	mCurrentPortal = nullptr;
 	mMirrorCount = 0;
 	mPlaneMirrorCount = 0;
 	mLightCount = 0;
 	mAngles = FRotator(0.f, 0.f, 0.f);
 	mViewVector = FVector2(0,0);
-	mVBO = NULL;
-	mSkyVBO = NULL;
+	mVBO = nullptr;
+	mSkyVBO = nullptr;
 	gl_spriteindex = 0;
-	mShaderManager = NULL;
-	gllight = glpart2 = glpart = mirrortexture = NULL;
-	mLights = NULL;
+	mShaderManager = nullptr;
+	gllight = glpart2 = glpart = mirrortexture = nullptr;
+	mLights = nullptr;
 	m2DDrawer = nullptr;
 	mTonemapPalette = nullptr;
+	mBuffers = nullptr;
+	mPresentShader = nullptr;
+	mBloomExtractShader = nullptr;
+	mBloomCombineShader = nullptr;
+	mBlurShader = nullptr;
+	mTonemapShader = nullptr;
+	mTonemapPalette = nullptr;
+	mColormapShader = nullptr;
+	mLensShader = nullptr;
 }
 
 void gl_LoadModels();
@@ -124,13 +134,14 @@ void FGLRenderer::Initialize(int width, int height)
 	mBloomCombineShader = new FBloomCombineShader();
 	mBlurShader = new FBlurShader();
 	mTonemapShader = new FTonemapShader();
+	mColormapShader = new FColormapShader();
 	mTonemapPalette = nullptr;
 	mLensShader = new FLensShader();
 	mPresentShader = new FPresentShader();
 	m2DDrawer = new F2DDrawer;
 
-	// Only needed for the core profile, because someone decided it was a good idea to remove the default VAO.
-	if (gl.buffermethod != BM_CLIENTARRAY)
+	// needed for the core profile, because someone decided it was a good idea to remove the default VAO.
+	if (!gl.legacyMode)
 	{
 		glGenVertexArrays(1, &mVAOID);
 		glBindVertexArray(mVAOID);
@@ -145,7 +156,7 @@ void FGLRenderer::Initialize(int width, int height)
 
 	mVBO = new FFlatVertexBuffer(width, height);
 	mSkyVBO = new FSkyVertexBuffer;
-	if (gl.lightmethod != LM_SOFTWARE) mLights = new FLightBuffer();
+	if (!gl.legacyMode) mLights = new FLightBuffer();
 	else mLights = NULL;
 	gl_RenderState.SetVertexBuffer(mVBO);
 	mFBID = 0;
@@ -184,6 +195,7 @@ FGLRenderer::~FGLRenderer()
 	if (mBlurShader) delete mBlurShader;
 	if (mTonemapShader) delete mTonemapShader;
 	if (mTonemapPalette) delete mTonemapPalette;
+	if (mColormapShader) delete mColormapShader;
 	if (mLensShader) delete mLensShader;
 }
 
@@ -219,6 +231,13 @@ void FGLRenderer::SetOutputViewport(GL_IRECT *bounds)
 	// Back buffer letterbox for the final output
 	int clientWidth = framebuffer->GetClientWidth();
 	int clientHeight = framebuffer->GetClientHeight();
+	if (clientWidth == 0 || clientHeight == 0)
+	{
+		// When window is minimized there may not be any client area.
+		// Pretend to the rest of the render code that we just have a very small window.
+		clientWidth = 160;
+		clientHeight = 120;
+	}
 	int screenWidth = framebuffer->GetWidth();
 	int screenHeight = framebuffer->GetHeight();
 	float scale = MIN(clientWidth / (float)screenWidth, clientHeight / (float)screenHeight);
