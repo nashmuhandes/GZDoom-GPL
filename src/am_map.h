@@ -24,7 +24,7 @@
 #define __AMMAP_H__
 
 struct event_t;
-class FArchive;
+class FSerializer;
 
 
 void AM_StaticInit();
@@ -46,7 +46,7 @@ void AM_Stop (void);
 void AM_NewResolution ();
 void AM_ToggleMap ();
 void AM_LevelInit ();
-void AM_SerializeMarkers(FArchive &arc);
+void AM_SerializeMarkers(FSerializer &arc);
 
 
 #endif

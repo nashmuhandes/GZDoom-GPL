@@ -185,7 +185,7 @@ public:
 		platRaiseAndStayLockout,
 	};
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 	bool IsLift() const { return m_Type == platDownWaitUpStay || m_Type == platDownWaitUpStayStone; }
@@ -242,7 +242,7 @@ public:
 	DPillar (sector_t *sector, EPillar type, double speed, double height,
 			 double height2, int crush, bool hexencrush);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 	void Destroy();
 
@@ -284,7 +284,7 @@ public:
 	DDoor (sector_t *sector);
 	DDoor (sector_t *sec, EVlDoor type, double speed, int delay, int lightTag, int topcountdown);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 protected:
 	EVlDoor		m_Type;
@@ -326,7 +326,7 @@ public:
 	DAnimatedDoor (sector_t *sector);
 	DAnimatedDoor (sector_t *sec, line_t *line, int speed, int delay, FDoorAnimation *anim);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 	bool StartClosing ();
@@ -406,7 +406,7 @@ public:
 	DCeiling (sector_t *sec);
 	DCeiling (sector_t *sec, double speed1, double speed2, int silent);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 protected:
@@ -509,7 +509,7 @@ public:
 
 	DFloor (sector_t *sec);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 //protected:
@@ -574,7 +574,7 @@ public:
 	DElevator (sector_t *sec);
 
 	void Destroy();
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 protected:
@@ -602,7 +602,7 @@ class DWaggleBase : public DMover
 public:
 	DWaggleBase (sector_t *sec);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 
 protected:
 	double m_OriginalDist;
@@ -613,7 +613,6 @@ protected:
 	double m_ScaleDelta;
 	int m_Ticker;
 	int m_State;
-	TObjPtr<DInterpolation> m_Interpolation;
 
 	friend bool EV_StartWaggle (int tag, line_t *line, int height, int speed,
 		int offset, int timer, bool ceiling);
