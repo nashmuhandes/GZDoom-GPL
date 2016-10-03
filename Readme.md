@@ -16,6 +16,8 @@ Licenses
   * foo_DUMB
 * **[General Public License version 2 (or later)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html "GNU General Public License v2.0 - GNU Project - Free Software Foundation")**
   * Doom
+* **[nvidia License](https://github.com/nashmuhandes/GZDoom-GPL/blob/master/docs/licenses/fxaa.txt "nvidia License")**
+  * FXAA code
 * **[GZDoom License (LGPLv3)](https://github.com/nashmuhandes/GZDoom-GPL/blob/master/docs/GZDoom%20License.md "GZDoom License")**
   * OpenGL renderer
 * **[Lesser General Public License version 2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html "GNU Lesser General Public License v2.1 - GNU Project - Free Software Foundation")**
