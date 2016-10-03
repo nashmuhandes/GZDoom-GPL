@@ -1324,6 +1324,9 @@ bool AActor::Massacre ()
 
 	if (health > 0)
 	{
+		auto f = flags;
+		auto f2 = flags2;
+
 		flags |= MF_SHOOTABLE;
 		flags2 &= ~(MF2_DORMANT|MF2_INVULNERABLE);
 		do
@@ -1332,6 +1335,12 @@ bool AActor::Massacre ()
 			P_DamageMobj (this, NULL, NULL, TELEFRAG_DAMAGE, NAME_Massacre);
 		}
 		while (health != prevhealth && health > 0);	//abort if the actor wasn't hurt.
+		if (health > 0)
+		{
+			// restore flags if this did not kill the monster.
+			flags = f;
+			flags2 = f2;
+		}
 		return health <= 0;
 	}
 	return false;
@@ -3518,7 +3527,7 @@ void AActor::Tick ()
 				sector_t *sec = node->m_sector;
 				DVector2 scrollv;
 
-				if (level.Scrolls.Size() > (sec-sectors))
+				if (level.Scrolls.Size() > unsigned(sec-sectors))
 				{
 					scrollv = level.Scrolls[sec - sectors];
 				}
@@ -6516,6 +6525,23 @@ int AActor::ApplyDamageFactor(FName damagetype, int damage) const
 	return damage;
 }
 
+
+void AActor::SetTranslation(const char *trname)
+{
+	if (*trname == 0)
+	{
+		// an empty string resets to the default
+		Translation = GetDefault()->Translation;
+		return;
+	}
+
+	int tnum = R_FindCustomTranslation(trname);
+	if (tnum >= 0)
+	{
+		Translation = tnum;
+	}
+	// silently ignore if the name does not exist, this would create some insane message spam otherwise.
+}
 
 //----------------------------------------------------------------------------
 //

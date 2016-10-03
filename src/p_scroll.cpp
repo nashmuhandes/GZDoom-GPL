@@ -260,6 +260,7 @@ DScroller::DScroller (EScroll type, double dx, double dy,
 	m_Accel = accel;
 	m_Parts = scrollpos;
 	m_vdx = m_vdy = 0;
+	m_LastHeight = 0;
 	if ((m_Control = control) != -1)
 		m_LastHeight =
 			sectors[control].CenterFloor () + sectors[control].CenterCeiling ();
@@ -343,6 +344,7 @@ DScroller::DScroller (double dx, double dy, const line_t *l,
 	m_vdx = m_vdy = 0;
 	m_Accel = accel;
 	m_Parts = scrollpos;
+	m_LastHeight = 0;
 	if ((m_Control = control) != -1)
 		m_LastHeight = sectors[control].CenterFloor() + sectors[control].CenterCeiling();
 	m_Affectee = int(l->sidedef[0] - sides);
