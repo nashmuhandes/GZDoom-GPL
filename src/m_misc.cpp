@@ -124,7 +124,8 @@ int M_ReadFile (char const *name, BYTE **buffer)
 	handle = open (name, O_RDONLY | O_BINARY, 0666);
 	if (handle == -1)
 		I_Error ("Couldn't read file %s", name);
-	if (fstat (handle,&fileinfo) == -1)
+	// [BL] Use stat instead of fstat for v140_xp hack
+	if (stat (name,&fileinfo) == -1)
 		I_Error ("Couldn't read file %s", name);
 	length = fileinfo.st_size;
 	buf = new BYTE[length];
@@ -150,7 +151,8 @@ int M_ReadFileMalloc (char const *name, BYTE **buffer)
 	handle = open (name, O_RDONLY | O_BINARY, 0666);
 	if (handle == -1)
 		I_Error ("Couldn't read file %s", name);
-	if (fstat (handle,&fileinfo) == -1)
+	// [BL] Use stat instead of fstat for v140_xp hack
+	if (stat (name,&fileinfo) == -1)
 		I_Error ("Couldn't read file %s", name);
 	length = fileinfo.st_size;
 	buf = (BYTE*)M_Malloc(length);
