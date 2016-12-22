@@ -42,6 +42,14 @@ OptionValue "TonemapModes"
 	5, "$OPTVAL_PALETTE"
 }
 
+OptionValue "SSAOModes"
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_LOW"
+	2, "$OPTVAL_MEDIUM"
+	3, "$OPTVAL_HIGH"
+}
+
 OptionValue "FXAAQuality"
 {
 	0, "$OPTVAL_OFF"
@@ -231,7 +239,6 @@ OptionMenu "GLPrefOptions"
 	Option "$GLPREFMNU_SPRBILLBOARD",			gl_billboard_mode,				"BillboardModes"
 	Option "$GLPREFMNU_SPRBILLFACECAMERA",		gl_billboard_faces_camera,		"OnOff"
 	Option "$GLPREFMNU_PARTICLESTYLE",			gl_particles_style,				"Particles"
-	Slider "$GLPREFMNU_AMBLIGHT",				gl_light_ambient,				1.0, 255.0, 5.0
 	Option "$GLPREFMNU_RENDERQUALITY",			gl_render_precise,				"Precision"
 	Option "$GLPREFMNU_VRMODE",					vr_mode, 						"VRMode"
 	Option "$GLPREFMNU_VRQUADSTEREO",			vr_enable_quadbuffered,			"OnOff"
@@ -239,5 +246,7 @@ OptionMenu "GLPrefOptions"
 	Option "$GLPREFMNU_TONEMAP", 				gl_tonemap,						"TonemapModes"
 	Option "$GLPREFMNU_BLOOM",		 			gl_bloom,						"OnOff"
 	Option "$GLPREFMNU_LENS",		 			gl_lens,						"OnOff"
+	Option "$GLPREFMNU_SSAO",		 			gl_ssao,						"SSAOModes"
+	Slider "$GLPREFMNU_SSAO_PORTALS",			gl_ssao_portals,				0.0, 4.0, 1.0, 0
 	Option "$GLPREFMNU_FXAA",		 			gl_fxaa,						"FXAAQuality"
 }

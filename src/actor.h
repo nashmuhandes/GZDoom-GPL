@@ -386,6 +386,8 @@ enum ActorFlag7
 	MF7_USEKILLSCRIPTS	= 0x00800000,	// [JM] Use "KILL" Script on death if not forced by GameInfo.
 	MF7_NOKILLSCRIPTS	= 0x01000000,	// [JM] No "KILL" Script on death whatsoever, even if forced by GameInfo.
 	MF7_SPRITEANGLE		= 0x02000000,	// [MC] Utilize the SpriteAngle property and lock the rotation to the degrees specified.
+	MF7_SMASHABLE		= 0x04000000,	// dies if hitting the floor.
+	MF7_NOSHIELDREFLECT = 0x08000000,	// will not be reflected by shields.
 };
 
 // --- mobj.renderflags ---
@@ -584,11 +586,13 @@ public:
 	AActor () throw();
 	AActor (const AActor &other) throw();
 	AActor &operator= (const AActor &other);
-	void Destroy ();
 	~AActor ();
 
-	void Serialize(FSerializer &arc);
-	void PostSerialize();
+	virtual void Destroy() override;
+	virtual void Serialize(FSerializer &arc) override;
+	virtual void PostSerialize() override;
+	virtual void PostBeginPlay() override;		// Called immediately before the actor's first tick
+	virtual void Tick() override;
 
 	static AActor *StaticSpawn (PClassActor *type, const DVector3 &pos, replace_t allowreplacement, bool SpawningMapThing = false);
 
@@ -612,43 +616,50 @@ public:
 	bool CheckNoDelay();
 
 	virtual void BeginPlay();			// Called immediately after the actor is created
-	virtual void PostBeginPlay();		// Called immediately before the actor's first tick
-	virtual void LevelSpawned();		// Called after BeginPlay if this actor was spawned by the world
+	void CallBeginPlay();
+
+	void LevelSpawned();				// Called after BeginPlay if this actor was spawned by the world
 	virtual void HandleSpawnFlags();	// Translates SpawnFlags into in-game flags.
 
 	virtual void MarkPrecacheSounds() const;	// Marks sounds used by this actor for precaching.
 
 	virtual void Activate (AActor *activator);
-	virtual void Deactivate (AActor *activator);
+	void CallActivate(AActor *activator);
 
-	virtual void Tick ();
+	virtual void Deactivate(AActor *activator);
+	void CallDeactivate(AActor *activator);
 
 	// Called when actor dies
 	virtual void Die (AActor *source, AActor *inflictor, int dmgflags = 0);
+	void CallDie(AActor *source, AActor *inflictor, int dmgflags = 0);
 
 	// Perform some special damage action. Returns the amount of damage to do.
 	// Returning -1 signals the damage routine to exit immediately
 	virtual int DoSpecialDamage (AActor *target, int damage, FName damagetype);
+	int CallDoSpecialDamage(AActor *target, int damage, FName damagetype);
 
 	// Like DoSpecialDamage, but called on the actor receiving the damage.
 	virtual int TakeSpecialDamage (AActor *inflictor, AActor *source, int damage, FName damagetype);
+	int CallTakeSpecialDamage(AActor *inflictor, AActor *source, int damage, FName damagetype);
+
+	// Actor had MF_SKULLFLY set and rammed into something
+	// Returns false to stop moving and true to keep moving
+	virtual bool Slam(AActor *victim);
+	bool CallSlam(AActor *victim);
+
+	// Something just touched this actor.
+	virtual void Touch(AActor *toucher);
+	void CallTouch(AActor *toucher);
 
 	// Centaurs and ettins squeal when electrocuted, poisoned, or "holy"-ed
 	// Made a metadata property so no longer virtual
 	void Howl ();
 
-	// Actor just hit the floor
-	virtual void HitFloor ();
-
 	// plays bouncing sound
 	void PlayBounceSound(bool onfloor);
 
 	// Called when an actor with MF_MISSILE and MF2_FLOORBOUNCE hits the floor
-	virtual bool FloorBounceMissile (secplane_t &plane);
-
-	// Called when an actor is to be reflected by a disc of repulsion.
-	// Returns true to continue normal blast processing.
-	virtual bool SpecialBlastHandling (AActor *source, double strength);
+	bool FloorBounceMissile (secplane_t &plane);
 
 	// Called by RoughBlockCheck
 	bool IsOkayToAttack (AActor *target);
@@ -656,27 +667,28 @@ public:
 	// Plays the actor's ActiveSound if its voice isn't already making noise.
 	void PlayActiveSound ();
 
-	// Actor had MF_SKULLFLY set and rammed into something
-	// Returns false to stop moving and true to keep moving
-	virtual bool Slam (AActor *victim);
+	void RestoreSpecialPosition();
 
 	// Called by PIT_CheckThing() and needed for some Hexen things.
 	// Returns -1 for normal behavior, 0 to return false, and 1 to return true.
 	// I'm not sure I like it this way, but it will do for now.
-	virtual int SpecialMissileHit (AActor *victim);
+	// (virtual on the script side only)
+	int SpecialMissileHit (AActor *victim);
 
 	// Returns true if it's okay to switch target to "other" after being attacked by it.
-	virtual bool OkayToSwitchTarget (AActor *other);
+	bool OkayToSwitchTarget (AActor *other);
 
-	// Something just touched this actor.
-	virtual void Touch (AActor *toucher);
+	// Note: Although some of the inventory functions are virtual, this
+	// is not exposed to scripts, as the only class overriding them is 
+	// APlayerPawn for some specific handling for players. None of this
+	// should ever be overridden by custom classes.
 
 	// Adds the item to this actor's inventory and sets its Owner.
 	virtual void AddInventory (AInventory *item);
 
 	// Give an item to the actor and pick it up.
 	// Returns true if the item pickup succeeded.
-	virtual bool GiveInventory (PClassInventory *type, int amount, bool givecheat = false);
+	bool GiveInventory (PClassInventory *type, int amount, bool givecheat = false);
 
 	// Removes the item from the inventory list.
 	virtual void RemoveInventory (AInventory *item);
@@ -690,7 +702,7 @@ public:
 	virtual bool UseInventory (AInventory *item);
 
 	// Tosses an item out of the inventory.
-	virtual AInventory *DropInventory (AInventory *item);
+	AInventory *DropInventory (AInventory *item);
 
 	// Removes all items from the inventory.
 	void ClearInventory();
@@ -732,7 +744,7 @@ public:
 	void ObtainInventory (AActor *other);
 
 	// Die. Now.
-	virtual bool Massacre ();
+	bool Massacre ();
 
 	// Transforms the actor into a finely-ground paste
 	virtual bool Grind(bool items);
@@ -754,10 +766,10 @@ public:
 	DVector3 GetPortalTransition(double byoffset, sector_t **pSec = NULL);
 
 	// What species am I?
-	virtual FName GetSpecies();
+	FName GetSpecies();
 
 	// set translation
-	void SetTranslation(const char *trname);
+	void SetTranslation(FName trname);
 
 	double GetBobOffset(double ticfrac = 0) const
 	{
@@ -957,7 +969,7 @@ public:
 	{
 		SetOrigin(Pos() + vel, true);
 	}
-	virtual void SetOrigin(double x, double y, double z, bool moving);
+	void SetOrigin(double x, double y, double z, bool moving);
 	void SetOrigin(const DVector3 & npos, bool moving)
 	{
 		SetOrigin(npos.X, npos.Y, npos.Z, moving);
@@ -969,7 +981,7 @@ public:
 	bool IsInsideVisibleAngles() const;
 
 	// Calculate amount of missile damage
-	virtual int GetMissileDamage(int mask, int add);
+	int GetMissileDamage(int mask, int add);
 
 	bool CanSeek(AActor *target) const;
 
@@ -1367,7 +1379,7 @@ public:
 		Vel.Y = speed * Angles.Yaw.Sin();
 	}
 
-	void VelFromAngle(DAngle angle, double speed)
+	void VelFromAngle(double speed, DAngle angle)
 	{
 		Vel.X = speed * angle.Cos();
 		Vel.Y = speed * angle.Sin();
@@ -1415,6 +1427,7 @@ public:
 	}
 
 	int ApplyDamageFactor(FName damagetype, int damage) const;
+	int GetModifiedDamage(FName damagetype, int damage, bool passive);
 
 
 	// begin of GZDoom specific additions
@@ -1448,6 +1461,10 @@ public:
 			base = base->inext;
 
 		return base;
+	}
+	void Reinit()
+	{
+		base = nullptr;
 	}
 private:
 	AActor *base;
@@ -1532,6 +1549,7 @@ struct FTranslatedLineTarget
 {
 	AActor *linetarget;
 	DAngle angleFromSource;
+	DAngle attackAngleFromSource;
 	bool unlinked;	// found by a trace that went through an unlinked portal.
 };
 

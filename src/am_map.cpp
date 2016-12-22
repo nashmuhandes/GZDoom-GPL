@@ -474,6 +474,11 @@ static AMColorset AMMod;
 static AMColorset AMModOverlay;
 
 
+void AM_ClearColorsets()
+{
+	AMModOverlay.defined = false;
+	AMMod.defined = false;
+}
 //=============================================================================
 //
 //
@@ -2964,8 +2969,8 @@ void AM_drawAuthorMarkers ()
 	// [RH] Draw any actors derived from AMapMarker on the automap.
 	// If args[0] is 0, then the actor's sprite is drawn at its own location.
 	// Otherwise, its sprite is drawn at the location of any actors whose TIDs match args[0].
-	TThinkerIterator<AMapMarker> it (STAT_MAPMARKER);
-	AMapMarker *mark;
+	TThinkerIterator<AActor> it ("MapMarker", STAT_MAPMARKER);
+	AActor *mark;
 
 	while ((mark = it.Next()) != NULL)
 	{

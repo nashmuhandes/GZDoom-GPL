@@ -65,6 +65,7 @@
 #include "g_level.h"
 #include "d_event.h"
 #include "d_player.h"
+#include "gstrings.h"
 #include "c_consolebuffer.h"
 
 #include "gi.h"
@@ -1522,8 +1523,6 @@ static bool C_HandleKey (event_t *ev, FCommandBuffer &buffer)
 
 			buffer.Text.StripLeftRight();
 			Printf(127, TEXTCOLOR_WHITE "]%s\n", buffer.Text.GetChars());
-			AddCommandString(buffer.Text.LockBuffer());
-			buffer.Text.UnlockBuffer();
 
 			if (buffer.Text.Len() == 0)
 			{
@@ -1567,7 +1566,21 @@ static bool C_HandleKey (event_t *ev, FCommandBuffer &buffer)
 				}
 			}
 			HistPos = NULL;
-			buffer.SetString("");
+			{
+				// Work with a copy of command to avoid side effects caused by
+				// exception raised during execution, like with 'error' CCMD.
+				// It's problematic to maintain FString's lock symmetry.
+				static TArray<char> command;
+				const size_t length = buffer.Text.Len();
+
+				command.Resize(length + 1);
+				memcpy(&command[0], buffer.Text.GetChars(), length);
+				command[length] = '\0';
+
+				buffer.SetString("");
+
+				AddCommandString(&command[0]);
+			}
 			TabbedLast = false;
 			TabbedList = false;
 			break;
@@ -1727,6 +1740,20 @@ void C_MidPrintBold (FFont *font, const char *msg)
 	{
 		StatusBar->DetachMessage (MAKE_ID('C','N','T','R'));
 	}
+}
+
+DEFINE_ACTION_FUNCTION(DObject, C_MidPrint)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(font);
+	PARAM_STRING(text);
+	PARAM_BOOL_DEF(bold);
+
+	FFont *fnt = FFont::FindFont(font);
+	const char *txt = text[0] == '$'? GStrings(&text[1]) : text.GetChars();
+	if (!bold) C_MidPrint(fnt, txt);
+	else C_MidPrintBold(fnt, txt);
+	return 0;
 }
 
 /****** Tab completion code ******/

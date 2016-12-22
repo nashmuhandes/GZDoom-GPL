@@ -32,6 +32,7 @@
 
 #include "p_lnspec.h"
 #include "doomstat.h"
+#include "p_maputl.h"
 
 // State.
 #include "r_state.h"
@@ -174,7 +175,7 @@ private:
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DLighting)
+IMPLEMENT_CLASS(DLighting, false, false)
 
 DLighting::DLighting ()
 {
@@ -192,7 +193,7 @@ DLighting::DLighting (sector_t *sector)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DFireFlicker)
+IMPLEMENT_CLASS(DFireFlicker, false, false)
 
 DFireFlicker::DFireFlicker ()
 {
@@ -259,7 +260,7 @@ DFireFlicker::DFireFlicker (sector_t *sector, int upper, int lower)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DFlicker)
+IMPLEMENT_CLASS(DFlicker, false, false)
 
 DFlicker::DFlicker ()
 {
@@ -335,7 +336,7 @@ void EV_StartLightFlickering (int tag, int upper, int lower)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DLightFlash)
+IMPLEMENT_CLASS(DLightFlash, false, false)
 
 DLightFlash::DLightFlash ()
 {
@@ -410,7 +411,7 @@ DLightFlash::DLightFlash (sector_t *sector, int min, int max)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DStrobe)
+IMPLEMENT_CLASS(DStrobe, false, false)
 
 DStrobe::DStrobe ()
 {
@@ -668,7 +669,7 @@ void EV_LightChange (int tag, int value)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DGlow)
+IMPLEMENT_CLASS(DGlow, false, false)
 
 DGlow::DGlow ()
 {
@@ -737,7 +738,7 @@ DGlow::DGlow (sector_t *sector)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DGlow2)
+IMPLEMENT_CLASS(DGlow2, false, false)
 
 DGlow2::DGlow2 ()
 {
@@ -870,7 +871,7 @@ void EV_StartLightFading (int tag, int value, int tics)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DPhased)
+IMPLEMENT_CLASS(DPhased, false, false)
 
 DPhased::DPhased ()
 {
@@ -915,7 +916,7 @@ void DPhased::Tick ()
 
 int DPhased::PhaseHelper (sector_t *sector, int index, int light, sector_t *prev)
 {
-	if (!sector)
+	if (!sector || sector->validcount == validcount)
 	{
 		return index;
 	}
@@ -923,6 +924,7 @@ int DPhased::PhaseHelper (sector_t *sector, int index, int light, sector_t *prev
 	{
 		DPhased *l;
 		int baselevel = sector->lightlevel ? sector->lightlevel : light;
+		sector->validcount = validcount;
 
 		if (index == 0)
 		{
@@ -959,6 +961,7 @@ DPhased::DPhased (sector_t *sector, int baselevel)
 DPhased::DPhased (sector_t *sector)
 	: DLighting (sector)
 {
+	validcount++;
 	PhaseHelper (sector, 0, 0, NULL);
 }
 

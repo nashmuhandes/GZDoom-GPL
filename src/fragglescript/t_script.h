@@ -41,11 +41,21 @@
 #include "p_lnspec.h"
 #include "m_fixed.h"
 #include "actor.h"
+#include "doomerrors.h"
 
 #ifdef _MSC_VER
 // This pragma saves 8kb of wasted code.
 #pragma pointers_to_members( full_generality, single_inheritance )
 #endif
+
+
+class CFraggleScriptError : public CDoomError
+{
+public:
+	CFraggleScriptError() : CDoomError() {}
+	CFraggleScriptError(const char *message) : CDoomError(message) {}
+};
+
 
 class DRunningScript;
 
@@ -337,7 +347,7 @@ public:
 
 	DFsScript();
 	~DFsScript();
-	void Destroy();
+	void Destroy() override;
 	void Serialize(FSerializer &ar);
 
 	DFsVariable *NewVariable(const char *name, int vtype);
@@ -652,7 +662,7 @@ class DRunningScript : public DObject
 
 public:
 	DRunningScript(AActor *trigger=NULL, DFsScript *owner = NULL, int index = 0) ;
-	void Destroy();
+	void Destroy() override;
 	void Serialize(FSerializer &arc);
 
 	TObjPtr<DFsScript> script;
@@ -687,7 +697,7 @@ public:
 	bool nocheckposition;
 
 	DFraggleThinker();
-	void Destroy();
+	void Destroy() override;
 
 
 	void Serialize(FSerializer & arc);
@@ -708,7 +718,7 @@ public:
 
 #include "t_fs.h"
 
-void script_error(const char *s, ...);
+void script_error(const char *s, ...) GCCPRINTF(1,2);
 void FS_EmulateCmd(char * string);
 
 extern AActor *trigger_obj;

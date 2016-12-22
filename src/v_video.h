@@ -462,6 +462,14 @@ union ColorTable32k
 };
 extern "C" ColorTable32k RGB32k;
 
+// [SP] RGB666 support
+union ColorTable256k
+{
+	BYTE RGB[64][64][64];
+	BYTE All[64 *64 *64];
+};
+extern "C" ColorTable256k RGB256k;
+
 // Col2RGB8 is a pre-multiplied palette for color lookup. It is stored in a
 // special R10B10G10 format for efficient blending computation.
 //		--RRRRRrrr--BBBBBbbb--GGGGGggg--   at level 64
@@ -497,15 +505,17 @@ void V_Shutdown ();
 
 void V_MarkRect (int x, int y, int width, int height);
 
+class FScanner;
 // Returns the closest color to the one desired. String
 // should be of the form "rr gg bb".
-int V_GetColorFromString (const DWORD *palette, const char *colorstring);
+int V_GetColorFromString (const DWORD *palette, const char *colorstring, FScriptPosition *sc = nullptr);
 // Scans through the X11R6RGB lump for a matching color
 // and returns a color string suitable for V_GetColorFromString.
-FString V_GetColorStringByName (const char *name);
+FString V_GetColorStringByName (const char *name, FScriptPosition *sc = nullptr);
 
 // Tries to get color by name, then by string
-int V_GetColor (const DWORD *palette, const char *str);
+int V_GetColor (const DWORD *palette, const char *str, FScriptPosition *sc = nullptr);
+int V_GetColor(const DWORD *palette, FScanner &sc);
 void V_DrawFrame (int left, int top, int width, int height);
 
 // If the view size is not full screen, draws a border around it.
@@ -513,10 +523,6 @@ void V_DrawBorder (int x1, int y1, int x2, int y2);
 void V_RefreshViewBorder ();
 
 void V_SetBorderNeedRefresh();
-
-#if defined(X86_ASM) || defined(X64_ASM)
-extern "C" void ASM_PatchPitch (void);
-#endif
 
 int CheckRatio (int width, int height, int *trueratio=NULL);
 static inline int CheckRatio (double width, double height) { return CheckRatio(int(width), int(height)); }

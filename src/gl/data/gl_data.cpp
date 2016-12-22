@@ -39,6 +39,8 @@
 #include "w_wad.h"
 #include "gi.h"
 #include "g_level.h"
+#include "doomstat.h"
+#include "d_player.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/renderer/gl_renderer.h"
@@ -57,11 +59,19 @@ long gl_frameCount;
 
 EXTERN_CVAR(Int, gl_lightmode)
 EXTERN_CVAR(Bool, gl_brightfog)
+EXTERN_CVAR(Bool, gl_lightadditivesurfaces)
+EXTERN_CVAR(Bool, gl_attenuate)
+
 
 CUSTOM_CVAR(Float, maxviewpitch, 90.f, CVAR_ARCHIVE|CVAR_SERVERINFO)
 {
 	if (self>90.f) self=90.f;
 	else if (self<-90.f) self=-90.f;
+	if (usergame)
+	{
+		// [SP] Update pitch limits to the netgame/gamesim.
+		players[consoleplayer].SendPitchLimits();
+	}
 }
 
 CUSTOM_CVAR(Bool, gl_notexturefill, false, 0)
@@ -85,29 +95,30 @@ void gl_CreateSections();
 
 void AdjustSpriteOffsets()
 {
-	static bool done=false;
-	char name[30];
-
-	if (done) return;
-	done=true;
-
-	mysnprintf(name, countof(name), "sprofs/%s.sprofs", GameNames[gameinfo.gametype]);
-	int lump = Wads.CheckNumForFullName(name);
-	if (lump>=0)
+	int lump, lastlump = 0;
+	while ((lump = Wads.FindLump("SPROFS", &lastlump, false)) != -1)
 	{
 		FScanner sc;
 		sc.OpenLumpNum(lump);
+		sc.SetCMode(true);
 		GLRenderer->FlushTextures();
 		int ofslumpno = Wads.GetLumpFile(lump);
 		while (sc.GetString())
 		{
 			int x,y;
+			bool iwadonly = false;
 			FTextureID texno = TexMan.CheckForTexture(sc.String, FTexture::TEX_Sprite);
-			sc.GetNumber();
+			sc.MustGetStringName(",");
+			sc.MustGetNumber();
 			x=sc.Number;
-			sc.GetNumber();
+			sc.MustGetStringName(",");
+			sc.MustGetNumber();
 			y=sc.Number;
-
+			if (sc.CheckString(","))
+			{
+				sc.MustGetString();
+				if (sc.Compare("iwad")) iwadonly = true;
+			}
 			if (texno.isValid())
 			{
 				FTexture * tex = TexMan[texno];
@@ -117,7 +128,7 @@ void AdjustSpriteOffsets()
 				if (lumpnum >= 0 && lumpnum < Wads.GetNumLumps())
 				{
 					int wadno = Wads.GetLumpFile(lumpnum);
-					if (wadno==FWadCollection::IWAD_FILENUM || wadno == ofslumpno)
+					if ((iwadonly && wadno==FWadCollection::IWAD_FILENUM) || (!iwadonly && wadno == ofslumpno))
 					{
 						tex->LeftOffset=x;
 						tex->TopOffset=y;
@@ -198,11 +209,13 @@ struct FGLROptions : public FOptionalMapinfoData
 		skyfog = 0;
 		brightfog = false;
 		lightmode = -1;
+		attenuate = -1;
 		nocoloredspritelighting = -1;
 		notexturefill = -1;
 		skyrotatevector = FVector3(0,0,1);
 		skyrotatevector2 = FVector3(0,0,1);
 		pixelstretch = 1.2f;
+		lightadditivesurfaces = false;
 	}
 	virtual FOptionalMapinfoData *Clone() const
 	{
@@ -212,11 +225,13 @@ struct FGLROptions : public FOptionalMapinfoData
 		newopt->outsidefogdensity = outsidefogdensity;
 		newopt->skyfog = skyfog;
 		newopt->lightmode = lightmode;
+		newopt->attenuate = attenuate;
 		newopt->nocoloredspritelighting = nocoloredspritelighting;
 		newopt->notexturefill = notexturefill;
 		newopt->skyrotatevector = skyrotatevector;
 		newopt->skyrotatevector2 = skyrotatevector2;
 		newopt->pixelstretch = pixelstretch;
+		newopt->lightadditivesurfaces = lightadditivesurfaces;
 		return newopt;
 	}
 	int			fogdensity;
@@ -224,8 +239,10 @@ struct FGLROptions : public FOptionalMapinfoData
 	int			skyfog;
 	int			lightmode;
 	int			brightfog;
-	SBYTE		nocoloredspritelighting;
-	SBYTE		notexturefill;
+	int8_t		attenuate;
+	int8_t		lightadditivesurfaces;
+	int8_t		nocoloredspritelighting;
+	int8_t		notexturefill;
 	FVector3	skyrotatevector;
 	FVector3	skyrotatevector2;
 	float		pixelstretch;
@@ -299,6 +316,34 @@ DEFINE_MAP_OPTION(notexturefill, false)
 	}
 }
 
+DEFINE_MAP_OPTION(lightadditivesurfaces, false)
+{
+	FGLROptions *opt = info->GetOptData<FGLROptions>("gl_renderer");
+	if (parse.CheckAssign())
+	{
+		parse.sc.MustGetNumber();
+		opt->lightadditivesurfaces = !!parse.sc.Number;
+	}
+	else
+	{
+		opt->lightadditivesurfaces = true;
+	}
+}
+
+DEFINE_MAP_OPTION(attenuate, false)
+{
+	FGLROptions *opt = info->GetOptData<FGLROptions>("gl_renderer");
+	if (parse.CheckAssign())
+	{
+		parse.sc.MustGetNumber();
+		opt->attenuate = !!parse.sc.Number;
+	}
+	else
+	{
+		opt->attenuate = true;
+	}
+}
+
 DEFINE_MAP_OPTION(skyrotate, false)
 {
 	FGLROptions *opt = info->GetOptData<FGLROptions>("gl_renderer");
@@ -345,6 +390,22 @@ bool IsLightmodeValid()
 	return (glset.map_lightmode >= 0 && glset.map_lightmode <= 4) || glset.map_lightmode == 8;
 }
 
+static void ResetOpts()
+{
+	if (!IsLightmodeValid()) glset.lightmode = gl_lightmode;
+	else glset.lightmode = glset.map_lightmode;
+	if (glset.map_nocoloredspritelighting == -1) glset.nocoloredspritelighting = gl_nocoloredspritelighting;
+	else glset.nocoloredspritelighting = !!glset.map_nocoloredspritelighting;
+	if (glset.map_notexturefill == -1) glset.notexturefill = gl_notexturefill;
+	else glset.notexturefill = !!glset.map_notexturefill;
+	if (glset.map_brightfog == -1) glset.brightfog = gl_brightfog;
+	else glset.brightfog = !!glset.map_brightfog;
+	if (glset.map_lightadditivesurfaces == -1) glset.lightadditivesurfaces = gl_lightadditivesurfaces;
+	else glset.lightadditivesurfaces = !!glset.map_lightadditivesurfaces;
+	if (glset.map_attenuate == -1) glset.attenuate = gl_attenuate;
+	else glset.attenuate = !!glset.map_attenuate;
+}
+
 void InitGLRMapinfoData()
 {
 	FGLROptions *opt = level.info->GetOptData<FGLROptions>("gl_renderer", false);
@@ -353,6 +414,8 @@ void InitGLRMapinfoData()
 	{
 		gl_SetFogParams(opt->fogdensity, level.info->outsidefog, opt->outsidefogdensity, opt->skyfog);
 		glset.map_lightmode = opt->lightmode;
+		glset.map_lightadditivesurfaces = opt->lightadditivesurfaces;
+		glset.map_attenuate = opt->attenuate;
 		glset.map_brightfog = opt->brightfog;
 		glset.map_nocoloredspritelighting = opt->nocoloredspritelighting;
 		glset.map_notexturefill = opt->notexturefill;
@@ -364,34 +427,20 @@ void InitGLRMapinfoData()
 	{
 		gl_SetFogParams(0, level.info->outsidefog, 0, 0);
 		glset.map_lightmode = -1;
+		glset.map_lightadditivesurfaces = -1;
 		glset.map_brightfog = -1;
+		glset.map_attenuate = -1;
 		glset.map_nocoloredspritelighting = -1;
 		glset.map_notexturefill = -1;
-		glset.skyrotatevector = FVector3(0,0,1);
-		glset.skyrotatevector2 = FVector3(0,0,1);
+		glset.skyrotatevector = FVector3(0, 0, 1);
+		glset.skyrotatevector2 = FVector3(0, 0, 1);
 		glset.pixelstretch = 1.2f;
 	}
-
-	if (!IsLightmodeValid()) glset.lightmode = gl_lightmode;
-	else glset.lightmode = glset.map_lightmode;
-	if (glset.map_nocoloredspritelighting == -1) glset.nocoloredspritelighting = gl_nocoloredspritelighting;
-	else glset.nocoloredspritelighting = !!glset.map_nocoloredspritelighting;
-	if (glset.map_notexturefill == -1) glset.notexturefill = gl_notexturefill;
-	else glset.notexturefill = !!glset.map_notexturefill;
-	if (glset.map_brightfog == -1) glset.brightfog = gl_brightfog;
-	else glset.brightfog = !!glset.map_brightfog;
+	ResetOpts();
 }
-
 CCMD(gl_resetmap)
 {
-	if (!IsLightmodeValid()) glset.lightmode = gl_lightmode;
-	else glset.lightmode = glset.map_lightmode;
-	if (glset.map_nocoloredspritelighting == -1) glset.nocoloredspritelighting = gl_nocoloredspritelighting;
-	else glset.nocoloredspritelighting = !!glset.map_nocoloredspritelighting;
-	if (glset.map_notexturefill == -1) glset.notexturefill = gl_notexturefill;
-	else glset.notexturefill = !!glset.map_notexturefill;
-	if (glset.map_brightfog == -1) glset.brightfog = gl_brightfog;
-	else glset.brightfog = !!glset.map_brightfog;
+	ResetOpts();
 }
 
 

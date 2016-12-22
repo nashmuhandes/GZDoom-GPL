@@ -49,57 +49,6 @@
 class PClassActor;
 typedef TMap<int, PClassActor *> FClassMap;
 
-// Since this file is included by everything, it seems an appropriate place
-// to check the NOASM/USEASM macros.
-
-// There are three assembly-related macros:
-//
-//		NOASM	- Assembly code is disabled
-//		X86_ASM	- Using ia32 assembly code
-//		X64_ASM	- Using amd64 assembly code
-//
-// Note that these relate only to using the pure assembly code. Inline
-// assembly may still be used without respect to these macros, as
-// deemed appropriate.
-
-#ifndef NOASM
-// Select the appropriate type of assembly code to use.
-
-#if defined(_M_IX86) || defined(__i386__)
-
-#define X86_ASM
-#ifdef X64_ASM
-#undef X64_ASM
-#endif
-
-#elif defined(_M_X64) || defined(__amd64__)
-
-#define X64_ASM
-#ifdef X86_ASM
-#undef X86_ASM
-#endif
-
-#else
-
-#define NOASM
-
-#endif
-
-#endif
-
-#ifdef NOASM
-// Ensure no assembly macros are defined if NOASM is defined.
-
-#ifdef X86_ASM
-#undef X86_ASM
-#endif
-
-#ifdef X64_ASM
-#undef X64_ASM
-#endif
-
-#endif
-
 
 #if defined(_MSC_VER)
 #define NOVTABLE __declspec(novtable)
@@ -265,12 +214,14 @@ char ( &_ArraySizeHelper( T (&array)[N] ))[N];
 #ifdef __MACH__
 #define SECTION_AREG "__DATA,areg"
 #define SECTION_CREG "__DATA,creg"
+#define SECTION_FREG "__DATA,freg"
 #define SECTION_GREG "__DATA,greg"
 #define SECTION_MREG "__DATA,mreg"
 #define SECTION_YREG "__DATA,yreg"
 #else
 #define SECTION_AREG "areg"
 #define SECTION_CREG "creg"
+#define SECTION_FREG "freg"
 #define SECTION_GREG "greg"
 #define SECTION_MREG "mreg"
 #define SECTION_YREG "yreg"

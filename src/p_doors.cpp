@@ -46,7 +46,7 @@
 //
 //============================================================================
 
-IMPLEMENT_CLASS (DDoor)
+IMPLEMENT_CLASS(DDoor, false, false)
 
 DDoor::DDoor ()
 {
@@ -514,7 +514,7 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 //
 //============================================================================
 
-IMPLEMENT_CLASS (DAnimatedDoor)
+IMPLEMENT_CLASS(DAnimatedDoor, false, false)
 
 DAnimatedDoor::DAnimatedDoor ()
 {

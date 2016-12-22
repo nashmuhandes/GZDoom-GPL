@@ -12,11 +12,13 @@
 #include "m_swap.h"
 #include "templates.h"
 #include "a_keys.h"
-#include "a_strifeglobal.h"
+#include "a_armor.h"
+#include "a_ammo.h"
 #include "gi.h"
 #include "g_level.h"
 #include "colormatcher.h"
 #include "v_palette.h"
+#include "cmdlib.h"
 
 // Number of tics to move the popscreen up and down.
 #define POP_TIME (TICRATE/8)
@@ -172,14 +174,10 @@ void FHealthBar::MakeTexture ()
 
 void FHealthBar::FillBar (int min, int max, BYTE light, BYTE dark)
 {
-#ifdef __BIG_ENDIAN__
-	SDWORD fill = (light << 24) | (dark << 16) | (light << 8) | dark;
-#else
-	SDWORD fill = light | (dark << 8) | (light << 16) | (dark << 24);
-#endif
-	if (max > min)
+	for (int i = min*2; i < max*2; i++)
 	{
-		clearbuf (&Pixels[min*4], max - min, fill);
+		Pixels[i * 2] = light;
+		Pixels[i * 2 + 1] = dark;
 	}
 }
 
@@ -438,7 +436,7 @@ private:
 		}
 
 		// Sigil
-		item = CPlayer->mo->FindInventory<ASigil>();
+		item = CPlayer->mo->FindInventory(PClass::FindActor(NAME_Sigil));
 		if (item != NULL)
 		{
 			DrawImage (TexMan(item->Icon), 253, 7);
@@ -850,7 +848,7 @@ private:
 	double ItemFlash;
 };
 
-IMPLEMENT_CLASS(DStrifeStatusBar);
+IMPLEMENT_CLASS(DStrifeStatusBar, false, false);
 
 DBaseStatusBar *CreateStrifeStatusBar ()
 {

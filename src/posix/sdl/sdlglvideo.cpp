@@ -29,7 +29,7 @@
 
 // TYPES -------------------------------------------------------------------
 
-IMPLEMENT_ABSTRACT_CLASS(SDLGLFB)
+IMPLEMENT_CLASS(SDLGLFB, true, false)
 
 struct MiniModeInfo
 {

@@ -553,6 +553,15 @@ void P_GiveSecret(AActor *actor, bool printmessage, bool playsound, int sectornu
 	level.found_secrets++;
 }
 
+DEFINE_ACTION_FUNCTION(AActor, GiveSecret)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_BOOL(printmessage);
+	PARAM_BOOL(playsound);
+	P_GiveSecret(self, printmessage, playsound, -1);
+	return 0;
+}
+
 //============================================================================
 //
 // P_PlayerOnSpecialFlat
@@ -661,7 +670,7 @@ protected:
 	short LastLight;
 };
 
-IMPLEMENT_CLASS (DLightTransfer)
+IMPLEMENT_CLASS(DLightTransfer, false, false)
 
 void DLightTransfer::Serialize(FSerializer &arc)
 {
@@ -751,7 +760,7 @@ protected:
 	BYTE Flags;
 };
 
-IMPLEMENT_CLASS (DWallLightTransfer)
+IMPLEMENT_CLASS(DWallLightTransfer, false, false)
 
 void DWallLightTransfer::Serialize(FSerializer &arc)
 {
@@ -1610,3 +1619,4 @@ void sector_t::AdjustFloorClip () const
 		}
 	}
 }
+

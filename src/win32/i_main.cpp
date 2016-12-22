@@ -680,17 +680,23 @@ void I_SetWndProc()
 
 void RestoreConView()
 {
+	HDC screenDC = GetDC(0);
+	int dpi = GetDeviceCaps(screenDC, LOGPIXELSX);
+	ReleaseDC(0, screenDC);
+	int width = (512 * dpi + 96 / 2) / 96;
+	int height = (384 * dpi + 96 / 2) / 96;
+
 	// Make sure the window has a frame in case it was fullscreened.
 	SetWindowLongPtr (Window, GWL_STYLE, WS_VISIBLE|WS_OVERLAPPEDWINDOW);
 	if (GetWindowLong (Window, GWL_EXSTYLE) & WS_EX_TOPMOST)
 	{
-		SetWindowPos (Window, HWND_BOTTOM, 0, 0, 512, 384,
+		SetWindowPos (Window, HWND_BOTTOM, 0, 0, width, height,
 			SWP_DRAWFRAME | SWP_NOCOPYBITS | SWP_NOMOVE);
 		SetWindowPos (Window, HWND_TOP, 0, 0, 0, 0, SWP_NOCOPYBITS | SWP_NOMOVE | SWP_NOSIZE);
 	}
 	else
 	{
-		SetWindowPos (Window, NULL, 0, 0, 512, 384,
+		SetWindowPos (Window, NULL, 0, 0, width, height,
 			SWP_DRAWFRAME | SWP_NOCOPYBITS | SWP_NOMOVE | SWP_NOZORDER);
 	}
 
@@ -935,8 +941,11 @@ void DoMain (HINSTANCE hInstance)
 		progdir.Truncate((long)strlen(program));
 		progdir.UnlockBuffer();
 
-		width = 512;
-		height = 384;
+		HDC screenDC = GetDC(0);
+		int dpi = GetDeviceCaps(screenDC, LOGPIXELSX);
+		ReleaseDC(0, screenDC);
+		width = (512 * dpi + 96 / 2) / 96;
+		height = (384 * dpi + 96 / 2) / 96;
 
 		// Many Windows structures that specify their size do so with the first
 		// element. DEVMODE is not one of those structures.
@@ -1184,6 +1193,11 @@ void CALLBACK ExitFatally (ULONG_PTR dummy)
 //
 //==========================================================================
 
+namespace
+{
+	CONTEXT MainThreadContext;
+}
+
 LONG WINAPI CatchAllExceptions (LPEXCEPTION_POINTERS info)
 {
 #ifdef _DEBUG
@@ -1208,11 +1222,7 @@ LONG WINAPI CatchAllExceptions (LPEXCEPTION_POINTERS info)
 	// Otherwise, put the crashing thread to sleep and signal the main thread to clean up.
 	if (GetCurrentThreadId() == MainThreadID)
 	{
-#ifndef _M_X64
-		info->ContextRecord->Eip = (DWORD_PTR)ExitFatally;
-#else
-		info->ContextRecord->Rip = (DWORD_PTR)ExitFatally;
-#endif
+		*info->ContextRecord = MainThreadContext;
 	}
 	else
 	{
@@ -1304,6 +1314,15 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE nothing, LPSTR cmdline, int n
 	if (MainThread != INVALID_HANDLE_VALUE)
 	{
 		SetUnhandledExceptionFilter (CatchAllExceptions);
+
+		static bool setJumpResult = false;
+		RtlCaptureContext(&MainThreadContext);
+		if (setJumpResult)
+		{
+			ExitFatally(0);
+			return 0;
+		}
+		setJumpResult = true;
 	}
 #endif
 

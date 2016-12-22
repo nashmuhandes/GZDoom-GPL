@@ -206,6 +206,11 @@ CUSTOM_CVAR (String, vid_cursor, "None", CVAR_ARCHIVE | CVAR_NOINITCALL)
 	}
 }
 
+// Controlled by startup dialog
+CVAR (Bool, disableautoload, false, CVAR_ARCHIVE | CVAR_NOINITCALL | CVAR_GLOBALCONFIG)
+CVAR (Bool, autoloadbrightmaps, false, CVAR_ARCHIVE | CVAR_NOINITCALL | CVAR_GLOBALCONFIG)
+CVAR (Bool, autoloadlights, false, CVAR_ARCHIVE | CVAR_NOINITCALL | CVAR_GLOBALCONFIG)
+
 bool wantToRestart;
 bool DrawFSHUD;				// [RH] Draw fullscreen HUD?
 TArray<FString> allwads;
@@ -1028,6 +1033,12 @@ void D_DoomLoop ()
 			}
 			D_ErrorCleanup ();
 		}
+		catch (CVMAbortException &error)
+		{
+			error.MaybePrintMessage();
+			Printf("%s", error.stacktrace.GetChars());
+			D_ErrorCleanup();
+		}
 	}
 }
 
@@ -1839,10 +1850,10 @@ static FString ParseGameInfo(TArray<FString> &pwads, const char *fn, const char 
 		else if (!nextKey.CompareNoCase("STARTUPCOLORS"))
 		{
 			sc.MustGetString();
-			DoomStartupInfo.FgColor = V_GetColor(NULL, sc.String);
+			DoomStartupInfo.FgColor = V_GetColor(NULL, sc);
 			sc.MustGetStringName(",");
 			sc.MustGetString();
-			DoomStartupInfo.BkColor = V_GetColor(NULL, sc.String);
+			DoomStartupInfo.BkColor = V_GetColor(NULL, sc);
 		}
 		else if (!nextKey.CompareNoCase("STARTUPTYPE"))
 		{
@@ -2033,7 +2044,24 @@ static void AddAutoloadFiles(const char *autoname)
 {
 	LumpFilterIWAD.Format("%s.", autoname);	// The '.' is appened to simplify parsing the string 
 
-	if (!(gameinfo.flags & GI_SHAREWARE) && !Args->CheckParm("-noautoload"))
+	// [SP] Dialog reaction - load lights.pk3 and brightmaps.pk3 based on user choices
+	if (!(gameinfo.flags & GI_SHAREWARE))
+	{
+		if (autoloadlights)
+		{
+			const char *lightswad = BaseFileSearch ("lights.pk3", NULL);
+			if (lightswad)
+				D_AddFile (allwads, lightswad);
+		}
+		if (autoloadbrightmaps)
+		{
+			const char *bmwad = BaseFileSearch ("brightmaps.pk3", NULL);
+			if (bmwad)
+				D_AddFile (allwads, bmwad);
+		}
+	}
+
+	if (!(gameinfo.flags & GI_SHAREWARE) && !Args->CheckParm("-noautoload") && !disableautoload)
 	{
 		FString file;
 
@@ -2593,44 +2621,48 @@ void D_DoomMain (void)
 				G_DeferedPlayDemo (v);
 				D_DoomLoop ();	// never returns
 			}
-
-			v = Args->CheckValue ("-timedemo");
-			if (v)
+			else
 			{
-				G_TimeDemo (v);
-				D_DoomLoop ();	// never returns
-			}
-
-			if (gameaction != ga_loadgame && gameaction != ga_loadgamehidecon)
-			{
-				if (autostart || netgame)
+				v = Args->CheckValue("-timedemo");
+				if (v)
 				{
-					// Do not do any screenwipes when autostarting a game.
-					if (!Args->CheckParm("-warpwipe"))
-					{
-						NoWipe = TICRATE;
-					}
-					CheckWarpTransMap (startmap, true);
-					if (demorecording)
-						G_BeginRecording (startmap);
-					G_InitNew (startmap, false);
-					if (StoredWarp.IsNotEmpty())
-					{
-						AddCommandString(StoredWarp.LockBuffer());
-						StoredWarp = NULL;
-					}
+					G_TimeDemo(v);
+					D_DoomLoop();	// never returns
 				}
 				else
 				{
-					D_StartTitle ();				// start up intro loop
+					if (gameaction != ga_loadgame && gameaction != ga_loadgamehidecon)
+					{
+						if (autostart || netgame)
+						{
+							// Do not do any screenwipes when autostarting a game.
+							if (!Args->CheckParm("-warpwipe"))
+							{
+								NoWipe = TICRATE;
+							}
+							CheckWarpTransMap(startmap, true);
+							if (demorecording)
+								G_BeginRecording(startmap);
+							G_InitNew(startmap, false);
+							if (StoredWarp.IsNotEmpty())
+							{
+								AddCommandString(StoredWarp.LockBuffer());
+								StoredWarp = NULL;
+							}
+						}
+						else
+						{
+							D_StartTitle();				// start up intro loop
+						}
+					}
+					else if (demorecording)
+					{
+						G_BeginRecording(NULL);
+					}
+
+					atterm(D_QuitNetGame);		// killough
 				}
 			}
-			else if (demorecording)
-			{
-				G_BeginRecording (NULL);
-			}
-						
-			atterm (D_QuitNetGame);		// killough
 		}
 		else
 		{
@@ -2644,7 +2676,6 @@ void D_DoomMain (void)
 		}
 
 		D_DoomLoop ();		// this only returns if a 'restart' CCMD is given.
-
 		// 
 		// Clean up after a restart
 		//
@@ -2655,6 +2686,7 @@ void D_DoomMain (void)
 
 		M_ClearMenus();					// close menu if open
 		F_EndFinale();					// If an intermission is active, end it now
+		AM_ClearColorsets();
 
 		// clean up game state
 		ST_Clear();

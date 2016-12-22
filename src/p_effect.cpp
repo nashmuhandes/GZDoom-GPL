@@ -198,7 +198,7 @@ void P_FindParticleSubsectors ()
 		ParticlesInSubsec.Reserve (numsubsectors - ParticlesInSubsec.Size());
 	}
 
-	clearbufshort (&ParticlesInSubsec[0], numsubsectors, NO_PARTICLE);
+	fillshort (&ParticlesInSubsec[0], numsubsectors, NO_PARTICLE);
 
 	if (!r_particles)
 	{
@@ -572,6 +572,16 @@ void P_DrawSplash (int count, const DVector3 &pos, DAngle angle, int kind)
 		p->Pos.X = pos.X + (M_Random() & 15)*angle.Cos();
 		p->Pos.Y = pos.Y + (M_Random() & 15)*angle.Sin();
 	}
+}
+
+DEFINE_ACTION_FUNCTION(AActor, DrawSplash)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(count);
+	PARAM_FLOAT(angle);
+	PARAM_INT(kind);
+	P_DrawSplash(count, self->Pos(), angle, kind);
+	return 0;
 }
 
 void P_DrawSplash2 (int count, const DVector3 &pos, DAngle angle, int updown, int kind)

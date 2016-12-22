@@ -1,128 +1,97 @@
-// This file is based on pragmas.h from Ken Silverman's original Build
-// source code release. The functions in here are so simple and so
-// basic that they can't be rewritten without being copycats of
-// themselves. As such, they are uncopyrightable.
-
 #ifndef __M_FIXED__
 #define __M_FIXED__
 
 #include <stdlib.h>
 #include "doomtype.h"
-#include "basicinlines.h"
+
+// Unfortunately, the Scale function still gets badly handled on 32 bit x86 platforms so it's the last remaining piece of inline assembly 
+
+// GCC inlines
+#if defined(__GNUC__) && defined(__i386__) && !defined(__clang__)
+#ifndef alloca
+// MinGW does not seem to come with alloca defined.
+#define alloca __builtin_alloca
+#endif
+
+static inline int32_t Scale(int32_t a, int32_t b, int32_t c)
+{
+	int32_t result, dummy;
+
+	asm volatile
+		("imull %3\n\t"
+			"idivl %4"
+			: "=a,a,a,a,a,a" (result),
+			"=&d,&d,&d,&d,d,d" (dummy)
+			: "a,a,a,a,a,a" (a),
+			"m,r,m,r,d,d" (b),
+			"r,r,m,m,r,m" (c)
+			: "cc"
+			);
+
+	return result;
+}
+
+// MSVC inlines
+#elif defined(_MSC_VER) && defined(_M_IX86)
+#pragma warning (disable: 4035)
+
+__forceinline int32_t Scale(int32_t a, int32_t b, int32_t c)
+{
+	__asm mov eax, a
+	__asm imul b
+	__asm idiv c
+}
+
+#pragma warning (default: 4035)
+#else
+
+static __forceinline int32_t Scale(int32_t a, int32_t b, int32_t c)
+{
+	return (int32_t)(((int64_t)a*b) / c);
+}
+
+#endif
+
+// Modern compilers are smart enough to do these multiplications intelligently.
+__forceinline int32_t MulScale14(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 14); } // only used by R_DrawVoxel
+__forceinline int32_t MulScale30(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 30); } // only used once in the node builder
+__forceinline int32_t MulScale32(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 32); } // only used by R_DrawVoxel
+
+__forceinline uint32_t UMulScale16(uint32_t a, uint32_t b) { return (uint32_t)(((uint64_t)a * b) >> 16); } // used for sky drawing
+
+__forceinline int32_t DMulScale3(int32_t a, int32_t b, int32_t c, int32_t d) { return (int32_t)(((int64_t)a*b + (int64_t)c*d) >> 3); } // used for setting up slopes for Build maps
+__forceinline int32_t DMulScale6(int32_t a, int32_t b, int32_t c, int32_t d) { return (int32_t)(((int64_t)a*b + (int64_t)c*d) >> 6); } // only used by R_DrawVoxel
+__forceinline int32_t DMulScale10(int32_t a, int32_t b, int32_t c, int32_t d) { return (int32_t)(((int64_t)a*b + (int64_t)c*d) >> 10); } // only used by R_DrawVoxel
+__forceinline int32_t DMulScale18(int32_t a, int32_t b, int32_t c, int32_t d) { return (int32_t)(((int64_t)a*b + (int64_t)c*d) >> 18); } // only used by R_DrawVoxel
+__forceinline int32_t DMulScale32(int32_t a, int32_t b, int32_t c, int32_t d) { return (int32_t)(((int64_t)a*b + (int64_t)c*d) >> 32); } // used by R_PointOnSide.
+
+// Sadly, for divisions this is not true but these are so infrequently used that the C versions are just fine, despite not being fully optimal.
+__forceinline int32_t DivScale6(int32_t a, int32_t b) { return (int32_t)(((int64_t)a << 6) / b); } // only used by R_DrawVoxel
+__forceinline int32_t DivScale21(int32_t a, int32_t b) { return (int32_t)(((int64_t)a << 21) / b); } // only used by R_DrawVoxel
+__forceinline int32_t DivScale30(int32_t a, int32_t b) { return (int32_t)(((int64_t)a << 30) / b); } // only used once in the node builder
+
+__forceinline void fillshort(void *buff, unsigned int count, WORD clear)
+{
+	SWORD *b2 = (SWORD *)buff;
+	for (unsigned int i = 0; i != count; ++i)
+	{
+		b2[i] = clear;
+	}
+}
+
 #include "xs_Float.h"
 
-#define MAKESAFEDIVSCALE(x) \
-	inline SDWORD SafeDivScale##x (SDWORD a, SDWORD b) \
-	{ \
-		if ((DWORD)abs(a) >> (31-x) >= (DWORD)abs (b)) \
-			return (a^b)<0 ? FIXED_MIN : FIXED_MAX; \
-		return DivScale##x (a, b); \
-	}
+inline int32_t FixedDiv (int32_t a, int32_t b) 
+{ 
+	if ((uint32_t)abs(a) >> (31-16) >= (uint32_t)abs (b)) 
+		return (a^b)<0 ? FIXED_MIN : FIXED_MAX; 
 
-MAKESAFEDIVSCALE(1)
-MAKESAFEDIVSCALE(2)
-MAKESAFEDIVSCALE(3)
-MAKESAFEDIVSCALE(4)
-MAKESAFEDIVSCALE(5)
-MAKESAFEDIVSCALE(6)
-MAKESAFEDIVSCALE(7)
-MAKESAFEDIVSCALE(8)
-MAKESAFEDIVSCALE(9)
-MAKESAFEDIVSCALE(10)
-MAKESAFEDIVSCALE(11)
-MAKESAFEDIVSCALE(12)
-MAKESAFEDIVSCALE(13)
-MAKESAFEDIVSCALE(14)
-MAKESAFEDIVSCALE(15)
-MAKESAFEDIVSCALE(16)
-MAKESAFEDIVSCALE(17)
-MAKESAFEDIVSCALE(18)
-MAKESAFEDIVSCALE(19)
-MAKESAFEDIVSCALE(20)
-MAKESAFEDIVSCALE(21)
-MAKESAFEDIVSCALE(22)
-MAKESAFEDIVSCALE(23)
-MAKESAFEDIVSCALE(24)
-MAKESAFEDIVSCALE(25)
-MAKESAFEDIVSCALE(26)
-MAKESAFEDIVSCALE(27)
-MAKESAFEDIVSCALE(28)
-MAKESAFEDIVSCALE(29)
-MAKESAFEDIVSCALE(30)
-#undef MAKESAFEDIVSCALE
-
-inline SDWORD SafeDivScale31 (SDWORD a, SDWORD b)
-{
-	if ((DWORD)abs(a) >= (DWORD)abs (b))
-		return (a^b)<0 ? FIXED_MIN : FIXED_MAX;
-	return DivScale31 (a, b);
+	return (int32_t)(((int64_t)a << 16) / b);
 }
 
-inline SDWORD SafeDivScale32 (SDWORD a, SDWORD b)
-{
-	if ((DWORD)abs(a) >= (DWORD)abs (b) >> 1)
-		return (a^b)<0 ? FIXED_MIN : FIXED_MAX;
-	return DivScale32 (a, b);
-}
-
-#define FixedMul MulScale16
-#define FixedDiv SafeDivScale16
-
-inline void qinterpolatedown16 (SDWORD *out, DWORD count, SDWORD val, SDWORD delta)
-{
-	if (count & 1)
-	{
-		out[0] = val >> 16;
-		val += delta;
-	}
-	count >>= 1;
-	while (count-- != 0)
-	{
-		int temp = val + delta;
-		out[0] = val >> 16;
-		val = temp + delta;
-		out[1] = temp >> 16;
-		out += 2;
-	}
-}
-
-inline void qinterpolatedown16short (short *out, DWORD count, SDWORD val, SDWORD delta)
-{
-	if (count)
-	{
-		if ((size_t)out & 2)
-		{ // align to dword boundary
-			*out++ = (short)(val >> 16);
-			count--;
-			val += delta;
-		}
-		DWORD *o2 = (DWORD *)out;
-		DWORD c2 = count>>1;
-		while (c2-- != 0)
-		{
-			SDWORD temp = val + delta;
-			*o2++ = (temp & 0xffff0000) | ((DWORD)val >> 16);
-			val = temp + delta;
-		}
-		if (count & 1)
-		{
-			*(short *)o2 = (short)(val >> 16);
-		}
-	}
-}
-
-	//returns num/den, dmval = num%den
-inline SDWORD DivMod (SDWORD num, SDWORD den, SDWORD *dmval)
-{
-	*dmval = num % den;
-	return num / den;
-}
-
-	//returns num%den, dmval = num/den
-inline SDWORD ModDiv (SDWORD num, SDWORD den, SDWORD *dmval)
-{
-	*dmval = num / den;
-	return num % den;
+__forceinline int32_t FixedMul(int32_t a, int32_t b) 
+{ 
+	return (int32_t)(((int64_t)a * b) >> 16); 
 }
 
 inline fixed_t FloatToFixed(double f)
