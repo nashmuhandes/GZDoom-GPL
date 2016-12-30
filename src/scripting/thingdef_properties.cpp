@@ -216,9 +216,10 @@ bool ModActorFlag(AActor *actor, FString &flagname, bool set, bool printerror)
 				// If these 2 flags get changed we need to update the blockmap and sector links.
 				bool linkchange = flagp == &actor->flags && (fd->flagbit == MF_NOBLOCKMAP || fd->flagbit == MF_NOSECTOR);
 
-				if (linkchange) actor->UnlinkFromWorld();
+				FLinkContext ctx;
+				if (linkchange) actor->UnlinkFromWorld(&ctx);
 				ModActorFlag(actor, fd, set);
-				if (linkchange) actor->LinkToWorld();
+				if (linkchange) actor->LinkToWorld(&ctx);
 			}
 
 			if (actor->CountsAsKill() && actor->health > 0) ++level.total_monsters;
@@ -525,7 +526,7 @@ DEFINE_PROPERTY(skip_super, 0, Actor)
 	if (info->Size != actorclass->Size)
 	{
 		bag.ScriptPosition.Message(MSG_OPTERROR,
-			"'skip_super' is only allowed in subclasses of AActor with no additional fields and will be ignored.", info->TypeName.GetChars());
+			"'skip_super' is only allowed in subclasses of AActor with no additional fields and will be ignored in type %s.", info->TypeName.GetChars());
 		return;
 	}
 	if (bag.StateSet)
@@ -711,6 +712,15 @@ DEFINE_PROPERTY(radius, F, Actor)
 {
 	PROP_DOUBLE_PARM(id, 0);
 	defaults->radius = id;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_PROPERTY(renderradius, F, Actor)
+{
+	PROP_DOUBLE_PARM(id, 0);
+	defaults->renderradius = id;
 }
 
 //==========================================================================
@@ -1206,11 +1216,6 @@ DEFINE_PROPERTY(bouncetype, S, Actor)
 	}
 	defaults->BounceFlags &= ~(BOUNCE_TypeMask | BOUNCE_UseSeeSound);
 	defaults->BounceFlags |= flags[match];
-	if (defaults->BounceFlags & (BOUNCE_Actors | BOUNCE_AllActors))
-	{
-		// PASSMOBJ is irrelevant for normal missiles, but not for bouncers.
-		defaults->flags2 |= MF2_PASSMOBJ;
-	}
 }
 
 //==========================================================================

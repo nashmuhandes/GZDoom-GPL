@@ -1138,8 +1138,9 @@ void P_CreateLinkedPortals()
 				P_CollectConnectedGroups(actor->Sector->PortalGroup, actor->Pos(), actor->Top(), actor->radius, check);
 				if (check.Size() > 0)
 				{
-					actor->UnlinkFromWorld();
-					actor->LinkToWorld();
+					FLinkContext ctx;
+					actor->UnlinkFromWorld(&ctx);
+					actor->LinkToWorld(&ctx);
 				}
 			}
 		}

@@ -34,6 +34,7 @@
 // States are tied to finite states are tied to animation frames.
 #include "info.h"
 
+#include <forward_list>
 #include "doomdef.h"
 #include "textures/textures.h"
 #include "r_data/renderstyle.h"
@@ -562,7 +563,14 @@ inline T *GetDefault ()
 
 struct line_t;
 struct secplane_t;
+struct msecnode_t;
 struct FStrifeDialogueNode;
+
+struct FLinkContext
+{
+	msecnode_t *sector_list = nullptr;
+	msecnode_t *render_list = nullptr;
+};
 
 class DDropItem : public DObject
 {
@@ -1036,6 +1044,7 @@ public:
 	struct sector_t	*ceilingsector;
 	FTextureID		ceilingpic;			// contacted sec ceilingpic
 	double			radius, Height;		// for movement checking
+	double			renderradius;
 
 	double			projectilepassheight;	// height for clipping projectile movement against this actor
 	
@@ -1142,6 +1151,8 @@ public:
 	struct msecnode_t	*touching_sectorlist;				// phares 3/14/98
 	struct msecnode_t	*render_sectorlist;		// same for cross-sectorportal rendering
 	struct portnode_t	*render_portallist;		// and for cross-lineportal
+	struct msecnode_t	*touching_rendersectors; // this is the list of sectors that this thing interesects with it's max(radius, renderradius).
+	int validcount;
 
 
 	TObjPtr<AInventory>	Inventory;		// [RH] This actor's inventory
@@ -1217,8 +1228,8 @@ private:
 	bool FixMapthingPos();
 
 public:
-	void LinkToWorld (bool spawningmapthing=false, sector_t *sector = NULL);
-	void UnlinkFromWorld ();
+	void LinkToWorld (FLinkContext *ctx, bool spawningmapthing=false, sector_t *sector = NULL);
+	void UnlinkFromWorld(FLinkContext *ctx);
 	void AdjustFloorClip ();
 	bool InStateSequence(FState * newstate, FState * basestate);
 	int GetTics(FState * newstate);

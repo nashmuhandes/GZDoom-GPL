@@ -87,7 +87,8 @@ void DFloor::Serialize(FSerializer &arc)
 		("pausetime", m_PauseTime)
 		("steptime", m_StepTime)
 		("persteptime", m_PerStepTime)
-		("crushmode", m_Hexencrush);
+		("crushmode", m_Hexencrush)
+		("instant", m_Instant);
 }
 
 //==========================================================================
@@ -130,7 +131,7 @@ void DFloor::Tick ()
 	if (m_Type == waitStair)
 		return;
 
-	res = m_Sector->MoveFloor (m_Speed, m_FloorDestDist, m_Crush, m_Direction, m_Hexencrush);
+	res = m_Sector->MoveFloor (m_Speed, m_FloorDestDist, m_Crush, m_Direction, m_Hexencrush, m_Instant);
 	
 	if (res == EMoveResult::pastdest)
 	{
@@ -287,6 +288,7 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 	floor->m_Speed = speed;
 	floor->m_ResetCount = 0;				// [RH]
 	floor->m_OrgDist = sec->floorplane.fD();	// [RH]
+	floor->m_Instant = false;
 
 	switch (floortype)
 	{
@@ -452,6 +454,7 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 		(floor->m_Speed >= fabs(sec->floorplane.fD() - floor->m_FloorDestDist)))	// moving in one step
 	{
 		floor->StopInterpolation(true);
+		floor->m_Instant = true;
 
 		// [Graf Zahl]
 		// Don't make sounds for instant movement hacks but make an exception for

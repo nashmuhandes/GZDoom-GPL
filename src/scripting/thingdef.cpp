@@ -272,7 +272,7 @@ static void CheckForUnsafeStates(PClassActor *obj)
 				// If an unsafe function (i.e. one that accesses user variables) is being detected, print a warning once and remove the bogus function. We may not call it because that would inevitably crash.
 				auto owner = FState::StaticFindStateOwner(state);
 				GetStateSource(state).Message(MSG_ERROR, TEXTCOLOR_RED "Unsafe state call in state %s.%d which accesses user variables, reached by %s.%s.\n",
-					owner->TypeName.GetChars(), state - owner->OwnedStates, obj->TypeName.GetChars(), FName(*test).GetChars());
+					owner->TypeName.GetChars(), int(state - owner->OwnedStates), obj->TypeName.GetChars(), FName(*test).GetChars());
 			}
 			state = state->NextState;
 		}
@@ -424,6 +424,15 @@ void LoadActors()
 			// hits an unsafe state. If we can find something here it can be handled wuth a compile error rather than a runtime error.
 			CheckForUnsafeStates(ti);
 		}
+
+		// ensure that all actor bouncers have PASSMOBJ set.
+		auto defaults = GetDefaultByType(ti);
+		if (defaults->BounceFlags & (BOUNCE_Actors | BOUNCE_AllActors))
+		{
+			// PASSMOBJ is irrelevant for normal missiles, but not for bouncers.
+			defaults->flags2 |= MF2_PASSMOBJ;
+		}
+
 
 	}
 	if (FScriptPosition::ErrorCounter > 0)
