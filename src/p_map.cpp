@@ -92,12 +92,6 @@ TArray<spechit_t> portalhit;
 //
 //==========================================================================
 
-DEFINE_ACTION_FUNCTION(AActor, CanCollideWith)
-{
-	// No need to check the parameters, as they are not even used.
-	ACTION_RETURN_BOOL(true);
-}
-
 bool P_CanCollideWith(AActor *tmthing, AActor *thing)
 {
 	static unsigned VIndex = ~0u;
@@ -1299,7 +1293,7 @@ bool PIT_CheckThing(FMultiBlockThingsIterator &it, FMultiBlockThingsIterator::Ch
 				if ((tm.thing->Z() >= topz) || (tm.thing->Top() <= thing->Z()))
 					return true;
 			}
-			// If they are not allowed to overlap, the rest of this function still needs to be executed.
+			else return unblocking;	// This may not really make sense, but Heretic depends on the broken implementation.
 		}
 	}
 

@@ -357,13 +357,30 @@ static FFlagDef MoreFlagDefs[] =
 	DEFINE_DUMMY_FLAG(FASTER, true),				// obsolete, replaced by 'Fast' state flag
 	DEFINE_DUMMY_FLAG(FASTMELEE, true),			// obsolete, replaced by 'Fast' state flag
 
+	// Deprecated name as an alias
+	DEFINE_FLAG2_DEPRECATED(MF4_DONTHARMCLASS, DONTHURTSPECIES, AActor, flags4),
+
 	// Various Skulltag flags that are quite irrelevant to ZDoom
-	DEFINE_DUMMY_FLAG(NONETID, false),				// netcode-based
-	DEFINE_DUMMY_FLAG(ALLOWCLIENTSPAWN, false),	// netcode-based
-	DEFINE_DUMMY_FLAG(CLIENTSIDEONLY, false),	    // netcode-based
-	DEFINE_DUMMY_FLAG(SERVERSIDEONLY, false),		// netcode-based
-	DEFINE_DUMMY_FLAG(EXPLODEONDEATH, true),	    // seems useless
-	DEFINE_FLAG2_DEPRECATED(MF4_DONTHARMCLASS, DONTHURTSPECIES, AActor, flags4), // Deprecated name as an alias
+	// [BC] New DECORATE flag defines here.
+	DEFINE_DUMMY_FLAG(BLUETEAM, false),
+	DEFINE_DUMMY_FLAG(REDTEAM, false),
+	DEFINE_DUMMY_FLAG(USESPECIAL, false),
+	DEFINE_DUMMY_FLAG(BASEHEALTH, false),
+	DEFINE_DUMMY_FLAG(SUPERHEALTH, false),
+	DEFINE_DUMMY_FLAG(BASEARMOR, false),
+	DEFINE_DUMMY_FLAG(SUPERARMOR, false),
+	DEFINE_DUMMY_FLAG(SCOREPILLAR, false),
+	DEFINE_DUMMY_FLAG(NODE, false),
+	DEFINE_DUMMY_FLAG(USESTBOUNCESOUND, false),
+	DEFINE_DUMMY_FLAG(EXPLODEONDEATH, true),
+	DEFINE_DUMMY_FLAG(DONTIDENTIFYTARGET, false), // [CK]
+
+	// Skulltag netcode-based flags.
+	// [BB] New DECORATE network related flag defines here.
+	DEFINE_DUMMY_FLAG(NONETID, false),
+	DEFINE_DUMMY_FLAG(ALLOWCLIENTSPAWN, false),
+	DEFINE_DUMMY_FLAG(CLIENTSIDEONLY, false),
+	DEFINE_DUMMY_FLAG(SERVERSIDEONLY, false),
 };
 
 static FFlagDef InventoryFlagDefs[] =
@@ -390,6 +407,8 @@ static FFlagDef InventoryFlagDefs[] =
 	DEFINE_FLAG(IF, ALWAYSRESPAWN, AInventory, ItemFlags),
 	DEFINE_FLAG(IF, TRANSFER, AInventory, ItemFlags),
 	DEFINE_FLAG(IF, NOTELEPORTFREEZE, AInventory, ItemFlags),
+
+	DEFINE_DUMMY_FLAG(FORCERESPAWNINSURVIVAL, false),
 
 	DEFINE_DEPRECATED_FLAG(PICKUPFLASH),
 	DEFINE_DEPRECATED_FLAG(INTERHUBSTRIP),
@@ -691,12 +710,8 @@ static int fieldcmp(const void * a, const void * b)
 
 void InitThingdef()
 {
-	PType *TypeActor = NewPointer(RUNTIME_CLASS(AActor));
+	// Create all global variables here because this cannot be done on the script side and really isn't worth adding support for.
 
-	PStruct *sstruct = NewNativeStruct("Sector", nullptr);
-	auto sptr = NewPointer(sstruct);
-	sstruct->AddNativeField("soundtarget", TypeActor, myoffsetof(sector_t, SoundTarget));
-	
 	// expose the global validcount variable.
 	PField *vcf = new PField("validcount", TypeSInt32, VARF_Native | VARF_Static, (intptr_t)&validcount);
 	GlobalSymbols.AddSymbol(vcf);
@@ -727,7 +742,7 @@ void InitThingdef()
 	// set up the lines array in the sector struct. This is a bit messy because the type system is not prepared to handle a pointer to an array of pointers to a native struct even remotely well...
 	// As a result, the size has to be set to something large and arbritrary because it can change between maps. This will need some serious improvement when things get cleaned up.
 	pstruct = NewNativeStruct("Sector", nullptr);
-	pstruct->AddNativeField("lines", NewPointer(NewArray(NewPointer(NewNativeStruct("line", nullptr), false), 0x40000), false), myoffsetof(sector_t, lines), VARF_Native);
+	pstruct->AddNativeField("lines", NewPointer(NewResizableArray(NewPointer(NewNativeStruct("line", nullptr), false)), false), myoffsetof(sector_t, Lines), VARF_Native);
 
 	parray = NewArray(TypeBool, MAXPLAYERS);
 	playerf = new PField("playeringame", parray, VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&playeringame);

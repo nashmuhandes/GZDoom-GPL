@@ -696,7 +696,7 @@ void FString::StripRight ()
 {
 	size_t max = Len(), i;
 	if (max == 0) return;
-	for (i = --max; i-- > 0; )
+	for (i = --max; i > 0; i--)
 	{
 		if (!isspace((unsigned char)Chars[i]))
 			break;
@@ -728,7 +728,7 @@ void FString::StripRight (const char *charset)
 {
 	size_t max = Len(), i;
 	if (max == 0) return;
-	for (i = --max; i-- > 0; )
+	for (i = --max; i > 0; i--)
 	{
 		if (!strchr (charset, Chars[i]))
 			break;

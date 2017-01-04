@@ -21,6 +21,7 @@
 #include "v_palette.h"
 #include "serializer.h"
 #include "r_utility.h"
+#include "virtual.h"
 
 #include "r_data/colormaps.h"
 
@@ -182,6 +183,25 @@ void APowerup::InitEffect ()
 {
 }
 
+DEFINE_ACTION_FUNCTION(APowerup, InitEffect)
+{
+	PARAM_SELF_PROLOGUE(APowerup);
+	self->InitEffect();
+	return 0;
+}
+
+void APowerup::CallInitEffect()
+{
+	IFVIRTUAL(APowerup, InitEffect)
+	{
+		VMValue params[1] = { (DObject*)this };
+		VMFrameStack stack;
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
+	else InitEffect();
+}
+
+
 //===========================================================================
 //
 // APowerup :: DoEffect
@@ -230,6 +250,25 @@ void APowerup::EndEffect ()
 	}
 }
 
+DEFINE_ACTION_FUNCTION(APowerup, EndEffect)
+{
+	PARAM_SELF_PROLOGUE(APowerup);
+	self->EndEffect();
+	return 0;
+}
+
+void APowerup::CallEndEffect()
+{
+	IFVIRTUAL(APowerup, EndEffect)
+	{
+		VMValue params[1] = { (DObject*)this };
+		VMFrameStack stack;
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
+	else EndEffect();
+}
+
+
 //===========================================================================
 //
 // APowerup :: Destroy
@@ -238,7 +277,7 @@ void APowerup::EndEffect ()
 
 void APowerup::Destroy ()
 {
-	EndEffect ();
+	CallEndEffect ();
 	Super::Destroy ();
 }
 
@@ -325,7 +364,7 @@ AInventory *APowerup::CreateCopy (AActor *other)
 	// properly attached to anything yet.
 	Owner = other;
 	// Actually activate the powerup.
-	InitEffect ();
+	CallInitEffect ();
 	// Clear the Owner field, unless it was
 	// changed by the activation, for example,
 	// if this instance is a morph powerup;
@@ -599,7 +638,7 @@ void APowerInvisibility::InitEffect ()
 		flags5 &= ~(Owner->flags5 & INVISIBILITY_FLAGS5);
 		Owner->flags5 |= flags5 & INVISIBILITY_FLAGS5;
 
-		DoEffect();
+		CallDoEffect();
 	}
 }
 
@@ -1251,17 +1290,13 @@ void APowerSpeed::DoEffect ()
 	}
 }
 
-// Minotaur (aka Dark Servant) powerup ---------------------------------------
-
-IMPLEMENT_CLASS(APowerMinotaur, false, false)
-
 // Targeter powerup ---------------------------------------------------------
 
 IMPLEMENT_CLASS(APowerTargeter, false, false)
 
 void APowerTargeter::Travelled ()
 {
-	InitEffect ();
+	CallInitEffect ();
 }
 
 void APowerTargeter::InitEffect ()
@@ -1299,14 +1334,14 @@ void APowerTargeter::AttachToOwner(AActor *other)
 	Super::AttachToOwner(other);
 
 	// Let's actually properly call this for the targeters.
-	InitEffect();
+	CallInitEffect();
 }
 
 bool APowerTargeter::HandlePickup(AInventory *item)
 {
 	if (Super::HandlePickup(item))
 	{
-		InitEffect();	// reset the HUD sprites
+		CallInitEffect();	// reset the HUD sprites
 		return true;
 	}
 	return false;
@@ -1370,482 +1405,6 @@ void APowerTargeter::PositionAccuracy ()
 	}
 }
 
-// Frightener Powerup --------------------------------
-
-IMPLEMENT_CLASS(APowerFrightener, false, false)
-
-//===========================================================================
-//
-// APowerFrightener :: InitEffect
-//
-//===========================================================================
-
-void APowerFrightener::InitEffect ()
-{
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	Owner->player->cheats |= CF_FRIGHTENING;
-}
-
-//===========================================================================
-//
-// APowerFrightener :: EndEffect
-//
-//===========================================================================
-
-void APowerFrightener::EndEffect ()
-{
-	Super::EndEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	Owner->player->cheats &= ~CF_FRIGHTENING;
-}
-
-// Buddha Powerup --------------------------------
-
-IMPLEMENT_CLASS(APowerBuddha, false, false)
-
-//===========================================================================
-//
-// APowerBuddha :: InitEffect
-//
-//===========================================================================
-
-void APowerBuddha::InitEffect ()
-{
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	Owner->player->cheats |= CF_BUDDHA;
-}
-
-//===========================================================================
-//
-// APowerBuddha :: EndEffect
-//
-//===========================================================================
-
-void APowerBuddha::EndEffect ()
-{
-	Super::EndEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	Owner->player->cheats &= ~CF_BUDDHA;
-}
-
-// Scanner powerup ----------------------------------------------------------
-
-IMPLEMENT_CLASS(APowerScanner, false, false)
-
-// Time freezer powerup -----------------------------------------------------
-
-IMPLEMENT_CLASS( APowerTimeFreezer, false, false)
-
-//===========================================================================
-//
-// APowerTimeFreezer :: InitEffect
-//
-//===========================================================================
-
-void APowerTimeFreezer::InitEffect()
-{
-	int freezemask;
-
-	Super::InitEffect();
-
-	if (Owner == NULL || Owner->player == NULL)
-		return;
-
-	// When this powerup is in effect, pause the music.
-	S_PauseSound(false, false);
-
-	// Give the player and his teammates the power to move when time is frozen.
-	freezemask = 1 << (Owner->player - players);
-	Owner->player->timefreezer |= freezemask;
-	for (int i = 0; i < MAXPLAYERS; i++)
-	{
-		if (playeringame[i] &&
-			players[i].mo != NULL &&
-			players[i].mo->IsTeammate(Owner)
-		   )
-		{
-			players[i].timefreezer |= freezemask;
-		}
-	}
-
-	// [RH] The effect ends one tic after the counter hits zero, so make
-	// sure we start at an odd count.
-	EffectTics += !(EffectTics & 1);
-	if ((EffectTics & 1) == 0)
-	{
-		EffectTics++;
-	}
-	// Make sure the effect starts and ends on an even tic.
-	if ((level.time & 1) == 0)
-	{
-		level.flags2 |= LEVEL2_FROZEN;
-	}
-	else
-	{
-		// Compensate for skipped tic, but beware of overflow.
-		if(EffectTics < INT_MAX)
-			EffectTics++;
-	}
-}
-
-//===========================================================================
-//
-// APowerTimeFreezer :: DoEffect
-//
-//===========================================================================
-
-void APowerTimeFreezer::DoEffect()
-{
-	Super::DoEffect();
-	// [RH] Do not change LEVEL_FROZEN on odd tics, or the Revenant's tracer
-	// will get thrown off.
-	// [ED850] Don't change it if the player is predicted either.
-	if (level.time & 1 || (Owner != NULL && Owner->player != NULL && Owner->player->cheats & CF_PREDICTING))
-	{
-		return;
-	}
-	// [RH] The "blinking" can't check against EffectTics exactly or it will
-	// never happen, because InitEffect ensures that EffectTics will always
-	// be odd when level.time is even.
-	if ( EffectTics > 4*32 
-		|| (( EffectTics > 3*32 && EffectTics <= 4*32 ) && ((EffectTics + 1) & 15) != 0 )
-		|| (( EffectTics > 2*32 && EffectTics <= 3*32 ) && ((EffectTics + 1) & 7) != 0 )
-		|| (( EffectTics >   32 && EffectTics <= 2*32 ) && ((EffectTics + 1) & 3) != 0 )
-		|| (( EffectTics >    0 && EffectTics <= 1*32 ) && ((EffectTics + 1) & 1) != 0 ))
-		level.flags2 |= LEVEL2_FROZEN;
-	else
-		level.flags2 &= ~LEVEL2_FROZEN;
-}
-
-//===========================================================================
-//
-// APowerTimeFreezer :: EndEffect
-//
-//===========================================================================
-
-void APowerTimeFreezer::EndEffect()
-{
-	int	i;
-
-	Super::EndEffect();
-
-	// If there is an owner, remove the timefreeze flag corresponding to
-	// her from all players.
-	if (Owner != NULL && Owner->player != NULL)
-	{
-		int freezemask = ~(1 << (Owner->player - players));
-		for (i = 0; i < MAXPLAYERS; ++i)
-		{
-			players[i].timefreezer &= freezemask;
-		}
-	}
-
-	// Are there any players who still have timefreezer bits set?
-	for (i = 0; i < MAXPLAYERS; ++i)
-	{
-		if (playeringame[i] && players[i].timefreezer != 0)
-		{
-			break;
-		}
-	}
-
-	if (i == MAXPLAYERS)
-	{
-		// No, so allow other actors to move about freely once again.
-		level.flags2 &= ~LEVEL2_FROZEN;
-
-		// Also, turn the music back on.
-		S_ResumeSound(false);
-	}
-}
-
-// Damage powerup ------------------------------------------------------
-
-IMPLEMENT_CLASS(APowerDamage, false, false)
-
-//===========================================================================
-//
-// APowerDamage :: InitEffect
-//
-//===========================================================================
-
-void APowerDamage::InitEffect( )
-{
-	Super::InitEffect();
-
-	// Use sound channel 5 to avoid interference with other actions.
-	if (Owner != NULL) S_Sound(Owner, 5, SeeSound, 1.0f, ATTN_NONE);
-}
-
-//===========================================================================
-//
-// APowerDamage :: EndEffect
-//
-//===========================================================================
-
-void APowerDamage::EndEffect( )
-{
-	Super::EndEffect();
-	// Use sound channel 5 to avoid interference with other actions.
-	if (Owner != NULL) S_Sound(Owner, 5, DeathSound, 1.0f, ATTN_NONE);
-}
-
-//===========================================================================
-//
-// APowerDamage :: ModifyDamage
-//
-//===========================================================================
-
-void APowerDamage::ModifyDamage(int damage, FName damageType, int &newdamage, bool passive)
-{
-	if (!passive && damage > 0)
-	{
-		int newdam;
-		DmgFactors *df = GetClass()->DamageFactors;
-		if (df != NULL && df->CountUsed() != 0)
-		{
-			newdam = MAX(1, df->Apply(damageType, damage));// don't allow zero damage as result of an underflow
-		}
-		else
-		{
-			newdam = damage * 4;
-		}
-		if (Owner != NULL && newdam > damage) S_Sound(Owner, 5, ActiveSound, 1.0f, ATTN_NONE);
-		newdamage = damage = newdam;
-	}
-	if (Inventory != NULL) Inventory->ModifyDamage(damage, damageType, newdamage, passive);
-}
-
-// Quarter damage powerup ------------------------------------------------------
-
-IMPLEMENT_CLASS(APowerProtection, false, false)
-
-#define PROTECTION_FLAGS3	(MF3_NORADIUSDMG | MF3_DONTMORPH | MF3_DONTSQUASH | MF3_DONTBLAST | MF3_NOTELEOTHER)
-#define PROTECTION_FLAGS5	(MF5_NOPAIN | MF5_DONTRIP)
-
-//===========================================================================
-//
-// APowerProtection :: InitEffect
-//
-//===========================================================================
-
-void APowerProtection::InitEffect( )
-{
-	Super::InitEffect();
-
-	if (Owner != NULL)
-	{
-		S_Sound(Owner, CHAN_AUTO, SeeSound, 1.0f, ATTN_NONE);
-
-		// Transfer various protection flags if owner does not already have them.
-		// If the owner already has the flag, clear it from the powerup.
-		// If the powerup still has a flag set, add it to the owner.
-		flags3 &= ~(Owner->flags3 & PROTECTION_FLAGS3);
-		Owner->flags3 |= flags3 & PROTECTION_FLAGS3;
-
-		flags5 &= ~(Owner->flags5 & PROTECTION_FLAGS5);
-		Owner->flags5 |= flags5 & PROTECTION_FLAGS5;
-	}
-}
-
-//===========================================================================
-//
-// APowerProtection :: EndEffect
-//
-//===========================================================================
-
-void APowerProtection::EndEffect( )
-{
-	Super::EndEffect();
-	if (Owner != NULL)
-	{
-		S_Sound(Owner, CHAN_AUTO, DeathSound, 1.0f, ATTN_NONE);
-		Owner->flags3 &= ~(flags3 & PROTECTION_FLAGS3);
-		Owner->flags5 &= ~(flags5 & PROTECTION_FLAGS5);
-	}
-}
-
-//===========================================================================
-//
-// APowerProtection :: AbsorbDamage
-//
-//===========================================================================
-
-void APowerProtection::ModifyDamage(int damage, FName damageType, int &newdamage, bool passive)
-{
-	if (passive && damage > 0)
-	{
-		int newdam;
-		DmgFactors *df = GetClass()->DamageFactors;
-		if (df != NULL && df->CountUsed() != 0)
-		{
-			newdam = MAX(0, df->Apply(damageType, damage));
-		}
-		else
-		{
-			newdam = damage / 4;
-		}
-		if (Owner != NULL && newdam < damage) S_Sound(Owner, CHAN_AUTO, ActiveSound, 1.0f, ATTN_NONE);
-		newdamage = damage = newdam;
-	}
-	if (Inventory != NULL)
-	{
-		Inventory->ModifyDamage(damage, damageType, newdamage, passive);
-	}
-}
-
-// Drain rune -------------------------------------------------------
-
-IMPLEMENT_CLASS(APowerDrain, false, false)
-
-//===========================================================================
-//
-// ARuneDrain :: InitEffect
-//
-//===========================================================================
-
-void APowerDrain::InitEffect( )
-{
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	// Give the player the power to drain life from opponents when he damages them.
-	Owner->player->cheats |= CF_DRAIN;
-}
-
-//===========================================================================
-//
-// ARuneDrain :: EndEffect
-//
-//===========================================================================
-
-void APowerDrain::EndEffect( )
-{
-	Super::EndEffect();
-
-	// Nothing to do if there's no owner.
-	if (Owner != NULL && Owner->player != NULL)
-	{
-		// Take away the drain power.
-		Owner->player->cheats &= ~CF_DRAIN;
-	}
-}
-
-
-// Regeneration rune -------------------------------------------------------
-
-IMPLEMENT_CLASS(APowerRegeneration, false, false)
-
-//===========================================================================
-//
-// APowerRegeneration :: DoEffect
-//
-//===========================================================================
-
-void APowerRegeneration::DoEffect()
-{
-	Super::DoEffect();
-	if (Owner != NULL && Owner->health > 0 && (level.time & 31) == 0)
-	{
-		if (P_GiveBody(Owner, int(Strength)))
-		{
-			S_Sound(Owner, CHAN_ITEM, "*regenerate", 1, ATTN_NORM );
-		}
-	}
-}
-
-// High jump rune -------------------------------------------------------
-
-IMPLEMENT_CLASS(APowerHighJump, false, false)
-
-//===========================================================================
-//
-// ARuneHighJump :: InitEffect
-//
-//===========================================================================
-
-void APowerHighJump::InitEffect( )
-{
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	// Give the player the power to jump much higher.
-	Owner->player->cheats |= CF_HIGHJUMP;
-}
-
-//===========================================================================
-//
-// ARuneHighJump :: EndEffect
-//
-//===========================================================================
-
-void APowerHighJump::EndEffect( )
-{
-	Super::EndEffect();
-	// Nothing to do if there's no owner.
-	if (Owner != NULL && Owner->player != NULL)
-	{
-		// Take away the high jump power.
-		Owner->player->cheats &= ~CF_HIGHJUMP;
-	}
-}
-
-// Double firing speed rune ---------------------------------------------
-
-IMPLEMENT_CLASS(APowerDoubleFiringSpeed, false, false)
-
-//===========================================================================
-//
-// APowerDoubleFiringSpeed :: InitEffect
-//
-//===========================================================================
-
-void APowerDoubleFiringSpeed::InitEffect( )
-{
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	// Give the player the power to shoot twice as fast.
-	Owner->player->cheats |= CF_DOUBLEFIRINGSPEED;
-}
-
-//===========================================================================
-//
-// APowerDoubleFiringSpeed :: EndEffect
-//
-//===========================================================================
-
-void APowerDoubleFiringSpeed::EndEffect( )
-{
-	Super::EndEffect();
-	// Nothing to do if there's no owner.
-	if (Owner != NULL && Owner->player != NULL)
-	{
-		// Take away the shooting twice as fast power.
-		Owner->player->cheats &= ~CF_DOUBLEFIRINGSPEED;
-	}
-}
-
 // Morph powerup ------------------------------------------------------
 
 IMPLEMENT_CLASS(APowerMorph, false, true)
@@ -1862,7 +1421,6 @@ DEFINE_FIELD(APowerMorph, MorphFlash)
 DEFINE_FIELD(APowerMorph, UnMorphFlash)
 DEFINE_FIELD(APowerMorph, MorphStyle)
 DEFINE_FIELD(APowerMorph, MorphedPlayer)
-DEFINE_FIELD(APowerMorph, bInUndoMorph)
 
 //===========================================================================
 //
@@ -1878,118 +1436,5 @@ void APowerMorph::Serialize(FSerializer &arc)
 		("morphflash", MorphFlash)
 		("unmorphflash", UnMorphFlash)
 		("morphedplayer", MorphedPlayer);
-}
-
-//===========================================================================
-//
-// APowerMorph :: InitEffect
-//
-//===========================================================================
-
-void APowerMorph::InitEffect( )
-{
-	Super::InitEffect();
-
-	if (Owner != nullptr && Owner->player != nullptr && PlayerClass != nullptr)
-	{
-		player_t *realplayer = Owner->player;	// Remember the identity of the player
-		if (P_MorphPlayer(realplayer, realplayer, PlayerClass, INT_MAX/*INDEFINITELY*/, MorphStyle, MorphFlash, UnMorphFlash))
-		{
-			Owner = realplayer->mo;				// Replace the new owner in our owner; safe because we are not attached to anything yet
-			ItemFlags |= IF_CREATECOPYMOVED;	// Let the caller know the "real" owner has changed (to the morphed actor)
-			MorphedPlayer = realplayer;				// Store the player identity (morphing clears the unmorphed actor's "player" field)
-		}
-		else // morph failed - give the caller an opportunity to fail the pickup completely
-		{
-			ItemFlags |= IF_INITEFFECTFAILED;	// Let the caller know that the activation failed (can fail the pickup if appropriate)
-		}
-	}
-}
-
-//===========================================================================
-//
-// APowerMorph :: EndEffect
-//
-//===========================================================================
-
-void APowerMorph::EndEffect( )
-{
-	Super::EndEffect();
-
-	// Abort if owner already destroyed or unmorphed
-	if (Owner == nullptr || MorphedPlayer == nullptr)
-	{
-		return;
-	}
-	
-	// Abort if owner is dead; their Die() method will
-	// take care of any required unmorphing on death.
-	if (MorphedPlayer->health <= 0)
-	{
-		return;
-	}
-
-	// Unmorph if possible
-	if (!bInUndoMorph)
-	{
-		int savedMorphTics = MorphedPlayer->morphTics;
-		P_UndoPlayerMorph (MorphedPlayer, MorphedPlayer, 0, !!(MorphedPlayer->MorphStyle & MORPH_UNDOALWAYS));
-
-		// Abort if unmorph failed; in that case,
-		// set the usual retry timer and return.
-		if (MorphedPlayer != NULL && MorphedPlayer->morphTics)
-		{
-			// Transfer retry timeout
-			// to the powerup's timer.
-			EffectTics = MorphedPlayer->morphTics;
-			// Reload negative morph tics;
-			// use actual value; it may
-			// be in use for animation.
-			MorphedPlayer->morphTics = savedMorphTics;
-			// Try again some time later
-			return;
-		}
-	}
-	// Unmorph suceeded
-	MorphedPlayer = NULL;
-}
-
-// Infinite Ammo Powerup -----------------------------------------------------
-
-IMPLEMENT_CLASS(APowerInfiniteAmmo, false, false)
-
-//===========================================================================
-//
-// APowerInfiniteAmmo :: InitEffect
-//
-//===========================================================================
-
-void APowerInfiniteAmmo::InitEffect( )
-{
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
-		return;
-
-	// Give the player infinite ammo
-	Owner->player->cheats |= CF_INFINITEAMMO;
-}
-
-//===========================================================================
-//
-// APowerInfiniteAmmo :: EndEffect
-//
-//===========================================================================
-
-void APowerInfiniteAmmo::EndEffect( )
-{
-	Super::EndEffect();
-
-	// Nothing to do if there's no owner.
-	if (Owner != NULL && Owner->player != NULL)
-	{
-		// Take away the limitless ammo
-		Owner->player->cheats &= ~CF_INFINITEAMMO;
-	}
 }
 
