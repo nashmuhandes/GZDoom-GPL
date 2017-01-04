@@ -44,7 +44,7 @@ function( assort_pk3_source_folder FOLDER_NAME PK3_DIR )
 			assort_pk3_source_folder( ${FOLDER_NAME}\\${DIRNAME} ${PK3_SRC} )
 		endif()
 		# Assign IDE group for current top-level source files
-		source_group(${FOLDER_NAME} FILES ${PK3_SRCS}) 
+		source_group(${FOLDER_NAME} FILES ${PK3_SRCS})
 	endforeach()
 endfunction()
 
@@ -68,7 +68,7 @@ function( add_pk3 PK3_NAME PK3_DIR )
 			DEPENDS zipdir )
 	endif()
 	# Create a list of source files for this PK3, for use in the IDE
-	# Phase 1: Create a list of all source files for this PK3 archive, except 
+	# Phase 1: Create a list of all source files for this PK3 archive, except
 	#  for a couple of strife image file names that confuse CMake.
 	file(GLOB_RECURSE PK3_SRCS ${PK3_DIR}/*)
 	# Exclude from the source list some gzdoom .png files with brackets in the
@@ -172,7 +172,7 @@ if( MSVC )
 	# Function-level linking
 	# Disable run-time type information
 	set( ALL_C_FLAGS "/GF /Gy /GR-" )
-	
+
 	if( CMAKE_SIZEOF_VOID_P MATCHES "4")
 		# SSE2 option (to allow x87 in 32 bit and disallow extended feature sets which have not yet been checked for precision)
 		option (ZDOOM_USE_SSE2	"Use SSE2 instruction set")
@@ -187,7 +187,7 @@ if( MSVC )
 	else()
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} /arch:SSE2")
 	endif()
-	
+
 	# Avoid CRT DLL dependancies in release builds, optionally generate assembly output for checking crash locations.
 	option( ZDOOM_GENERATE_ASM "Generate assembly output." OFF )
 	if( ZDOOM_GENERATE_ASM )
@@ -196,7 +196,7 @@ if( MSVC )
 		set( REL_C_FLAGS "/MT /Oy /Oi" )
 	endif()
 
-	
+
 	# Debug allocations in debug builds
 	set( DEB_C_FLAGS "/D _CRTDBG_MAP_ALLOC /MTd" )
 
@@ -204,7 +204,7 @@ if( MSVC )
 	if( MSVC_VERSION GREATER 1399 )
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} /wd4996" )
 	endif()
-	
+
 	# The CMake configurations set /GR and /MD by default, which conflict with our settings.
 	string(REPLACE "/MD " " " CMAKE_CXX_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE} )
 	string(REPLACE "/MD " " " CMAKE_CXX_FLAGS_MINSIZEREL ${CMAKE_CXX_FLAGS_MINSIZEREL} )
@@ -310,8 +310,8 @@ if( WIN32 )
 else()
 	set( INSTALL_DOCS_PATH share/doc/${ZDOOM_EXE_NAME} CACHE STRING "Directory where the zdoom documentation will be placed during install." )
 endif()
-install(DIRECTORY docs/ 
-		DESTINATION ${INSTALL_DOCS_PATH} 
+install(DIRECTORY docs/
+		DESTINATION ${INSTALL_DOCS_PATH}
 		COMPONENT "Documentation")
 
 add_subdirectory( lzma )
@@ -319,6 +319,7 @@ add_subdirectory( tools )
 add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
+add_subdirectory( wadsrc_lights )
 add_subdirectory( src )
 
 if( NOT WIN32 AND NOT APPLE )
