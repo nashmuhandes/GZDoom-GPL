@@ -1509,7 +1509,7 @@ void P_LoadSectors (MapData *map, FMissingTextureTracker &missingtex)
 		tagManager.AddSectorTag(i, LittleShort(ms->tag));
 		ss->thinglist = nullptr;
 		ss->touching_thinglist = nullptr;		// phares 3/14/98
-		ss->render_thinglist = nullptr;
+		ss->sectorportal_thinglist = nullptr;
 		ss->touching_renderthings = nullptr;
 		ss->seqType = defSeqType;
 		ss->SeqName = NAME_None;
@@ -3089,7 +3089,7 @@ line_t**				linebuffer;
 static void P_GroupLines (bool buildmap)
 {
 	cycle_t times[16];
-	int*				linesDoneInEachSector;
+	unsigned int*		linesDoneInEachSector;
 	int 				i;
 	int 				total;
 	line_t* 			li;
@@ -3157,7 +3157,7 @@ static void P_GroupLines (bool buildmap)
 	times[3].Clock();
 	linebuffer = new line_t *[total];
 	line_t **lineb_p = linebuffer;
-	linesDoneInEachSector = new int[numsectors];
+	linesDoneInEachSector = new unsigned int[numsectors];
 	memset (linesDoneInEachSector, 0, sizeof(int)*numsectors);
 
 	for (sector = sectors, i = 0; i < numsectors; i++, sector++)
@@ -3553,6 +3553,7 @@ void P_FreeLevelData ()
 	P_ClearUDMFKeys();
 }
 
+extern FMemArena secnodearena;
 extern msecnode_t *headsecnode;
 
 void P_FreeExtraLevelData()
@@ -3570,18 +3571,10 @@ void P_FreeExtraLevelData()
 		}
 		FBlockNode::FreeBlocks = NULL;
 	}
-	{
-		msecnode_t *node = headsecnode;
-
-		while (node != NULL)
-		{
-			msecnode_t *next = node->m_snext;
-			M_Free (node);
-			node = next;
-		}
-		headsecnode = NULL;
-	}
+	secnodearena.FreeAllBlocks();
+	headsecnode = nullptr;
 }
+
 
 //
 // P_SetupLevel
