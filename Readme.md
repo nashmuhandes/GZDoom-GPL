@@ -1,3 +1,7 @@
+![Logo](https://github.com/nashmuhandes/GZDoom-GPL/blob/master/docs/GZDoom-GPL%20Logo.png)
+
+<sup>Logo by Daniel "Tormentor667" Gimmer</sup>
+
 # GZDoom-GPL
 GZDoom-GPL is a GPL-compliant fork of GZDoom.
 
