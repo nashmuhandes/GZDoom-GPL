@@ -38,6 +38,7 @@
 #include "p_local.h"
 #include "g_level.h"
 #include "r_sky.h"
+#include "g_levellocals.h"
 
 // externally settable lighting properties
 static float distfogtable[2][256];	// light to fog conversion table for black fog
@@ -303,9 +304,14 @@ float gl_GetFogDensity(int lightlevel, PalEntry fogcolor, int sectorfogdensity)
 		// uses approximations of Legacy's default settings.
 		density = fogdensity ? fogdensity : 18;
 	}
+	else if (sectorfogdensity != 0)
+	{
+		// case 1: Sector has an explicit fog density set.
+		density = sectorfogdensity;
+	}
 	else if ((fogcolor.d & 0xffffff) == 0)
 	{
-		// case 1: black fog
+		// case 2: black fog
 		if (glset.lightmode != 8)
 		{
 			density = distfogtable[glset.lightmode != 0][gl_ClampLight(lightlevel)];
@@ -314,11 +320,6 @@ float gl_GetFogDensity(int lightlevel, PalEntry fogcolor, int sectorfogdensity)
 		{
 			density = 0;
 		}
-	}
-	else if (sectorfogdensity != 0)
-	{
-		// case 2: Sector has an explicit fog density set.
-		density = sectorfogdensity;
 	}
 	else if (outsidefogdensity != 0 && outsidefogcolor.a != 0xff && (fogcolor.d & 0xffffff) == (outsidefogcolor.d & 0xffffff))
 	{
@@ -551,7 +552,7 @@ CCMD(skyfog)
 {
 	if (argv.argc()>1)
 	{
-		skyfog=strtol(argv[1],NULL,0);
+		skyfog = MAX(0, (int)strtoull(argv[1], NULL, 0));
 	}
 }
 

@@ -253,7 +253,7 @@ DThinker::~DThinker ()
 	assert(NextThinker == NULL && PrevThinker == NULL);
 }
 
-void DThinker::Destroy ()
+void DThinker::OnDestroy ()
 {
 	assert((NextThinker != NULL && PrevThinker != NULL) ||
 		   (NextThinker == NULL && PrevThinker == NULL));
@@ -261,7 +261,7 @@ void DThinker::Destroy ()
 	{
 		Remove();
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -710,8 +710,12 @@ class DThinkerIterator : public DObject, public FThinkerIterator
 {
 	DECLARE_CLASS(DThinkerIterator, DObject)
 
+	DThinkerIterator()
+	{
+	}
+
 public:
-	DThinkerIterator(PClass *cls = nullptr, int statnum = MAX_STATNUM + 1)
+	DThinkerIterator(PClass *cls, int statnum = MAX_STATNUM + 1)
 		: FThinkerIterator(cls, statnum)
 	{
 	}

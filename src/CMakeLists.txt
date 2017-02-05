@@ -13,7 +13,6 @@ include( CheckIncludeFile )
 include( CheckIncludeFiles )
 include( CheckLibraryExists )
 include( FindPkgConfig )
-include( FindOpenGL )
 
 if( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
 	option( NO_STRIP "Do not strip Release or MinSizeRel builds" )
@@ -102,6 +101,7 @@ if( WIN32 )
 	endif()
 
 	set( ZDOOM_LIBS
+		opengl32
 		wsock32
 		winmm
 		"${DX_dinput8_LIBRARY}"
@@ -180,15 +180,6 @@ else()
 		add_definitions( -DHAVE_FPU_CONTROL )
 	endif()
 endif()
-
-# Check if we have OpenGL
-
-if( NOT OPENGL_FOUND )
-	message( FATAL_ERROR "OpenGL is required for building." )
-endif( NOT OPENGL_FOUND )
-
-set( ZDOOM_LIBS ${ZDOOM_LIBS} ${OPENGL_LIBRARIES} )
-include_directories( ${OPENGL_INCLUDE_DIR} )
 
 if( NOT NO_OPENAL )
 	find_package( OpenAL )
@@ -445,7 +436,7 @@ add_custom_target( revision_check ALL
 # Libraries ZDoom needs
 
 message( STATUS "Fluid synth libs: ${FLUIDSYNTH_LIBRARIES}" )
-set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" "${BZIP2_LIBRARIES}" "${GME_LIBRARIES}" )
+set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" "${BZIP2_LIBRARIES}" "${GME_LIBRARIES}" "${CMAKE_DL_LIBS}" )
 include_directories( "${ZLIB_INCLUDE_DIR}" "${BZIP2_INCLUDE_DIR}" "${LZMA_INCLUDE_DIR}" "${JPEG_INCLUDE_DIR}" "${GME_INCLUDE_DIR}" )
 
 if( SNDFILE_FOUND )
@@ -461,8 +452,6 @@ if( NOT DYN_FLUIDSYNTH )
 		set( ZDOOM_LIBS ${ZDOOM_LIBS} "${FLUIDSYNTH_LIBRARIES}" )
 		include_directories( "${FLUIDSYNTH_INCLUDE_DIR}" )
 	endif()
-else()
-	set( ZDOOM_LIBS ${ZDOOM_LIBS} ${CMAKE_DL_LIBS} )
 endif()
 
 # Start defining source files for ZDoom
@@ -479,7 +468,6 @@ set( PLAT_WIN32_SOURCES
 	win32/i_rawps2.cpp
 	win32/i_xinput.cpp
 	win32/i_main.cpp
-	win32/i_movie.cpp
 	win32/i_system.cpp
 	win32/i_specialpaths.cpp
 	win32/st_start.cpp
@@ -487,7 +475,6 @@ set( PLAT_WIN32_SOURCES
 	win32/win32video.cpp )
 set( PLAT_POSIX_SOURCES
 	posix/i_cd.cpp
-	posix/i_movie.cpp
 	posix/i_steam.cpp )
 set( PLAT_SDL_SOURCES
 	posix/sdl/crashcatcher.c
@@ -621,8 +608,8 @@ file( GLOB HEADER_FILES
 	${EXTRA_HEADER_DIRS}
 	fragglescript/*.h
 	g_shared/*.h
+	g_statusbar/*.h
 	g_inventory/*.h
-	g_strife/*.h
 	intermission/*.h
 	menu/*.h
 	posix/*.h
@@ -664,7 +651,7 @@ set( NOT_COMPILED_SOURCE_FILES
 	${OTHER_SYSTEM_SOURCES}
 	sc_man_scanner.h
 	sc_man_scanner.re
-	g_shared/sbarinfo_commands.cpp
+	g_statusbar/sbarinfo_commands.cpp
 	xlat/xlat_parser.y
 	xlat_parser.c
 	xlat_parser.h
@@ -945,7 +932,6 @@ set (PCH_SOURCES
 	p_udmf.cpp
 	p_usdf.cpp
 	p_user.cpp
-	p_writemap.cpp
 	p_xlat.cpp
 	parsecontext.cpp
 	po_man.cpp
@@ -970,37 +956,22 @@ set (PCH_SOURCES
 	w_wad.cpp
 	wi_stuff.cpp
 	zstrformat.cpp
-	g_inventory/a_ammo.cpp
-	g_inventory/a_armor.cpp
-	g_inventory/a_artifacts.cpp
-	g_inventory/a_health.cpp
 	g_inventory/a_keys.cpp
 	g_inventory/a_pickups.cpp
-	g_inventory/a_puzzleitems.cpp
-	g_inventory/a_weaponpiece.cpp
 	g_inventory/a_weapons.cpp
-	g_strife/strife_sbar.cpp
 	g_shared/a_action.cpp
-	g_shared/a_bridge.cpp
 	g_shared/a_decals.cpp
-	g_shared/a_fastprojectile.cpp
 	g_shared/a_flashfader.cpp
-	g_shared/a_fountain.cpp
 	g_shared/a_lightning.cpp
 	g_shared/a_morph.cpp
-	g_shared/a_movingcamera.cpp
 	g_shared/a_quake.cpp
-	g_shared/a_randomspawner.cpp
-	g_shared/a_sectoraction.cpp
-	g_shared/a_skies.cpp
-	g_shared/a_soundenvironment.cpp
-	g_shared/a_soundsequence.cpp
 	g_shared/a_specialspot.cpp
 	g_shared/hudmessages.cpp
-	g_shared/sbarinfo.cpp
-	g_shared/sbar_mugshot.cpp
 	g_shared/shared_hud.cpp
-	g_shared/shared_sbar.cpp
+	g_statusbar/sbarinfo.cpp
+	g_statusbar/sbar_mugshot.cpp
+	g_statusbar/shared_sbar.cpp
+	g_statusbar/strife_sbar.cpp
 	resourcefiles/ancientzip.cpp
 	resourcefiles/file_7z.cpp
 	resourcefiles/file_grp.cpp
@@ -1049,6 +1020,7 @@ set (PCH_SOURCES
 	scripting/thingdef_data.cpp
 	scripting/thingdef_properties.cpp
 	scripting/codegeneration/codegen.cpp
+	scripting/codegeneration/dynarrays.cpp
 	scripting/decorate/olddecorations.cpp
 	scripting/decorate/thingdef_exp.cpp
 	scripting/decorate/thingdef_parse.cpp
@@ -1059,7 +1031,6 @@ set (PCH_SOURCES
 	scripting/vm/vmframe.cpp
 	scripting/zscript/ast.cpp
 	scripting/zscript/zcc_compile.cpp
-	scripting/zscript/zcc_expr.cpp
 	scripting/zscript/zcc_parser.cpp
 	sfmt/SFMT.cpp
 )
@@ -1113,7 +1084,7 @@ endif()
 
 target_link_libraries( zdoom ${ZDOOM_LIBS} gdtoa dumb lzma )
 include_directories( .
-	g_strife
+	g_statusbar
 	g_shared
 	g_inventory
 	sound
@@ -1205,7 +1176,6 @@ source_group("External\\Math" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/m
 source_group("External\\RapidJSON" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/.+")
 source_group("External\\SFMT" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/sfmt/.+")
 source_group("FraggleScript" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/fragglescript/.+")
-source_group("Games\\Strife Game" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/g_strife/.+")
 source_group("Intermission" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/intermission/.+")
 source_group("Inventory" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/g_inventory/.+")
 source_group("Menu" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/menu/.+")
@@ -1242,6 +1212,7 @@ source_group("Scripting\\Code Generation" REGULAR_EXPRESSION "^${CMAKE_CURRENT_S
 source_group("Scripting\\VM" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/scripting/vm/.+")
 source_group("Scripting" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/scripting/.+")
 source_group("Shared Game" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/g_shared/.+")
+source_group("Statusbar" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/g_statusbar/.+")
 source_group("Versioning" FILES version.h win32/zdoom.rc)
 source_group("Xlat" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/xlat/.+" FILES ${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.c ${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.h)
 source_group("Source Files" FILES ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h sc_man_scanner.re)

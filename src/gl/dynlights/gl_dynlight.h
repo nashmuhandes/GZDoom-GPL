@@ -108,7 +108,7 @@ public:
 	void BeginPlay();
 	void SetOrigin (double x, double y, double z, bool moving = false);
 	void PostBeginPlay();
-	void Destroy();
+	void OnDestroy() override;
 	void Activate(AActor *activator);
 	void Deactivate(AActor *activator);
 	void SetOffset(const DVector3 &pos);
@@ -135,7 +135,6 @@ protected:
 
 public:
 	int m_tickCount;
-	int m_Radius[2];
 	BYTE lightflags;
 	BYTE lighttype;
 	bool owned;
@@ -146,28 +145,6 @@ public:
 
 
 };
-
-class AVavoomLight : public ADynamicLight
-{
-   DECLARE_CLASS (AVavoomLight, ADynamicLight)
-public:
-   virtual void BeginPlay();
-};
-
-class AVavoomLightWhite : public AVavoomLight
-{
-   DECLARE_CLASS (AVavoomLightWhite, AVavoomLight)
-public:
-   virtual void BeginPlay();
-};
-
-class AVavoomLightColor : public AVavoomLight
-{
-   DECLARE_CLASS (AVavoomLightColor, AVavoomLight)
-public:
-	void BeginPlay();
-};
-
 
 enum
 {

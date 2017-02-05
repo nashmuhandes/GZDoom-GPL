@@ -40,6 +40,7 @@
 #include "gi.h"
 #include "p_setup.h"
 #include "g_level.h"
+#include "g_levellocals.h"
 
 #include "gl/renderer/gl_renderer.h"
 #include "gl/data/gl_data.h"
@@ -257,11 +258,11 @@ static void PrepareSectorData()
 		ss->render_sector->subsectorcount++;
 	}
 
-	for (i=0; i<numsectors; i++) 
+	for (auto &sec : level.sectors) 
 	{
-		sectors[i].subsectors = subsectorbuffer;
-		subsectorbuffer += sectors[i].subsectorcount;
-		sectors[i].subsectorcount = 0;
+		sec.subsectors = subsectorbuffer;
+		subsectorbuffer += sec.subsectorcount;
+		sec.subsectorcount = 0;
 	}
 	
 	for(i=0, ss = subsectors; i<numsubsectors; i++, ss++)
@@ -306,13 +307,6 @@ static void PrepareTransparentDoors(sector_t * sector)
 	unsigned int nobtextures=0;
 	unsigned int selfref=0;
 	sector_t * nextsec=NULL;
-
-#ifdef _DEBUG
-	if (sector-sectors==34)
-	{
-		int a = 0;
-	}
-#endif
 
 	P_Recalculate3DFloors(sector);
 	if (sector->subsectorcount==0) return;
@@ -388,7 +382,7 @@ static void PrepareTransparentDoors(sector_t * sector)
 
 static void AddToVertex(const sector_t * sec, TArray<int> & list)
 {
-	int secno = int(sec-sectors);
+	int secno = sec->Index();
 
 	for(unsigned i=0;i<list.Size();i++)
 	{
@@ -405,55 +399,49 @@ static void AddToVertex(const sector_t * sec, TArray<int> & list)
 
 static void InitVertexData()
 {
-	TArray<int> * vt_sectorlists;
+	auto vt_sectorlists = new TArray<int>[level.vertexes.Size()];
 
-	int i,j,k;
-
-	vt_sectorlists = new TArray<int>[numvertexes];
-
-
-	for(i=0;i<numlines;i++)
+	for(auto &line : level.lines)
 	{
-		line_t * line = &lines[i];
-
-		for(j=0;j<2;j++)
+		for(int j = 0; j < 2; ++j)
 		{
-			vertex_t * v = j==0? line->v1 : line->v2;
+			vertex_t * v = j==0? line.v1 : line.v2;
 
-			for(k=0;k<2;k++)
+			for(int k = 0; k < 2; ++k)
 			{
-				sector_t * sec = k==0? line->frontsector : line->backsector;
+				sector_t * sec = k==0? line.frontsector : line.backsector;
 
 				if (sec)
 				{
 					extsector_t::xfloor &x = sec->e->XFloor;
 
-					AddToVertex(sec, vt_sectorlists[v-vertexes]);
-					if (sec->heightsec) AddToVertex(sec->heightsec, vt_sectorlists[v-vertexes]);
+					AddToVertex(sec, vt_sectorlists[v->Index()]);
+					if (sec->heightsec) AddToVertex(sec->heightsec, vt_sectorlists[v->Index()]);
 				}
 			}
 		}
 	}
 
-	for(i=0;i<numvertexes;i++)
+	for(unsigned i = 0; i < level.vertexes.Size(); ++i)
 	{
+		auto vert = level.vertexes[i];
 		int cnt = vt_sectorlists[i].Size();
 
-		vertexes[i].dirty = true;
-		vertexes[i].numheights=0;
+		vert.dirty = true;
+		vert.numheights=0;
 		if (cnt>1)
 		{
-			vertexes[i].numsectors= cnt;
-			vertexes[i].sectors=new sector_t*[cnt];
-			vertexes[i].heightlist = new float[cnt*2];
+			vert.numsectors= cnt;
+			vert.sectors=new sector_t*[cnt];
+			vert.heightlist = new float[cnt*2];
 			for(int j=0;j<cnt;j++)
 			{
-				vertexes[i].sectors[j] = &sectors[vt_sectorlists[i][j]];
+				vert.sectors[j] = &level.sectors[vt_sectorlists[i][j]];
 			}
 		}
 		else
 		{
-			vertexes[i].numsectors=0;
+			vert.numsectors=0;
 		}
 	}
 
@@ -468,8 +456,8 @@ static void InitVertexData()
 
 static void GetSideVertices(int sdnum, DVector2 *v1, DVector2 *v2)
 {
-	line_t *ln = sides[sdnum].linedef;
-	if (ln->sidedef[0] == &sides[sdnum]) 
+	line_t *ln = level.sides[sdnum].linedef;
+	if (ln->sidedef[0] == &level.sides[sdnum])
 	{
 		*v1 = ln->v1->fPos();
 		*v2 = ln->v2->fPos();
@@ -496,54 +484,25 @@ static int segcmp(const void *a, const void *b)
 
 static void PrepareSegs()
 {
+	auto numsides = level.sides.Size();
 	int *segcount = new int[numsides];
 	int realsegs = 0;
 
 	// Get floatng point coordinates of vertices
-	for(int i = 0; i < numvertexes; i++)
+	for(auto &v : level.vertexes)
 	{
-		vertexes[i].dirty = true;
+		v.dirty = true;
 	}
 
 	// count the segs
 	memset(segcount, 0, numsides * sizeof(int));
-	
-	// set up the extra data in case the map was loaded with regular nodes that might pass as GL nodes.
-	if (glsegextras == NULL)
-	{
-		for(int i=0;i<numsegs;i++)
-		{
-			segs[i].PartnerSeg = NULL;
-		}
-		for (int i=0; i<numsubsectors; i++)
-		{
-			int seg = int(subsectors[i].firstline-segs);
-			for(DWORD j=0;j<subsectors[i].numlines;j++)
-			{
-				segs[j+seg].Subsector = &subsectors[i];
-			}
-		}
-	}
-	else
-	{
-		for(int i=0;i<numsegs;i++)
-		{
-			seg_t *seg = &segs[i];
-
-			// Account for ZDoom space optimizations that cannot be done for GL
-			unsigned int partner= glsegextras[i].PartnerSeg;
-			if (partner < unsigned(numsegs))  seg->PartnerSeg = &segs[partner];
-			else seg->PartnerSeg = NULL;
-			seg->Subsector = glsegextras[i].Subsector;
-		}
-	}
 
 	for(int i=0;i<numsegs;i++)
 	{
 		seg_t *seg = &segs[i];
 
 		if (seg->sidedef == NULL) continue;	// miniseg
-		int sidenum = int(seg->sidedef - sides);
+		int sidenum = seg->sidedef->Index();
 
 		realsegs++;
 		segcount[sidenum]++;
@@ -557,13 +516,13 @@ static void PrepareSegs()
 	}
 
 	// allocate memory
-	sides[0].segs = new seg_t*[realsegs];
-	sides[0].numsegs = 0;
+	level.sides[0].segs = new seg_t*[realsegs];
+	level.sides[0].numsegs = 0;
 
-	for(int i = 1; i < numsides; i++)
+	for(unsigned i = 1; i < numsides; i++)
 	{
-		sides[i].segs = sides[i-1].segs + segcount[i-1];
-		sides[i].numsegs = 0;
+		level.sides[i].segs = level.sides[i-1].segs + segcount[i-1];
+		level.sides[i].numsegs = 0;
 	}
 	delete [] segcount;
 
@@ -575,9 +534,9 @@ static void PrepareSegs()
 	}
 
 	// sort the segs
-	for(int i = 0; i < numsides; i++)
+	for(unsigned i = 0; i < numsides; i++)
 	{
-		if (sides[i].numsegs > 1) qsort(sides[i].segs, sides[i].numsegs, sizeof(seg_t*), segcmp);
+		if (level.sides[i].numsegs > 1) qsort(level.sides[i].segs, level.sides[i].numsegs, sizeof(seg_t*), segcmp);
 	}
 }
 
@@ -590,38 +549,36 @@ extern int restart;
 
 void gl_PreprocessLevel()
 {
-	int i;
-
 	PrepareSegs();
 	PrepareSectorData();
 	InitVertexData();
-	int *checkmap = new int[numvertexes];
-	memset(checkmap, -1, sizeof(int)*numvertexes);
-	for(i=0;i<numsectors;i++) 
+	int *checkmap = new int[level.vertexes.Size()];
+	memset(checkmap, -1, sizeof(int)*level.vertexes.Size());
+	for(auto &sec : level.sectors) 
 	{
-		sectors[i].sectornum = i;
-		PrepareTransparentDoors(&sectors[i]);
+		int i = sec.sectornum;
+		PrepareTransparentDoors(&sec);
 
 		// This ignores vertices only used for seg splitting because those aren't needed here
-		for(auto l : sectors[i].Lines)
+		for(auto l : sec.Lines)
 		{
 			if (l->sidedef[0]->Flags & WALLF_POLYOBJ) continue;	// don't bother with polyobjects
 
-			int vtnum1 = int(l->v1 - vertexes);
-			int vtnum2 = int(l->v2 - vertexes);
+			int vtnum1 = l->v1->Index();
+			int vtnum2 = l->v2->Index();
 
 			if (checkmap[vtnum1] < i)
 			{
 				checkmap[vtnum1] = i;
-				sectors[i].e->vertices.Push(&vertexes[vtnum1]);
-				vertexes[vtnum1].dirty = true;
+				sec.e->vertices.Push(&level.vertexes[vtnum1]);
+				level.vertexes[vtnum1].dirty = true;
 			}
 
 			if (checkmap[vtnum2] < i)
 			{
 				checkmap[vtnum2] = i;
-				sectors[i].e->vertices.Push(&vertexes[vtnum2]);
-				vertexes[vtnum2].dirty = true;
+				sec.e->vertices.Push(&level.vertexes[vtnum2]);
+				level.vertexes[vtnum2].dirty = true;
 			}
 		}
 	}
@@ -661,32 +618,15 @@ void gl_CleanLevelData()
 		mo=next;
 	}
 
-	if (vertexes != NULL)
+	if (level.sides.Size() > 0 && level.sides[0].segs)
 	{
-		for(int i = 0; i < numvertexes; i++) if (vertexes[i].numsectors > 0)
-		{
-			if (vertexes[i].sectors != NULL)
-			{
-				delete [] vertexes[i].sectors;
-				vertexes[i].sectors = NULL;
-			}
-			if (vertexes[i].heightlist != NULL)
-			{
-				delete [] vertexes[i].heightlist;
-				vertexes[i].heightlist = NULL;
-			}
-		}
+		delete [] level.sides[0].segs;
+		level.sides[0].segs = NULL;
 	}
-
-	if (sides && sides[0].segs)
+	if (level.sectors.Size() > 0 && level.sectors[0].subsectors) 
 	{
-		delete [] sides[0].segs;
-		sides[0].segs = NULL;
-	}
-	if (sectors && sectors[0].subsectors) 
-	{
-		delete [] sectors[0].subsectors;
-		sectors[0].subsectors = NULL;
+		delete [] level.sectors[0].subsectors;
+		level.sectors[0].subsectors = nullptr;
 	}
 	for (int i=0;i<numsubsectors;i++)
 	{
@@ -721,7 +661,7 @@ CCMD(listmapsections)
 		{
 			if (subsectors[j].mapsection == i)
 			{
-				Printf("Mapsection %d, sector %d, line %d\n", i, subsectors[j].render_sector->sectornum, int(subsectors[j].firstline->linedef-lines));
+				Printf("Mapsection %d, sector %d, line %d\n", i, subsectors[j].render_sector->Index(), subsectors[j].firstline->linedef->Index());
 				break;
 			}
 		}

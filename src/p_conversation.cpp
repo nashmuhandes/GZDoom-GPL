@@ -60,6 +60,7 @@
 #include "r_utility.h"
 #include "p_local.h"
 #include "menu/menu.h"
+#include "g_levellocals.h"
 
 // The conversations as they exist inside a SCRIPTxx lump.
 struct Response
@@ -641,7 +642,7 @@ static void TakeStrifeItem (player_t *player, PClassActor *itemtype, int amount)
 		return;
 
 	// Don't take keys.
-	if (itemtype->IsDescendantOf (RUNTIME_CLASS(AKey)))
+	if (itemtype->IsDescendantOf (PClass::FindActor(NAME_Key)))
 		return;
 
 	// Don't take the sigil.
@@ -828,12 +829,12 @@ public:
 	//
 	//=============================================================================
 
-	void Destroy()
+	void OnDestroy() override
 	{
 		V_FreeBrokenLines(mDialogueLines);
 		mDialogueLines = NULL;
 		I_SetMusicVolume (1.f);
-		Super::Destroy();
+		Super::OnDestroy();
 	}
 
 	bool DimAllowed()
@@ -1060,10 +1061,10 @@ public:
 
 				mysnprintf(goldstr, countof(goldstr), "%d", coin != NULL ? coin->Amount : 0);
 				screen->DrawText(SmallFont, CR_GRAY, 21, 191, goldstr, DTA_320x200, true,
-					DTA_FillColor, 0, DTA_AlphaF, HR_SHADOW, TAG_DONE);
+					DTA_FillColor, 0, DTA_Alpha, HR_SHADOW, TAG_DONE);
 				screen->DrawTexture(TexMan(((AInventory *)GetDefaultByType(cointype))->Icon),
 					3, 190, DTA_320x200, true,
-					DTA_FillColor, 0, DTA_AlphaF, HR_SHADOW, TAG_DONE);
+					DTA_FillColor, 0, DTA_Alpha, HR_SHADOW, TAG_DONE);
 				screen->DrawText(SmallFont, CR_GRAY, 20, 190, goldstr, DTA_320x200, true, TAG_DONE);
 				screen->DrawTexture(TexMan(((AInventory *)GetDefaultByType(cointype))->Icon),
 					2, 189, DTA_320x200, true, TAG_DONE);

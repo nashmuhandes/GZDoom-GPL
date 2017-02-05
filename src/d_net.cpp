@@ -64,6 +64,7 @@
 #include "r_utility.h"
 #include "a_keys.h"
 #include "intermission/intermission.h"
+#include "g_levellocals.h"
 
 EXTERN_CVAR (Int, disableautosave)
 EXTERN_CVAR (Int, autosavecount)
@@ -2109,6 +2110,11 @@ static int RemoveClass(const PClass *cls)
 				player = true;
 				continue;
 			}
+			// [SP] Don't remove owned inventory objects.
+			if (actor->IsKindOf(RUNTIME_CLASS(AInventory)) && static_cast<AInventory *>(actor)->Owner != NULL)
+			{
+				continue;
+			}
 			removecount++; 
 			actor->ClearCounters();
 			actor->Destroy();
@@ -2193,12 +2199,12 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 
 	case DEM_GIVECHEAT:
 		s = ReadString (stream);
-		cht_Give (&players[player], s, ReadWord (stream));
+		cht_Give (&players[player], s, ReadLong (stream));
 		break;
 
 	case DEM_TAKECHEAT:
 		s = ReadString (stream);
-		cht_Take (&players[player], s, ReadWord (stream));
+		cht_Take (&players[player], s, ReadLong (stream));
 		break;
 
 	case DEM_WARPCHEAT:
@@ -2248,11 +2254,11 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 		if (gamestate == GS_LEVEL && !paused)
 		{
 			AInventory *item = players[player].mo->Inventory;
-
+			auto pitype = PClass::FindActor(NAME_PuzzleItem);
 			while (item != NULL)
 			{
 				AInventory *next = item->Inventory;
-				if (item->ItemFlags & IF_INVBAR && !(item->IsKindOf(RUNTIME_CLASS(APuzzleItem))))
+				if (item->ItemFlags & IF_INVBAR && !(item->IsKindOf(pitype)))
 				{
 					players[player].mo->UseInventory (item);
 				}
@@ -2716,7 +2722,7 @@ void Net_SkipCommand (int type, BYTE **stream)
 
 		case DEM_GIVECHEAT:
 		case DEM_TAKECHEAT:
-			skip = strlen ((char *)(*stream)) + 3;
+			skip = strlen ((char *)(*stream)) + 5;
 			break;
 
 		case DEM_SUMMON2:

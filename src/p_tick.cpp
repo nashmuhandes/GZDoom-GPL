@@ -36,6 +36,7 @@
 #include "g_level.h"
 #include "r_utility.h"
 #include "p_spec.h"
+#include "g_levellocals.h"
 
 extern gamestate_t wipegamestate;
 

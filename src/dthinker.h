@@ -66,7 +66,7 @@ class DThinker : public DObject
 	DECLARE_CLASS (DThinker, DObject)
 public:
 	DThinker (int statnum = STAT_DEFAULT) throw();
-	void Destroy () override;
+	void OnDestroy () override;
 	virtual ~DThinker ();
 	virtual void Tick ();
 	void CallTick();
@@ -125,6 +125,9 @@ public:
 	FThinkerIterator (const PClass *type, int statnum, DThinker *prev);
 	DThinker *Next (bool exact = false);
 	void Reinit ();
+
+protected:
+	FThinkerIterator() {}
 };
 
 template <class T> class TThinkerIterator : public FThinkerIterator

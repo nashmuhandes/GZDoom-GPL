@@ -1,5 +1,5 @@
 in vec4 pixelpos;
-in vec2 glowdist;
+in vec3 glowdist;
 
 in vec4 vWorldNormal;
 in vec4 vEyeNormal;
@@ -89,7 +89,8 @@ vec4 getTexel(vec2 st)
 			}
 			break;
 	}
-	texel *= uObjectColor;
+	if (uObjectColor2.a == 0) texel *= uObjectColor;
+	else texel *= mix(uObjectColor, uObjectColor2, glowdist.z);
 
 	return desaturate(texel);
 }
@@ -121,7 +122,11 @@ float R_DoomLightingEquation(float light)
 	/* The zdoom light equation */
 	float vis = globVis / z;
 	float shade = 64.0 - (L + 12.0) * 32.0/128.0;
-	float lightscale = clamp((shade - min(24.0, vis)) / 32.0, 0.0, 31.0/32.0);
+	float lightscale;
+	if (uPalLightLevels != 0)
+		lightscale = clamp(float(int(shade - min(24.0, vis))) / 32.0, 0.0, 31.0/32.0);
+	else
+		lightscale = clamp((shade - min(24.0, vis)) / 32.0, 0.0, 31.0/32.0);
 
 	// Result is the normalized colormap index (0 bright .. 1 dark)
 	return lightscale;

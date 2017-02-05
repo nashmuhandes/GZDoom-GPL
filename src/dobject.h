@@ -39,7 +39,7 @@
 #include "i_system.h"
 
 class PClass;
-
+class PType;
 class FSerializer;
 
 class   DObject;
@@ -94,15 +94,10 @@ enum
 	CLASSREG_PClass,
 	CLASSREG_PClassActor,
 	CLASSREG_PClassInventory,
-	CLASSREG_PClassAmmo,
-	CLASSREG_PClassHealth,
-	CLASSREG_PClassPuzzleItem,
 	CLASSREG_PClassWeapon,
 	CLASSREG_PClassPlayerPawn,
 	CLASSREG_PClassType,
 	CLASSREG_PClassClass,
-	CLASSREG_PClassWeaponPiece,
-	CLASSREG_PClassPowerupGiver
 };
 
 struct ClassReg
@@ -213,7 +208,6 @@ enum EObjectFlags
 	OF_SerialSuccess	= 1 << 9,		// For debugging Serialize() calls
 	OF_Sentinel			= 1 << 10,		// Object is serving as the sentinel in a ring list
 	OF_Transient		= 1 << 11,		// Object should not be archived (references to it will be nulled on disk)
-	OF_SuperCall		= 1 << 12,		// A super call from the VM is about to be performed
 };
 
 template<class T> class TObjPtr;
@@ -456,6 +450,10 @@ public:
 	DObject *GCNext;			// Next object in this collection list
 	uint32 ObjectFlags;			// Flags for this object
 
+	void *ScriptVar(FName field, PType *type);
+
+protected:
+
 public:
 	DObject ();
 	DObject (PClass *inClass);
@@ -476,7 +474,16 @@ public:
 	// that don't call their base class.
 	void CheckIfSerialized () const;
 
-	virtual void Destroy();
+	virtual void OnDestroy() {}
+	void Destroy();
+
+	// Add other types as needed.
+	bool &BoolVar(FName field);
+	int &IntVar(FName field);
+	PalEntry &ColorVar(FName field);
+	FName &NameVar(FName field);
+	double &FloatVar(FName field);
+	template<class T> T*& PointerVar(FName field);
 
 	// If you need to replace one object with another and want to
 	// change any pointers from the old object to the new object,

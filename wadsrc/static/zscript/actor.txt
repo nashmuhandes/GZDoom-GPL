@@ -1,3 +1,40 @@
+struct FCheckPosition
+{
+	// in
+	native Actor		thing;
+	native Vector3		pos;
+
+	// out
+	native Sector		cursector;
+	native double		floorz;
+	native double		ceilingz;
+	native double		dropoffz;
+	native TextureID	floorpic;
+	native int			floorterrain;
+	native Sector		floorsector;
+	native TextureID	ceilingpic;
+	native Sector		ceilingsector;
+	native bool			touchmidtex;
+	native bool			abovemidtex;
+	native bool			floatok;
+	native bool			FromPMove;
+	native line			ceilingline;
+	native Actor		stepthing;
+	native bool			DoRipping;
+	native bool			portalstep;
+
+	native int			PushTime;
+	
+	native void ClearLastRipped();
+}
+
+struct LinkContext
+{
+	voidptr sector_list;	// really msecnode but that's not exported yet.
+	voidptr render_list;
+}
+
+
 class Actor : Thinker native
 {
 	const DEFAULT_HEALTH = 1000;
@@ -45,7 +82,7 @@ class Actor : Thinker native
 	native TextureID ceilingpic;
 	native double Height;
 	native readonly double Radius;
-        native readonly double RenderRadius;
+    native readonly double RenderRadius;
 	native double projectilepassheight;
 	native int tics;
 	native readonly State CurState;
@@ -70,8 +107,8 @@ class Actor : Thinker native
 	native int ReactionTime;
 	native int Threshold;
 	native readonly int DefThreshold;
-	native readonly vector3 SpawnPoint;
-	native readonly uint16 SpawnAngle;
+	native vector3 SpawnPoint;
+	native uint16 SpawnAngle;
 	native int StartHealth;
 	native uint8 WeaveIndexXY;
 	native uint8 WeaveIndexZ;
@@ -114,6 +151,7 @@ class Actor : Thinker native
 	native int lastbump;
 	native int DesignatedTeam;
 	native Actor BlockingMobj;
+	native Line BlockingLine;
 	native int PoisonDamage;
 	native name PoisonDamageType;
 	native int PoisonDuration;
@@ -149,6 +187,8 @@ class Actor : Thinker native
 	native readonly State SeeState;
 	native State MeleeState;
 	native State MissileState;
+	native voidptr /*DecalBase*/ DecalGenerator;
+	native uint8 fountaincolor;
 	
 	native meta String Obituary;		// Player was killed by this actor
 	native meta String HitObituary;		// Player was killed by this actor in melee
@@ -175,9 +215,7 @@ class Actor : Thinker native
 
 	// need some definition work first
 	//FRenderStyle RenderStyle;
-	//line_t *BlockingLine; // Line that blocked the last move
 	//int ConversationRoot; // THe root of the current dialogue
-	//DecalBase DecalGenerator;
 
 	// deprecated things.
 	native readonly deprecated double X;
@@ -250,6 +288,7 @@ class Actor : Thinker native
 	native static double absangle(double ang1, double ang2);
 	native static Vector2 AngleToVector(double angle, double length = 1);
 	native static Vector2 RotateVector(Vector2 vec, double angle);
+	native static double Normalize180(double ang);
 	
 
 	bool IsPointerEqual(int ptr_select1, int ptr_select2)
@@ -270,6 +309,7 @@ class Actor : Thinker native
 	virtual native void Die(Actor source, Actor inflictor, int dmgflags = 0);
 	virtual native bool Slam(Actor victim);
 	virtual native void Touch(Actor toucher);
+	virtual native void MarkPrecacheSounds();
 
 	// Called by PIT_CheckThing to check if two actos actually can collide.
 	virtual bool CanCollideWith(Actor other, bool passive)
@@ -291,6 +331,8 @@ class Actor : Thinker native
 	}
 	
 
+	native static class<Actor> GetReplacement(class<Actor> cls);
+	native static class<Actor> GetReplacee(class<Actor> cls);
 	native static int GetSpriteIndex(name sprt);
 	native static double GetDefaultSpeed(class<Actor> type);
 	native static class<Actor> GetSpawnableType(int spawnnum);
@@ -314,7 +356,13 @@ class Actor : Thinker native
 	native void ClearBounce();
 	native TerrainDef GetFloorTerrain();
 	native bool CheckLocalView(int consoleplayer);
-
+	native bool CheckNoDelay();
+	native bool UpdateWaterLevel (bool splash = true);
+	native bool IsZeroDamage();
+	native void ClearInterpolation();
+	native Vector3 PosRelative(sector sec);
+		
+	native void HandleSpawnFlags();
 	native void ExplodeMissile(line lin = null, Actor target = null);
 	native void RestoreDamage();
 	native int SpawnHealth();
@@ -325,9 +373,9 @@ class Actor : Thinker native
 	native void SetXYZ(vector3 newpos);
 	native Actor GetPointer(int aaptr);
 	native double BulletSlope(out FTranslatedLineTarget pLineTarget = null, int aimflags = 0);
-	native Actor AimTarget();
+	
 	native bool CheckMissileSpawn(double maxdist);
-	native bool CheckPosition(Vector2 pos, bool actorsonly = false);
+	native bool CheckPosition(Vector2 pos, bool actorsonly = false, FCheckPosition tm = null);
 	native bool TestMobjLocation();
 	native static Actor Spawn(class<Actor> type, vector3 pos = (0,0,0), int replace = NO_REPLACE);
 	native Actor SpawnMissile(Actor dest, class<Actor> type, Actor owner = null);
@@ -364,7 +412,7 @@ class Actor : Thinker native
 	native void SetIdle(bool nofunction = false);
 	native bool CheckMeleeRange();
 	native bool CheckMeleeRange2();
-	native int DamageMobj(Actor inflictor, Actor source, int damage, Name mod, int flags = 0, double angle = 0);
+	native virtual int DamageMobj(Actor inflictor, Actor source, int damage, Name mod, int flags = 0, double angle = 0);
 	native void PoisonMobj (Actor inflictor, Actor source, int damage, int duration, int period, Name type);
 	native double AimLineAttack(double angle, double distance, out FTranslatedLineTarget pLineTarget = null, double vrange = 0., int flags = 0, Actor target = null, Actor friender = null);
 	native Actor, int LineAttack(double angle, double distance, double pitch, int damage, Name damageType, class<Actor> pufftype, int flags = 0, out FTranslatedLineTarget victim = null);
@@ -373,6 +421,10 @@ class Actor : Thinker native
 	native bool HitFriend();
 	native bool MonsterMove();
 	
+	native SeqNode StartSoundSequenceID (int sequence, int type, int modenum, bool nostop = false);
+	native SeqNode StartSoundSequence (Name seqname, int modenum);
+	native void StopSoundSequence();
+
 	native void FindFloorCeiling(int flags = 0);
 	native double, double GetFriction();
 	native bool, Actor TestMobjZ(bool quick = false);
@@ -388,7 +440,7 @@ class Actor : Thinker native
 		return true;
 	}
 	
-	native bool TryMove(vector2 newpos, int dropoff);
+	native bool TryMove(vector2 newpos, int dropoff, bool missilecheck = false, FCheckPosition tm = null);
 	native void NewChaseDir();
 	native void RandomChaseDir();
 	native bool CheckMissileRange();
@@ -396,8 +448,8 @@ class Actor : Thinker native
 	native state FindState(statelabel st, bool exact = false);
 	bool SetStateLabel(statelabel st, bool nofunction = false) { return SetState(FindState(st), nofunction); }
 	native action state ResolveState(statelabel st);	// this one, unlike FindState, is context aware.
-	native void LinkToWorld();
-	native void UnlinkFromWorld();
+	native void LinkToWorld(LinkContext ctx = null);
+	native void UnlinkFromWorld(out LinkContext ctx = null);
 	native bool CanSeek(Actor target);
 	native double AngleTo(Actor target, bool absolute = false);
 	native void AddZ(double zadd, bool moving = true);
@@ -435,12 +487,17 @@ class Actor : Thinker native
 	native void AddInventory(Inventory inv);
 	native void RemoveInventory(Inventory inv);
 	native void ClearInventory();
+	native bool GiveInventory(class<Inventory> type, int amount, bool givecheat = false);
+	native bool TakeInventory(class<Inventory> itemclass, int amount, bool fromdecorate = false, bool notakeinfinite = false);
 	native Inventory FindInventory(class<Inventory> itemtype, bool subclass = false);
 	native Inventory GiveInventoryType(class<Inventory> itemtype);
 	native Inventory DropInventory (Inventory item);
 	native bool UseInventory(Inventory item);
+	native void ObtainInventory(Actor other);
 	native bool GiveAmmo (Class<Ammo> type, int amount);
+	native bool UsePuzzleItem(int PuzzleItemType);
 	native float AccuracyFactor();
+	native bool MorphMonster (Class<Actor> spawntype, int duration, int style, Class<Actor> enter_flash, Class<Actor> exit_flash);
 
 	// DECORATE compatible functions
 	native int	CountInv(class<Inventory> itemtype, int ptr_select = AAPTR_DEFAULT);
@@ -636,6 +693,12 @@ class Actor : Thinker native
 		return true;
 	}
 	
+	Actor AimTarget()
+	{
+		FTranslatedLineTarget t;
+		BulletSlope(t, ALF_PORTALRESTRICT);
+		return t.linetarget;
+	}
 
 	native void A_Face(Actor faceto, double max_turn = 0, double max_pitch = 270, double ang_offset = 0, double pitch_offset = 0, int flags = 0, double z_ofs = 0);
 
@@ -673,13 +736,6 @@ class Actor : Thinker native
 	native void A_ActiveSound();
 
 	native void A_FastChase();
-	native void A_FreezeDeath();
-	native void A_FreezeDeathChunks();
-	void A_GenericFreezeDeath()
-	{
-		A_SetTranslation('Ice');
-		A_FreezeDeath();
-	}
 	native void A_PlayerScream();
 	native void A_SkullPop(class<PlayerChunk> skulltype = "BloodySkull");
 	native void A_CheckPlayerDone();
@@ -700,19 +756,19 @@ class Actor : Thinker native
 	deprecated native void A_StopSoundEx(name slot);
 	native void A_SeekerMissile(int threshold, int turnmax, int flags = 0, int chance = 50, int distance = 10);
 	native action state A_Jump(int chance, statelabel label, ...);
-	native void A_SpawnProjectile(class<Actor> missiletype, double spawnheight = 32, double spawnofs_xy = 0, double angle = 0, int flags = 0, double pitch = 0, int ptr = AAPTR_TARGET);
+	native Actor A_SpawnProjectile(class<Actor> missiletype, double spawnheight = 32, double spawnofs_xy = 0, double angle = 0, int flags = 0, double pitch = 0, int ptr = AAPTR_TARGET);
 	native void A_CustomBulletAttack(double spread_xy, double spread_z, int numbullets, int damageperbullet, class<Actor> pufftype = "BulletPuff", double range = 0, int flags = 0, int ptr = AAPTR_TARGET, class<Actor> missile = null, double Spawnheight = 32, double Spawnofs_xy = 0);
-	native void A_CustomRailgun(int damage, int spawnofs_xy = 0, color color1 = 0, color color2 = 0, int flags = 0, int aim = 0, double maxdiff = 0, class<Actor> pufftype = "BulletPuff", double spread_xy = 0, double spread_z = 0, double range = 0, int duration = 0, double sparsity = 1.0, double driftspeed = 1.0, class<Actor> spawnclass = null, double spawnofs_z = 0, int spiraloffset = 270, int limit = 0);
+	native void A_CustomRailgun(int damage, int spawnofs_xy = 0, color color1 = 0, color color2 = 0, int flags = 0, int aim = 0, double maxdiff = 0, class<Actor> pufftype = "BulletPuff", double spread_xy = 0, double spread_z = 0, double range = 0, int duration = 0, double sparsity = 1.0, double driftspeed = 1.0, class<Actor> spawnclass = null, double spawnofs_z = 0, int spiraloffset = 270, int limit = 0, double veleffect = 3);
 	native bool A_SetInventory(class<Inventory> itemtype, int amount, int ptr = AAPTR_DEFAULT, bool beyondMax = false);
 	native bool A_GiveInventory(class<Inventory> itemtype, int amount = 0, int giveto = AAPTR_DEFAULT);
 	native bool A_TakeInventory(class<Inventory> itemtype, int amount = 0, int flags = 0, int giveto = AAPTR_DEFAULT);
-	action native bool A_SpawnItem(class<Actor> itemtype = "Unknown", double distance = 0, double zheight = 0, bool useammo = true, bool transfer_translation = false);
-	native bool A_SpawnItemEx(class<Actor> itemtype, double xofs = 0, double yofs = 0, double zofs = 0, double xvel = 0, double yvel = 0, double zvel = 0, double angle = 0, int flags = 0, int failchance = 0, int tid=0);
+	action native bool, Actor A_SpawnItem(class<Actor> itemtype = "Unknown", double distance = 0, double zheight = 0, bool useammo = true, bool transfer_translation = false);
+	native bool, Actor A_SpawnItemEx(class<Actor> itemtype, double xofs = 0, double yofs = 0, double zofs = 0, double xvel = 0, double yvel = 0, double zvel = 0, double angle = 0, int flags = 0, int failchance = 0, int tid=0);
 	native void A_Print(string whattoprint, double time = 0, name fontname = "none");
 	native void A_PrintBold(string whattoprint, double time = 0, name fontname = "none");
-	native void A_Log(string whattoprint);
-	native void A_LogInt(int whattoprint);
-	native void A_LogFloat(double whattoprint);
+	native void A_Log(string whattoprint, bool local = false);
+	native void A_LogInt(int whattoprint, bool local = false);
+	native void A_LogFloat(double whattoprint, bool local = false);
 	native void A_SetTranslucent(double alpha, int style = 0);
 	native void A_SetRenderStyle(double alpha, int style);
 	native void A_FadeIn(double reduce = 0.1, int flags = 0);
@@ -729,7 +785,7 @@ class Actor : Thinker native
 	native void A_RaiseChildren(bool copy = 0);
 	native void A_RaiseSiblings(bool copy = 0);
 	deprecated native void A_BasicAttack(int meleedamage, sound meleesound, class<actor> missiletype, double missileheight);
-	action native bool A_ThrowGrenade(class<Actor> itemtype, double zheight = 0, double xyvel = 0, double zvel = 0, bool useammo = true);
+	action native bool, Actor A_ThrowGrenade(class<Actor> itemtype, double zheight = 0, double xyvel = 0, double zvel = 0, bool useammo = true);
 	native void A_Weave(int xspeed, int yspeed, double xdist, double ydist);
 
 

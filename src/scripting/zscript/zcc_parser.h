@@ -35,6 +35,8 @@ enum
 	ZCC_Extension		= 1 << 12,
 	ZCC_Virtual			= 1 << 13,
 	ZCC_Override		= 1 << 14,
+	ZCC_Transient		= 1 << 15,
+	ZCC_VarArg			= 1 << 16
 };
 
 // Function parameter modifiers
@@ -104,6 +106,7 @@ enum EZCCTreeNodeType
 	AST_DeclFlags,
 	AST_ClassCast,
 	AST_StaticArrayStatement,
+	AST_Property,
 
 	NUM_AST_NODE_TYPES
 };
@@ -187,6 +190,11 @@ struct ZCC_Struct : ZCC_NamedNode
 	VM_UWORD Flags;
 	ZCC_TreeNode *Body;
 	PStruct *Type;
+};
+
+struct ZCC_Property : ZCC_NamedNode
+{
+	ZCC_TreeNode *Body;
 };
 
 struct ZCC_Class : ZCC_Struct
@@ -519,47 +527,8 @@ struct ZCC_FlagStmt : ZCC_Statement
 	bool set;
 };
 
-typedef ZCC_ExprConstant *(*EvalConst1op)(ZCC_ExprConstant *);
-typedef ZCC_ExprConstant *(*EvalConst2op)(ZCC_ExprConstant *, ZCC_ExprConstant *, FSharedStringArena &);
-
-struct ZCC_OpProto
-{
-	ZCC_OpProto *Next;
-	PType *ResType;
-	PType *Type1;
-	PType *Type2;
-	union
-	{
-		EvalConst1op EvalConst1;
-		EvalConst2op EvalConst2;
-	};
-
-	ZCC_OpProto(PType *res, PType *t1, PType *t2)
-		: ResType(res), Type1(t1), Type2(t2) {}
-};
-
-struct ZCC_OpInfoType
-{
-	const char *OpName;
-	ZCC_OpProto *Protos;
-
-	void AddProto(PType *res, PType *optype, EvalConst1op evalconst);
-	void AddProto(PType *res, PType *left, PType *right, EvalConst2op evalconst);
-
-	ZCC_OpProto *FindBestProto(PType *optype, const PType::Conversion **route, int &numslots);
-	ZCC_OpProto *FindBestProto(PType *left, const PType::Conversion **route1, int &numslots,
-		PType *right, const PType::Conversion **route2, int &numslots2);
-
-	void FreeAllProtos();
-};
-
-#define CONVERSION_ROUTE_SIZE	8
-
 FString ZCC_PrintAST(ZCC_TreeNode *root);
 
-void ZCC_InitOperators();
-
-extern ZCC_OpInfoType ZCC_OpInfo[PEX_COUNT_OF];
 
 struct ZCC_AST
 {

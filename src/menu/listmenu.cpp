@@ -44,6 +44,10 @@
 
 IMPLEMENT_CLASS(DListMenu, false, false)
 
+IMPLEMENT_POINTERS_START(DListMenu)
+IMPLEMENT_POINTER(mFocusControl)
+IMPLEMENT_POINTERS_END
+
 //=============================================================================
 //
 //
@@ -101,7 +105,7 @@ void DListMenu::Init(DMenu *parent, FListMenuDescriptor *desc)
 //
 //=============================================================================
 
-FListMenuItem *DListMenu::GetItem(FName name)
+DMenuItemBase *DListMenu::GetItem(FName name)
 {
 	for(unsigned i=0;i<mDesc->mItems.Size(); i++)
 	{
@@ -274,30 +278,27 @@ void DListMenu::Drawer ()
 // base class for menu items
 //
 //=============================================================================
+IMPLEMENT_CLASS(DMenuItemBase, true, false)
 
-FListMenuItem::~FListMenuItem()
-{
-}
-
-bool FListMenuItem::CheckCoordinate(int x, int y)
+bool DMenuItemBase::CheckCoordinate(int x, int y)
 {
 	return false;
 }
 
-void FListMenuItem::Ticker()
+void DMenuItemBase::Ticker()
 {
 }
 
-void FListMenuItem::Drawer(bool selected)
+void DMenuItemBase::Drawer(bool selected)
 {
 }
 
-bool FListMenuItem::Selectable()
+bool DMenuItemBase::Selectable()
 {
 	return false;
 }
 
-void FListMenuItem::DrawSelector(int xofs, int yofs, FTextureID tex)
+void DMenuItemBase::DrawSelector(int xofs, int yofs, FTextureID tex)
 {
 	if (tex.isNull())
 	{
@@ -318,57 +319,57 @@ void FListMenuItem::DrawSelector(int xofs, int yofs, FTextureID tex)
 	}
 }
 
-bool FListMenuItem::Activate()
+bool DMenuItemBase::Activate()
 {
 	return false;	// cannot be activated
 }
 
-FName FListMenuItem::GetAction(int *pparam)
+FName DMenuItemBase::GetAction(int *pparam)
 {
 	return mAction;
 }
 
-bool FListMenuItem::SetString(int i, const char *s)
+bool DMenuItemBase::SetString(int i, const char *s)
 {
 	return false;
 }
 
-bool FListMenuItem::GetString(int i, char *s, int len)
+bool DMenuItemBase::GetString(int i, char *s, int len)
 {
 	return false;
 }
 
-bool FListMenuItem::SetValue(int i, int value)
+bool DMenuItemBase::SetValue(int i, int value)
 {
 	return false;
 }
 
-bool FListMenuItem::GetValue(int i, int *pvalue)
+bool DMenuItemBase::GetValue(int i, int *pvalue)
 {
 	return false;
 }
 
-void FListMenuItem::Enable(bool on)
+void DMenuItemBase::Enable(bool on)
 {
 	mEnabled = on;
 }
 
-bool FListMenuItem::MenuEvent(int mkey, bool fromcontroller)
+bool DMenuItemBase::MenuEvent(int mkey, bool fromcontroller)
 {
 	return false;
 }
 
-bool FListMenuItem::MouseEvent(int type, int x, int y)
+bool DMenuItemBase::MouseEvent(int type, int x, int y)
 {
 	return false;
 }
 
-bool FListMenuItem::CheckHotkey(int c) 
+bool DMenuItemBase::CheckHotkey(int c) 
 { 
 	return false; 
 }
 
-int FListMenuItem::GetWidth() 
+int DMenuItemBase::GetWidth() 
 { 
 	return 0; 
 }
@@ -379,15 +380,16 @@ int FListMenuItem::GetWidth()
 // static patch
 //
 //=============================================================================
+IMPLEMENT_CLASS(DListMenuItemStaticPatch, false, false)
 
-FListMenuItemStaticPatch::FListMenuItemStaticPatch(int x, int y, FTextureID patch, bool centered)
-: FListMenuItem(x, y)
+DListMenuItemStaticPatch::DListMenuItemStaticPatch(int x, int y, FTextureID patch, bool centered)
+: DMenuItemBase(x, y)
 {
 	mTexture = patch;
 	mCentered = centered;
 }
 	
-void FListMenuItemStaticPatch::Drawer(bool selected)
+void DListMenuItemStaticPatch::Drawer(bool selected)
 {
 	if (!mTexture.Exists())
 	{
@@ -414,21 +416,22 @@ void FListMenuItemStaticPatch::Drawer(bool selected)
 // static text
 //
 //=============================================================================
+IMPLEMENT_CLASS(DListMenuItemStaticText, false, false)
 
-FListMenuItemStaticText::FListMenuItemStaticText(int x, int y, const char *text, FFont *font, EColorRange color, bool centered)
-: FListMenuItem(x, y)
+DListMenuItemStaticText::DListMenuItemStaticText(int x, int y, const char *text, FFont *font, EColorRange color, bool centered)
+: DMenuItemBase(x, y)
 {
-	mText = ncopystring(text);
+	mText = text;
 	mFont = font;
 	mColor = color;
 	mCentered = centered;
 }
 	
-void FListMenuItemStaticText::Drawer(bool selected)
+void DListMenuItemStaticText::Drawer(bool selected)
 {
-	const char *text = mText;
-	if (text != NULL)
+	if (mText.IsNotEmpty())
 	{
+		const char *text = mText;
 		if (*text == '$') text = GStrings(text+1);
 		if (mYpos >= 0)
 		{
@@ -445,53 +448,49 @@ void FListMenuItemStaticText::Drawer(bool selected)
 	}
 }
 
-FListMenuItemStaticText::~FListMenuItemStaticText()
-{
-	if (mText != NULL) delete [] mText;
-}
-
 //=============================================================================
 //
 // base class for selectable items
 //
 //=============================================================================
+IMPLEMENT_CLASS(DListMenuItemSelectable, false, false)
 
-FListMenuItemSelectable::FListMenuItemSelectable(int x, int y, int height, FName action, int param)
-: FListMenuItem(x, y, action)
+DListMenuItemSelectable::DListMenuItemSelectable(int x, int y, int height, FName action, int param)
+: DMenuItemBase(x, y, action)
 {
 	mHeight = height;
 	mParam = param;
 	mHotkey = 0;
 }
 
-bool FListMenuItemSelectable::CheckCoordinate(int x, int y)
+bool DListMenuItemSelectable::CheckCoordinate(int x, int y)
 {
 	return mEnabled && y >= mYpos && y < mYpos + mHeight;	// no x check here
 }
 
-bool FListMenuItemSelectable::Selectable()
+bool DListMenuItemSelectable::Selectable()
 {
 	return mEnabled;
 }
 
-bool FListMenuItemSelectable::Activate()
+bool DListMenuItemSelectable::Activate()
 {
 	M_SetMenu(mAction, mParam);
 	return true;
 }
 
-FName FListMenuItemSelectable::GetAction(int *pparam)
+FName DListMenuItemSelectable::GetAction(int *pparam)
 {
 	if (pparam != NULL) *pparam = mParam;
 	return mAction;
 }
 
-bool FListMenuItemSelectable::CheckHotkey(int c) 
+bool DListMenuItemSelectable::CheckHotkey(int c) 
 { 
 	return c == tolower(mHotkey); 
 }
 
-bool FListMenuItemSelectable::MouseEvent(int type, int x, int y)
+bool DListMenuItemSelectable::MouseEvent(int type, int x, int y)
 {
 	if (type == DMenu::MOUSE_Release)
 	{
@@ -508,9 +507,10 @@ bool FListMenuItemSelectable::MouseEvent(int type, int x, int y)
 // text item
 //
 //=============================================================================
+IMPLEMENT_CLASS(DListMenuItemText, false, false)
 
-FListMenuItemText::FListMenuItemText(int x, int y, int height, int hotkey, const char *text, FFont *font, EColorRange color, EColorRange color2, FName child, int param)
-: FListMenuItemSelectable(x, y, height, child, param)
+DListMenuItemText::DListMenuItemText(int x, int y, int height, int hotkey, const char *text, FFont *font, EColorRange color, EColorRange color2, FName child, int param)
+: DListMenuItemSelectable(x, y, height, child, param)
 {
 	mText = ncopystring(text);
 	mFont = font;
@@ -519,7 +519,7 @@ FListMenuItemText::FListMenuItemText(int x, int y, int height, int hotkey, const
 	mHotkey = hotkey;
 }
 
-FListMenuItemText::~FListMenuItemText()
+void DListMenuItemText::OnDestroy()
 {
 	if (mText != NULL)
 	{
@@ -527,7 +527,7 @@ FListMenuItemText::~FListMenuItemText()
 	}
 }
 
-void FListMenuItemText::Drawer(bool selected)
+void DListMenuItemText::Drawer(bool selected)
 {
 	const char *text = mText;
 	if (text != NULL)
@@ -537,7 +537,7 @@ void FListMenuItemText::Drawer(bool selected)
 	}
 }
 
-int FListMenuItemText::GetWidth() 
+int DListMenuItemText::GetWidth() 
 { 
 	const char *text = mText;
 	if (text != NULL)
@@ -554,20 +554,21 @@ int FListMenuItemText::GetWidth()
 // patch item
 //
 //=============================================================================
+IMPLEMENT_CLASS(DListMenuItemPatch, false, false)
 
-FListMenuItemPatch::FListMenuItemPatch(int x, int y, int height, int hotkey, FTextureID patch, FName child, int param)
-: FListMenuItemSelectable(x, y, height, child, param)
+DListMenuItemPatch::DListMenuItemPatch(int x, int y, int height, int hotkey, FTextureID patch, FName child, int param)
+: DListMenuItemSelectable(x, y, height, child, param)
 {
 	mHotkey = hotkey;
 	mTexture = patch;
 }
 
-void FListMenuItemPatch::Drawer(bool selected)
+void DListMenuItemPatch::Drawer(bool selected)
 {
 	screen->DrawTexture (TexMan(mTexture), mXpos, mYpos, DTA_Clean, true, TAG_DONE);
 }
 
-int FListMenuItemPatch::GetWidth() 
+int DListMenuItemPatch::GetWidth() 
 {
 	return mTexture.isValid() 
 		? TexMan[mTexture]->GetScaledWidth() 

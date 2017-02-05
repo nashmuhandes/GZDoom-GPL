@@ -65,7 +65,7 @@ CVAR (Bool, show_obituaries, true, CVAR_ARCHIVE)
 
 
 CVAR (Float, snd_menuvolume, 0.6f, CVAR_ARCHIVE)
-CVAR(Int, m_use_mouse, 1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR(Int, m_use_mouse, 2, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(Int, m_show_backbutton, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 DMenu *DMenu::CurrentMenu;
@@ -85,6 +85,35 @@ static bool		MenuEnabled = true;
 #define KEY_REPEAT_DELAY	(TICRATE*5/12)
 #define KEY_REPEAT_RATE		(3)
 
+//============================================================================
+//
+//
+//
+//============================================================================
+
+size_t FListMenuDescriptor::PropagateMark()
+{
+	for (auto item : mItems) GC::Mark(item);
+	return 0;
+}
+
+size_t FOptionMenuDescriptor::PropagateMark()
+{
+	for (auto item : mItems) GC::Mark(item);
+	return 0;
+}
+
+void M_MarkMenus()
+{
+	MenuDescriptorList::Iterator it(MenuDescriptors);
+	MenuDescriptorList::Pair *pair;
+	while (it.NextPair(pair))
+	{
+		//GC::Mark(pair->Value);	// once the descriptors have been made objects.
+		pair->Value->PropagateMark();
+	}
+	GC::Mark(DMenu::CurrentMenu);
+}
 //============================================================================
 //
 // DMenu base class
@@ -276,7 +305,7 @@ void DMenu::Drawer ()
 		}
 		else
 		{
-			screen->DrawTexture(tex, x, y, DTA_CleanNoMove, true, DTA_AlphaF, BackbuttonAlpha, TAG_DONE);
+			screen->DrawTexture(tex, x, y, DTA_CleanNoMove, true, DTA_Alpha, BackbuttonAlpha, TAG_DONE);
 		}
 	}
 }

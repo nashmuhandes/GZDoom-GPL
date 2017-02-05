@@ -72,7 +72,6 @@
 #include "m_png.h"
 #include "gi.h"
 #include "a_keys.h"
-#include "a_artifacts.h"
 #include "r_data/r_translate.h"
 #include "cmdlib.h"
 #include "d_net.h"
@@ -92,6 +91,7 @@
 #include <zlib.h>
 
 #include "g_hub.h"
+#include "g_levellocals.h"
 
 
 static FRandom pr_dmspawn ("DMSpawn");
@@ -448,7 +448,7 @@ CCMD (use)
 {
 	if (argv.argc() > 1 && who != NULL)
 	{
-		SendItemUse = who->FindInventory(PClass::FindActor(argv[1]));
+		SendItemUse = who->FindInventory(argv[1]);
 	}
 }
 
@@ -469,7 +469,7 @@ CCMD (drop)
 {
 	if (argv.argc() > 1 && who != NULL)
 	{
-		SendItemDrop = who->FindInventory(PClass::FindActor(argv[1]));
+		SendItemDrop = who->FindInventory(argv[1]);
 	}
 }
 
@@ -514,7 +514,7 @@ CCMD (select)
 {
 	if (argv.argc() > 1)
 	{
-		AInventory *item = who->FindInventory(PClass::FindActor(argv[1]));
+		AInventory *item = who->FindInventory(argv[1]);
 		if (item != NULL)
 		{
 			who->InvSel = item;
@@ -1263,10 +1263,11 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 
 	// Strip all current powers, unless moving in a hub and the power is okay to keep.
 	item = p->mo->Inventory;
+	auto ptype = PClass::FindActor(NAME_Powerup);
 	while (item != NULL)
 	{
 		next = item->Inventory;
-		if (item->IsKindOf (RUNTIME_CLASS(APowerup)))
+		if (item->IsKindOf (ptype))
 		{
 			if (deathmatch || ((mode != FINISH_SameHub || !(item->ItemFlags & IF_HUBPOWER))
 				&& !(item->ItemFlags & IF_PERSISTENTPOWER))) // Keep persistent powers in non-deathmatch games
@@ -1891,168 +1892,150 @@ void G_DoLoadGame ()
 	hidecon = gameaction == ga_loadgamehidecon;
 	gameaction = ga_nothing;
 
-	FResourceFile *resfile = FResourceFile::OpenResourceFile(savename.GetChars(), nullptr, true, true);
+	std::unique_ptr<FResourceFile> resfile(FResourceFile::OpenResourceFile(savename.GetChars(), nullptr, true, true));
 	if (resfile == nullptr)
 	{
 		Printf ("Could not read savegame '%s'\n", savename.GetChars());
 		return;
 	}
-	try
+	FResourceLump *info = resfile->FindLump("info.json");
+	if (info == nullptr)
 	{
-		FResourceLump *info = resfile->FindLump("info.json");
-		if (info == nullptr)
-		{
-			delete resfile;
-			Printf("'%s' is not a valid savegame: Missing 'info.json'.\n", savename.GetChars());
-			return;
-		}
-
-		SaveVersion = 0;
-
-		void *data = info->CacheLump();
-		FSerializer arc;
-		if (!arc.OpenReader((const char *)data, info->LumpSize))
-		{
-			Printf("Failed to access savegame info\n");
-			delete resfile;
-			return;
-		}
-
-		// Check whether this savegame actually has been created by a compatible engine.
-		// Since there are ZDoom derivates using the exact same savegame format but
-		// with mutual incompatibilities this check simplifies things significantly.
-		FString savever, engine, map;
-		arc("Save Version", SaveVersion);
-		arc("Engine", engine);
-		arc("Current Map", map);
-
-		if (engine.CompareNoCase(GAMESIG) != 0)
-		{
-			// Make a special case for the message printed for old savegames that don't
-			// have this information.
-			if (engine.IsEmpty())
-			{
-				Printf("Savegame is from an incompatible version\n");
-			}
-			else
-			{
-				Printf("Savegame is from another ZDoom-based engine: %s\n", engine.GetChars());
-			}
-			delete resfile;
-			return;
-		}
-
-		if (SaveVersion < MINSAVEVER || SaveVersion > SAVEVER)
-		{
-			delete resfile;
-			Printf("Savegame is from an incompatible version");
-			if (SaveVersion < MINSAVEVER)
-			{
-				Printf(": %d (%d is the oldest supported)", SaveVersion, MINSAVEVER);
-			}
-			else
-			{
-				Printf(": %d (%d is the highest supported)", SaveVersion, SAVEVER);
-			}
-			Printf("\n");
-			return;
-		}
-
-		if (!G_CheckSaveGameWads(arc, true))
-		{
-			delete resfile;
-			return;
-		}
-
-		if (map.IsEmpty())
-		{
-			Printf("Savegame is missing the current map\n");
-			delete resfile;
-			return;
-		}
-
-		// Now that it looks like we can load this save, hide the fullscreen console if it was up
-		// when the game was selected from the menu.
-		if (hidecon && gamestate == GS_FULLCONSOLE)
-		{
-			gamestate = GS_HIDECONSOLE;
-		}
-		// we are done with info.json.
-		arc.Close();
-
-		info = resfile->FindLump("globals.json");
-		if (info == nullptr)
-		{
-			delete resfile;
-			Printf("'%s' is not a valid savegame: Missing 'globals.json'.\n", savename.GetChars());
-			return;
-		}
-
-		data = info->CacheLump();
-		if (!arc.OpenReader((const char *)data, info->LumpSize))
-		{
-			Printf("Failed to access savegame info\n");
-			delete resfile;
-			return;
-		}
-
-
-		// Read intermission data for hubs
-		G_SerializeHub(arc);
-
-		bglobal.RemoveAllBots(true);
-
-		FString cvar;
-		arc("importantcvars", cvar);
-		if (!cvar.IsEmpty())
-		{
-			BYTE *vars_p = (BYTE *)cvar.GetChars();
-			C_ReadCVars(&vars_p);
-		}
-
-		DWORD time[2] = { 1,0 };
-
-		arc("ticrate", time[0])
-			("leveltime", time[1]);
-		// dearchive all the modifications
-		level.time = Scale(time[1], TICRATE, time[0]);
-
-		G_ReadSnapshots(resfile);
-		delete resfile;	// we no longer need the resource file below this point
-		resfile = nullptr;
-		G_ReadVisited(arc);
-
-		// load a base level
-		savegamerestore = true;		// Use the player actors in the savegame
-		bool demoplaybacksave = demoplayback;
-		G_InitNew(map, false);
-		demoplayback = demoplaybacksave;
-		savegamerestore = false;
-
-		STAT_Serialize(arc);
-		FRandom::StaticReadRNGState(arc);
-		P_ReadACSDefereds(arc);
-		P_ReadACSVars(arc);
-
-		NextSkill = -1;
-		arc("nextskill", NextSkill);
-
-		if (level.info != nullptr)
-			level.info->Snapshot.Clean();
-
-		BackupSaveName = savename;
-
-		// At this point, the GC threshold is likely a lot higher than the
-		// amount of memory in use, so bring it down now by starting a
-		// collection.
-		GC::StartCollection();
+		Printf("'%s' is not a valid savegame: Missing 'info.json'.\n", savename.GetChars());
+		return;
 	}
-	catch (...)
+
+	SaveVersion = 0;
+
+	void *data = info->CacheLump();
+	FSerializer arc;
+	if (!arc.OpenReader((const char *)data, info->LumpSize))
 	{
-		// delete the resource file if anything goes wrong in here.
-		if (resfile != nullptr) delete resfile;
-		throw;
+		Printf("Failed to access savegame info\n");
+		return;
 	}
+
+	// Check whether this savegame actually has been created by a compatible engine.
+	// Since there are ZDoom derivates using the exact same savegame format but
+	// with mutual incompatibilities this check simplifies things significantly.
+	FString savever, engine, map;
+	arc("Save Version", SaveVersion);
+	arc("Engine", engine);
+	arc("Current Map", map);
+
+	if (engine.CompareNoCase(GAMESIG) != 0)
+	{
+		// Make a special case for the message printed for old savegames that don't
+		// have this information.
+		if (engine.IsEmpty())
+		{
+			Printf("Savegame is from an incompatible version\n");
+		}
+		else
+		{
+			Printf("Savegame is from another ZDoom-based engine: %s\n", engine.GetChars());
+		}
+		return;
+	}
+
+	if (SaveVersion < MINSAVEVER || SaveVersion > SAVEVER)
+	{
+		Printf("Savegame is from an incompatible version");
+		if (SaveVersion < MINSAVEVER)
+		{
+			Printf(": %d (%d is the oldest supported)", SaveVersion, MINSAVEVER);
+		}
+		else
+		{
+			Printf(": %d (%d is the highest supported)", SaveVersion, SAVEVER);
+		}
+		Printf("\n");
+		return;
+	}
+
+	if (!G_CheckSaveGameWads(arc, true))
+	{
+		return;
+	}
+
+	if (map.IsEmpty())
+	{
+		Printf("Savegame is missing the current map\n");
+		return;
+	}
+
+	// Now that it looks like we can load this save, hide the fullscreen console if it was up
+	// when the game was selected from the menu.
+	if (hidecon && gamestate == GS_FULLCONSOLE)
+	{
+		gamestate = GS_HIDECONSOLE;
+	}
+	// we are done with info.json.
+	arc.Close();
+
+	info = resfile->FindLump("globals.json");
+	if (info == nullptr)
+	{
+		Printf("'%s' is not a valid savegame: Missing 'globals.json'.\n", savename.GetChars());
+		return;
+	}
+
+	data = info->CacheLump();
+	if (!arc.OpenReader((const char *)data, info->LumpSize))
+	{
+		Printf("Failed to access savegame info\n");
+		return;
+	}
+
+
+	// Read intermission data for hubs
+	G_SerializeHub(arc);
+
+	bglobal.RemoveAllBots(true);
+
+	FString cvar;
+	arc("importantcvars", cvar);
+	if (!cvar.IsEmpty())
+	{
+		BYTE *vars_p = (BYTE *)cvar.GetChars();
+		C_ReadCVars(&vars_p);
+	}
+
+	DWORD time[2] = { 1,0 };
+
+	arc("ticrate", time[0])
+		("leveltime", time[1]);
+	// dearchive all the modifications
+	level.time = Scale(time[1], TICRATE, time[0]);
+
+	G_ReadSnapshots(resfile.get());
+	resfile.reset(nullptr);	// we no longer need the resource file below this point
+	G_ReadVisited(arc);
+
+	// load a base level
+	savegamerestore = true;		// Use the player actors in the savegame
+	bool demoplaybacksave = demoplayback;
+	G_InitNew(map, false);
+	demoplayback = demoplaybacksave;
+	savegamerestore = false;
+
+	STAT_Serialize(arc);
+	FRandom::StaticReadRNGState(arc);
+	P_ReadACSDefereds(arc);
+	P_ReadACSVars(arc);
+
+	NextSkill = -1;
+	arc("nextskill", NextSkill);
+
+	if (level.info != nullptr)
+		level.info->Snapshot.Clean();
+
+	BackupSaveName = savename;
+
+	// At this point, the GC threshold is likely a lot higher than the
+	// amount of memory in use, so bring it down now by starting a
+	// collection.
+	GC::StartCollection();
 }
 
 
@@ -2128,8 +2111,6 @@ CUSTOM_CVAR (Int, autosavecount, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 		self = 0;
-	if (self > 20)
-		self = 20;
 }
 
 extern void P_CalcHeight (player_t *);
@@ -2242,7 +2223,7 @@ void G_DoSaveGame (bool okForQuicksave, FString filename, const char *descriptio
 
 	// Do not even try, if we're not in a level. (Can happen after
 	// a demo finishes playback.)
-	if (lines == NULL || sectors == NULL || gamestate != GS_LEVEL)
+	if (level.lines.Size() == 0 || level.sectors.Size() == 0 || gamestate != GS_LEVEL)
 	{
 		return;
 	}
@@ -2802,7 +2783,7 @@ void G_DoPlayDemo (void)
 		{
 			G_InitNew (mapname, false);
 		}
-		else if (numsectors == 0)
+		else if (level.sectors.Size() == 0)
 		{
 			I_Error("Cannot play demo without its savegame\n");
 		}

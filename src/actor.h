@@ -45,10 +45,9 @@
 #include "portal.h"
 
 struct subsector_t;
-class PClassAmmo;
 struct FBlockNode;
 struct FPortalGroupArray;
-
+struct visstyle_t;
 //
 // NOTES: AActor
 //
@@ -426,6 +425,7 @@ enum ActorRenderFlag
 	RF_MASKROTATION		= 0x00200000, // [MC] Only draw the actor when viewed from a certain angle range.
 	RF_ABSMASKANGLE		= 0x00400000, // [MC] The mask rotation does not offset by the actor's angle.
 	RF_ABSMASKPITCH		= 0x00800000, // [MC] The mask rotation does not offset by the actor's pitch.
+	RF_INTERPOLATEANGLES		= 0x01000000, // [MC] Allow interpolation of the actor's angle, pitch and roll.
 
 	RF_FORCEYBILLBOARD		= 0x10000,	// [BB] OpenGL only: draw with y axis billboard, i.e. anchored to the floor (overrides gl_billboard_mode setting)
 	RF_FORCEXYBILLBOARD		= 0x20000,	// [BB] OpenGL only: draw with xy axis billboard, i.e. unanchored (overrides gl_billboard_mode setting)
@@ -597,7 +597,7 @@ public:
 	AActor &operator= (const AActor &other);
 	~AActor ();
 
-	virtual void Destroy() override;
+	virtual void OnDestroy() override;
 	virtual void Serialize(FSerializer &arc) override;
 	virtual void PostSerialize() override;
 	virtual void PostBeginPlay() override;		// Called immediately before the actor's first tick
@@ -618,6 +618,8 @@ public:
 	// Adjusts the angle for deflection/reflection of incoming missiles
 	// Returns true if the missile should be allowed to explode anyway
 	bool AdjustReflectionAngle (AActor *thing, DAngle &angle);
+	int AbsorbDamage(int damage, FName dmgtype);
+	void AlterWeaponSprite(visstyle_t *vis);
 
 	// Returns true if this actor is within melee range of its target
 	bool CheckMeleeRange();
@@ -628,7 +630,7 @@ public:
 	void CallBeginPlay();
 
 	void LevelSpawned();				// Called after BeginPlay if this actor was spawned by the world
-	virtual void HandleSpawnFlags();	// Translates SpawnFlags into in-game flags.
+	void HandleSpawnFlags();	// Translates SpawnFlags into in-game flags.
 
 	virtual void MarkPrecacheSounds() const;	// Marks sounds used by this actor for precaching.
 
@@ -721,7 +723,7 @@ public:
 
 	// Finds the first item of a particular type.
 	AInventory *FindInventory (PClassActor *type, bool subclass=false);
-	AInventory *FindInventory (FName type);
+	AInventory *FindInventory (FName type, bool subclass = false);
 	template<class T> T *FindInventory ()
 	{
 		return static_cast<T *> (FindInventory (RUNTIME_TEMPLATE_CLASS(T)));
@@ -734,7 +736,7 @@ public:
 	AInventory *FirstInv ();
 
 	// Tries to give the actor some ammo.
-	bool GiveAmmo (PClassAmmo *type, int amount);
+	bool GiveAmmo (PClassInventory *type, int amount);
 
 	// Destroys all the inventory the actor is holding.
 	void DestroyAllInventory ();
@@ -780,14 +782,7 @@ public:
 	// set translation
 	void SetTranslation(FName trname);
 
-	double GetBobOffset(double ticfrac = 0) const
-	{
-		if (!(flags2 & MF2_FLOATBOB))
-		{
-			return 0;
-		}
-		return BobSin(FloatBobPhase + level.maptime + ticfrac);
-	}
+	double GetBobOffset(double ticfrac = 0) const;
 
 	// Enter the crash state
 	void Crash();
@@ -1023,12 +1018,13 @@ public:
 	double			FloatSpeed;
 
 	int				sprite;				// used to find patch_t and flip value
-	BYTE			frame;				// sprite frame to draw
+	uint8_t			frame;				// sprite frame to draw
+	uint8_t			effects;			// [RH] see p_effect.h
+	uint8_t			fountaincolor;		// Split out of 'effect' to have easier access.
 	DVector2		Scale;				// Scaling values; 1 is normal size
 	FRenderStyle	RenderStyle;		// Style to draw this actor with
 	ActorRenderFlags	renderflags;		// Different rendering flags
 	FTextureID		picnum;				// Draw this instead of sprite if valid
-	DWORD			effects;			// [RH] see p_effect.h
 	double			Alpha;				// Since P_CheckSight makes an alpha check this can't be a float. It has to be a double.
 	DWORD			fillcolor;			// Color to draw when STYLE_Shaded
 
@@ -1323,6 +1319,14 @@ public:
 	DVector3 InterpolatedPosition(double ticFrac) const
 	{
 		return Prev + (ticFrac * (Pos() - Prev));
+	}
+	DRotator InterpolatedAngles(double ticFrac) const
+	{
+		DRotator result;
+		result.Yaw = PrevAngles.Yaw + deltaangle(PrevAngles.Yaw, Angles.Yaw) * ticFrac;
+		result.Pitch = PrevAngles.Pitch + deltaangle(PrevAngles.Pitch, Angles.Pitch) * ticFrac;
+		result.Roll = PrevAngles.Roll + deltaangle(PrevAngles.Roll, Angles.Roll) * ticFrac;
+		return result;
 	}
 	DVector3 PosPlusZ(double zadd) const
 	{

@@ -41,6 +41,7 @@
 #include "g_level.h"
 #include "doomstat.h"
 #include "d_player.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/renderer/gl_renderer.h"
@@ -154,9 +155,9 @@ int LS_Sector_SetPlaneReflection (line_t *ln, AActor *it, bool backSide,
 
 	while ((secnum = itr.Next()) >= 0)
 	{
-		sector_t * s = &sectors[secnum];
+		sector_t * s = &level.sectors[secnum];
 		if (!s->floorplane.isSlope()) s->reflect[sector_t::floor] = arg1/255.f;
-		if (!s->ceilingplane.isSlope()) sectors[secnum].reflect[sector_t::ceiling] = arg2/255.f;
+		if (!s->ceilingplane.isSlope()) level.sectors[secnum].reflect[sector_t::ceiling] = arg2/255.f;
 	}
 
 	return true;
@@ -412,7 +413,7 @@ void InitGLRMapinfoData()
 
 	if (opt != NULL)
 	{
-		gl_SetFogParams(opt->fogdensity, level.info->outsidefog, opt->outsidefogdensity, opt->skyfog);
+		gl_SetFogParams(clamp(opt->fogdensity, 0, 255), level.info->outsidefog, clamp(opt->outsidefogdensity, 0, 255), opt->skyfog);
 		glset.map_lightmode = opt->lightmode;
 		glset.map_lightadditivesurfaces = opt->lightadditivesurfaces;
 		glset.map_attenuate = opt->attenuate;
@@ -482,7 +483,7 @@ FTextureID gl_GetSpriteFrame(unsigned sprite, int frame, int rot, angle_t ang, b
 
 //==========================================================================
 //
-// Recalculate all heights affectting this vertex.
+// Recalculate all heights affecting this vertex.
 //
 //==========================================================================
 void gl_RecalcVertexHeights(vertex_t * v)
@@ -532,14 +533,12 @@ void gl_InitData()
 
 CCMD(dumpgeometry)
 {
-	for(int i=0;i<numsectors;i++)
+	for(auto &sector : level.sectors)
 	{
-		sector_t * sector = &sectors[i];
-
-		Printf(PRINT_LOG, "Sector %d\n",i);
-		for(int j=0;j<sector->subsectorcount;j++)
+		Printf(PRINT_LOG, "Sector %d\n", sector.sectornum);
+		for(int j=0;j<sector.subsectorcount;j++)
 		{
-			subsector_t * sub = sector->subsectors[j];
+			subsector_t * sub = sector.subsectors[j];
 
 			Printf(PRINT_LOG, "    Subsector %d - real sector = %d - %s\n", int(sub-subsectors), sub->sector->sectornum, sub->hacked&1? "hacked":"");
 			for(DWORD k=0;k<sub->numlines;k++)
@@ -549,7 +548,7 @@ CCMD(dumpgeometry)
 				{
 				Printf(PRINT_LOG, "      (%4.4f, %4.4f), (%4.4f, %4.4f) - seg %d, linedef %d, side %d", 
 					seg->v1->fX(), seg->v1->fY(), seg->v2->fX(), seg->v2->fY(),
-					int(seg-segs), int(seg->linedef-lines), seg->sidedef != seg->linedef->sidedef[0]);
+					int(seg-segs), seg->linedef->Index(), seg->sidedef != seg->linedef->sidedef[0]);
 				}
 				else
 				{
@@ -563,7 +562,7 @@ CCMD(dumpgeometry)
 					Printf(PRINT_LOG, ", back sector = %d, real back sector = %d", sub2->render_sector->sectornum, seg->PartnerSeg->frontsector->sectornum);
 				}
 				else if (seg->backsector)
-				{
+			{
 					Printf(PRINT_LOG, ", back sector = %d (no partnerseg)", seg->backsector->sectornum);
 				}
 

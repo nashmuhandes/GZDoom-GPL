@@ -84,10 +84,12 @@
 #include "r_utility.h"
 #include "p_spec.h"
 #include "serializer.h"
+#include "virtual.h"
 
 #include "gi.h"
 
 #include "g_hub.h"
+#include "g_levellocals.h"
 
 #include <string.h>
 
@@ -430,9 +432,15 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 		StatusBar->Destroy();
 		StatusBar = NULL;
 	}
+	auto cls = PClass::FindClass("DoomStatusBar");
+
 	if (bTitleLevel)
 	{
 		StatusBar = new DBaseStatusBar (0);
+	}
+	else if (cls && gameinfo.gametype == GAME_Doom)
+	{
+		StatusBar = (DBaseStatusBar*)cls->CreateNew();
 	}
 	else if (SBarInfoScript[SCRIPT_CUSTOM] != NULL)
 	{
@@ -1091,12 +1099,12 @@ void G_WorldDone (void)
 
 	if (strncmp (nextlevel, "enDSeQ", 6) == 0)
 	{
-		FName endsequence = ENamedName(strtol(nextlevel.GetChars()+6, NULL, 16));
+		FName endsequence = ENamedName(strtoll(nextlevel.GetChars()+6, NULL, 16));
 		// Strife needs a special case here to choose between good and sad ending. Bad is handled elsewhere.
 		if (endsequence == NAME_Inter_Strife)
 		{
-			if (players[0].mo->FindInventory (QuestItemClasses[24]) ||
-				players[0].mo->FindInventory (QuestItemClasses[27]))
+			if (players[0].mo->FindInventory (NAME_QuestItem25) ||
+				players[0].mo->FindInventory (NAME_QuestItem28))
 			{
 				endsequence = NAME_Inter_Strife_Good;
 			}
@@ -1312,7 +1320,13 @@ void G_FinishTravel ()
 		{
 			inv->ChangeStatNum (STAT_INVENTORY);
 			inv->LinkToWorld (nullptr);
-			inv->Travelled ();
+
+			IFVIRTUALPTR(inv, AInventory, Travelled)
+			{
+				VMValue params[1] = { inv };
+				VMFrameStack stack;
+				GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+			}
 		}
 		if (ib_compatflags & BCOMPATF_RESETPLAYERSPEED)
 		{
@@ -1841,8 +1855,8 @@ void FLevelLocals::AddScroller (int secnum)
 	}
 	if (Scrolls.Size() == 0)
 	{
-		Scrolls.Resize(numsectors);
-		memset (&Scrolls[0], 0, sizeof(Scrolls[0])*numsectors);
+		Scrolls.Resize(sectors.Size());
+		memset(&Scrolls[0], 0, sizeof(Scrolls[0])*Scrolls.Size());
 	}
 }
 
@@ -1889,6 +1903,7 @@ DEFINE_FIELD_BIT(FLevelLocals, flags2, checkswitchrange, LEVEL2_CHECKSWITCHRANGE
 DEFINE_FIELD_BIT(FLevelLocals, flags2, polygrind, LEVEL2_POLYGRIND)
 DEFINE_FIELD_BIT(FLevelLocals, flags2, nomonsters, LEVEL2_NOMONSTERS)
 DEFINE_FIELD_BIT(FLevelLocals, flags2, frozen, LEVEL2_FROZEN)
+DEFINE_FIELD_BIT(FLevelLocals, flags2, infinite_flight, LEVEL2_INFINITE_FLIGHT)
 
 //==========================================================================
 //

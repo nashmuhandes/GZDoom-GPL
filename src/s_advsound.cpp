@@ -52,6 +52,7 @@
 #include "d_player.h"
 #include "serializer.h"
 #include "v_text.h"
+#include "g_levellocals.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -2126,6 +2127,7 @@ CCMD (soundlist)
 		{
 			Printf ("%3d. %s **not present**\n", i, sfx->name.GetChars());
 		}
+		Printf("    PitchMask = %d\n", sfx->PitchMask);
 	}
 }
 
@@ -2456,45 +2458,3 @@ void S_ParseMusInfo()
 }
 
 
-//==========================================================================
-//
-// Music changer. Uses the sector action class to do its job
-//
-//==========================================================================
-
-class AMusicChanger : public ASectorAction
-{
-	DECLARE_CLASS (AMusicChanger, ASectorAction)
-public:
-	virtual bool DoTriggerAction (AActor *triggerer, int activationType);
-	virtual void PostBeginPlay();
-};
-
-IMPLEMENT_CLASS(AMusicChanger, false, false)
-
-bool AMusicChanger::DoTriggerAction (AActor *triggerer, int activationType)
-{
-	if (activationType & SECSPAC_Enter && triggerer->player != NULL)
-	{
-		if (triggerer->player->MUSINFOactor != this)
-		{
-			triggerer->player->MUSINFOactor = this;
-			triggerer->player->MUSINFOtics = 30;
-		}
-	}
-	return Super::DoTriggerAction (triggerer, activationType);
-}
- 
-void AMusicChanger::PostBeginPlay()
-{
-	// The music changer should consider itself activated if the player
-	// spawns in its sector as well as if it enters the sector during a P_TryMove.
-	Super::PostBeginPlay();
-	for (int i = 0; i < MAXPLAYERS; ++i)
-	{
-		if (playeringame[i] && players[i].mo && players[i].mo->Sector == this->Sector)
-		{
-			TriggerAction(players[i].mo, SECSPAC_Enter);
-		}
-	}
-}

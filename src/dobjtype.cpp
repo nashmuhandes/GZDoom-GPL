@@ -45,13 +45,10 @@
 #include "autosegs.h"
 #include "v_text.h"
 #include "a_pickups.h"
-#include "a_artifacts.h"
-#include "a_weaponpiece.h"
 #include "d_player.h"
 #include "doomerrors.h"
 #include "fragglescript/t_fs.h"
 #include "a_keys.h"
-#include "a_health.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -68,10 +65,13 @@ EXTERN_CVAR(Bool, strictdecorate);
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
+FNamespaceManager Namespaces;
+
 FTypeTable TypeTable;
-PSymbolTable GlobalSymbols;
 TArray<PClass *> PClass::AllClasses;
+TArray<VMFunction**> PClass::FunctionPtrList;
 bool PClass::bShutdown;
+bool PClass::bVMOperational;
 
 PErrorType *TypeError;
 PErrorType *TypeAuto;
@@ -94,6 +94,7 @@ PStruct *TypeVector3;
 PStruct *TypeColorStruct;
 PStruct *TypeStringStruct;
 PPointer *TypeNullPtr;
+PPointer *TypeVoidPtr;
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
@@ -118,7 +119,7 @@ void DumpTypeTable()
 		Printf("%4zu:", i);
 		for (PType *ty = TypeTable.TypeHash[i]; ty != NULL; ty = ty->HashNext)
 		{
-			Printf(" -> %s", ty->IsKindOf(RUNTIME_CLASS(PNamedType)) ? static_cast<PNamedType*>(ty)->TypeName.GetChars(): ty->GetClass()->TypeName.GetChars());
+			Printf(" -> %s", ty->DescriptiveName());
 			len++;
 			all++;
 		}
@@ -239,159 +240,6 @@ size_t PType::PropagateMark()
 {
 	size_t marked = Symbols.MarkSymbols();
 	return marked + Super::PropagateMark();
-}
-
-//==========================================================================
-//
-// PType :: AddConversion
-//
-//==========================================================================
-
-bool PType::AddConversion(PType *target, void (*convertconst)(ZCC_ExprConstant *, class FSharedStringArena &))
-{
-	// Make sure a conversion hasn't already been registered
-	for (unsigned i = 0; i < Conversions.Size(); ++i)
-	{
-		if (Conversions[i].TargetType == target)
-			return false;
-	}
-	Conversions.Push(Conversion(target, convertconst));
-	return true;
-}
-
-//==========================================================================
-//
-// PType :: FindConversion
-//
-// Returns <0 if there is no path to target. Otherwise, returns the distance
-// to target and fills slots (if non-NULL) with the necessary conversions
-// to get there. A result of 0 means this is the target.
-//
-//==========================================================================
-
-int PType::FindConversion(PType *target, const PType::Conversion **slots, int numslots)
-{
-	if (this == target)
-	{
-		return 0;
-	}
-	// The queue is implemented as a ring buffer
-	VisitQueue queue;
-	VisitedNodeSet visited;
-
-	// Use a breadth-first search to find the shortest path to the target.
-	MarkPred(NULL, -1, -1);
-	queue.Push(this);
-	visited.Insert(this);
-	while (!queue.IsEmpty())
-	{
-		PType *t = queue.Pop();
-		if (t == target)
-		{ // found it
-			if (slots != NULL)
-			{
-				if (t->Distance >= numslots)
-				{ // Distance is too far for the output
-					return -2;
-				}
-				t->FillConversionPath(slots);
-			}
-			return t->Distance + 1;
-		}
-		for (unsigned i = 0; i < t->Conversions.Size(); ++i)
-		{
-			PType *succ = t->Conversions[i].TargetType;
-			if (!visited.Check(succ))
-			{
-				succ->MarkPred(t, i, t->Distance + 1);
-				visited.Insert(succ);
-				queue.Push(succ);
-			}
-		}
-	}
-	return -1;
-}
-
-//==========================================================================
-//
-// PType :: FillConversionPath
-//
-// Traces backwards from the target type to the original type and fills in
-// the conversions necessary to get between them. slots must point to an
-// array large enough to contain the entire path.
-//
-//==========================================================================
-
-void PType::FillConversionPath(const PType::Conversion **slots)
-{
-	for (PType *node = this; node->Distance >= 0; node = node->PredType)
-	{
-		assert(node->PredType != NULL);
-		slots[node->Distance] = &node->PredType->Conversions[node->PredConv];
-	}
-}
-
-//==========================================================================
-//
-// PType :: VisitQueue :: Push
-//
-//==========================================================================
-
-void PType::VisitQueue::Push(PType *type)
-{
-	Queue[In] = type;
-	Advance(In);
-	assert(!IsEmpty() && "Queue overflowed");
-}
-
-//==========================================================================
-//
-// PType :: VisitQueue :: Pop
-//
-//==========================================================================
-
-PType *PType::VisitQueue::Pop()
-{
-	if (IsEmpty())
-	{
-		return NULL;
-	}
-	PType *node = Queue[Out];
-	Advance(Out);
-	return node;
-}
-
-//==========================================================================
-//
-// PType :: VisitedNodeSet :: Insert
-//
-//==========================================================================
-
-void PType::VisitedNodeSet::Insert(PType *node)
-{
-	assert(!Check(node) && "Node was already inserted");
-	size_t buck = Hash(node) & (countof(Buckets) - 1);
-	node->VisitNext = Buckets[buck];
-	Buckets[buck] = node;
-}
-
-//==========================================================================
-//
-// PType :: VisitedNodeSet :: Check
-//
-//==========================================================================
-
-bool PType::VisitedNodeSet::Check(const PType *node)
-{
-	size_t buck = Hash(node) & (countof(Buckets) - 1);
-	for (const PType *probe = Buckets[buck]; probe != NULL; probe = probe->VisitNext)
-	{
-		if (probe == node)
-		{
-			return true;
-		}
-	}
-	return false;
 }
 
 //==========================================================================
@@ -533,16 +381,9 @@ const char *PType::DescriptiveName() const
 //
 //==========================================================================
 
-void ReleaseGlobalSymbols()
-{
-	TypeTable.Clear();
-	GlobalSymbols.ReleaseSymbols();
-}
-
 void PType::StaticInit()
 {
 	// Add types to the global symbol table.
-	atterm(ReleaseGlobalSymbols);
 
 	// Set up TypeTable hash keys.
 	RUNTIME_CLASS(PErrorType)->TypeTableType = RUNTIME_CLASS(PErrorType);
@@ -593,8 +434,9 @@ void PType::StaticInit()
 	TypeTable.AddType(TypeSpriteID = new PSpriteID);
 	TypeTable.AddType(TypeTextureID = new PTextureID);
 
+	TypeVoidPtr = NewPointer(TypeVoid, false);
 	TypeColorStruct = NewStruct("@ColorStruct", nullptr);	//This name is intentionally obfuscated so that it cannot be used explicitly. The point of this type is to gain access to the single channels of a color value.
-	TypeStringStruct = NewNativeStruct(NAME_String, nullptr);
+	TypeStringStruct = NewNativeStruct("Stringstruct", nullptr);
 #ifdef __BIG_ENDIAN__
 	TypeColorStruct->AddField(NAME_a, TypeUInt8);
 	TypeColorStruct->AddField(NAME_r, TypeUInt8);
@@ -632,24 +474,24 @@ void PType::StaticInit()
 
 
 
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_sByte, TypeSInt8));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Byte, TypeUInt8));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Short, TypeSInt16));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_uShort, TypeUInt16));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Int, TypeSInt32));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_uInt, TypeUInt32));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Bool, TypeBool));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Float, TypeFloat64));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Double, TypeFloat64));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Float32, TypeFloat32));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Float64, TypeFloat64));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_String, TypeString));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Name, TypeName));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Sound, TypeSound));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Color, TypeColor));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_State, TypeState));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Vector2, TypeVector2));
-	GlobalSymbols.AddSymbol(new PSymbolType(NAME_Vector3, TypeVector3));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_sByte, TypeSInt8));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Byte, TypeUInt8));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Short, TypeSInt16));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_uShort, TypeUInt16));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Int, TypeSInt32));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_uInt, TypeUInt32));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Bool, TypeBool));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Float, TypeFloat64));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Double, TypeFloat64));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Float32, TypeFloat32));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Float64, TypeFloat64));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_String, TypeString));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Name, TypeName));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Sound, TypeSound));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Color, TypeColor));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_State, TypeState));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Vector2, TypeVector2));
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(new PSymbolType(NAME_Vector3, TypeVector3));
 }
 
 
@@ -1789,6 +1631,18 @@ PClassPointer::PClassPointer(PClass *restrict)
 
 //==========================================================================
 //
+// PClassPointer - isCompatible
+//
+//==========================================================================
+
+bool PClassPointer::isCompatible(PType *type)
+{
+	auto other = dyn_cast<PClassPointer>(type);
+	return (other != nullptr && other->ClassRestriction->IsDescendantOf(ClassRestriction));
+}
+
+//==========================================================================
+//
 // PClassPointer :: IsMatch
 //
 //==========================================================================
@@ -1840,7 +1694,7 @@ PClassPointer *NewClassPointer(PClass *restrict)
 IMPLEMENT_CLASS(PEnum, false, true)
 
 IMPLEMENT_POINTERS_START(PEnum)
-	IMPLEMENT_POINTER(ValueType)
+	IMPLEMENT_POINTER(Outer)
 IMPLEMENT_POINTERS_END
 
 //==========================================================================
@@ -1850,7 +1704,7 @@ IMPLEMENT_POINTERS_END
 //==========================================================================
 
 PEnum::PEnum()
-: ValueType(NULL)
+: PInt(4, false)
 {
 	mDescriptiveName = "Enum";
 }
@@ -1862,8 +1716,10 @@ PEnum::PEnum()
 //==========================================================================
 
 PEnum::PEnum(FName name, PTypeBase *outer)
-: PNamedType(name, outer), ValueType(NULL)
+: PInt(4, false)
 {
+	EnumName = name;
+	Outer = outer;
 	mDescriptiveName.Format("Enum<%s>", name.GetChars());
 }
 
@@ -1879,6 +1735,7 @@ PEnum::PEnum(FName name, PTypeBase *outer)
 PEnum *NewEnum(FName name, PTypeBase *outer)
 {
 	size_t bucket;
+	if (outer == nullptr) outer = Namespaces.GlobalNamespace;
 	PType *etype = TypeTable.FindType(RUNTIME_CLASS(PEnum), (intptr_t)outer, (intptr_t)name, &bucket);
 	if (etype == NULL)
 	{
@@ -2521,6 +2378,7 @@ size_t PStruct::PropagateMark()
 PStruct *NewStruct(FName name, PTypeBase *outer)
 {
 	size_t bucket;
+	if (outer == nullptr) outer = Namespaces.GlobalNamespace;
 	PType *stype = TypeTable.FindType(RUNTIME_CLASS(PStruct), (intptr_t)outer, (intptr_t)name, &bucket);
 	if (stype == NULL)
 	{
@@ -2540,8 +2398,8 @@ IMPLEMENT_CLASS(PNativeStruct, false, false)
 //
 //==========================================================================
 
-PNativeStruct::PNativeStruct(FName name)
-	: PStruct(name, nullptr)
+PNativeStruct::PNativeStruct(FName name, PTypeBase *outer)
+	: PStruct(name, outer)
 {
 	mDescriptiveName.Format("NativeStruct<%s>", name.GetChars());
 	Size = 0;
@@ -2559,10 +2417,11 @@ PNativeStruct::PNativeStruct(FName name)
 PNativeStruct *NewNativeStruct(FName name, PTypeBase *outer)
 {
 	size_t bucket;
+	if (outer == nullptr) outer = Namespaces.GlobalNamespace;
 	PType *stype = TypeTable.FindType(RUNTIME_CLASS(PNativeStruct), (intptr_t)outer, (intptr_t)name, &bucket);
 	if (stype == NULL)
 	{
-		stype = new PNativeStruct(name);
+		stype = new PNativeStruct(name, outer);
 		TypeTable.AddType(stype, RUNTIME_CLASS(PNativeStruct), (intptr_t)outer, (intptr_t)name, bucket);
 	}
 	return static_cast<PNativeStruct *>(stype);
@@ -2611,6 +2470,27 @@ PField::PField(FName name, PType *type, DWORD flags, size_t offset, int bitvalue
 		}
 	}
 	else BitValue = -1;
+}
+
+/* PProperty *****************************************************************/
+
+IMPLEMENT_CLASS(PProperty, false, false)
+
+//==========================================================================
+//
+// PField - Default Constructor
+//
+//==========================================================================
+
+PProperty::PProperty()
+	: PSymbol(NAME_None)
+{
+}
+
+PProperty::PProperty(FName name, TArray<PField *> &fields)
+	: PSymbol(name)
+{
+	Variables = std::move(fields);
 }
 
 /* PPrototype *************************************************************/
@@ -2923,6 +2803,7 @@ void PClass::StaticInit ()
 	atterm (StaticShutdown);
 
 	StaticBootstrap();
+	Namespaces.GlobalNamespace = Namespaces.NewNamespace(0);
 
 	FAutoSegIterator probe(CRegHead, CRegTail);
 
@@ -2960,7 +2841,24 @@ void PClass::StaticShutdown ()
 	TArray<size_t *> uniqueFPs(64);
 	unsigned int i, j;
 
-	FS_Close();	// this must be done before the classes get deleted.
+	// delete all variables containing pointers to script functions.
+	for (auto p : FunctionPtrList)
+	{
+		*p = nullptr;
+	}
+	FunctionPtrList.Clear();
+
+	// Make a full garbage collection here so that all destroyed but uncollected higher level objects that still exist can be properly taken down.
+	GC::FullGC();
+
+	// From this point onward no scripts may be called anymore because the data needed by the VM is getting deleted now.
+	// This flags DObject::Destroy not to call any scripted OnDestroy methods anymore.
+	bVMOperational = false;
+
+	// Unless something went wrong, anything left here should be class and type objects only, which do not own any scripts.
+	TypeTable.Clear();
+	Namespaces.ReleaseSymbols();
+
 	for (i = 0; i < PClass::AllClasses.Size(); ++i)
 	{
 		PClass *type = PClass::AllClasses[i];
@@ -2987,7 +2885,6 @@ void PClass::StaticShutdown ()
 	{
 		delete[] uniqueFPs[i];
 	}
-	TypeTable.Clear();
 	bShutdown = true;
 
 	AllClasses.Clear();
@@ -3000,7 +2897,7 @@ void PClass::StaticShutdown ()
 		auto cr = ((ClassReg *)*probe);
 		cr->MyClass = nullptr;
 	}
-
+	
 }
 
 //==========================================================================
@@ -3088,9 +2985,6 @@ PClass *ClassReg::RegisterClass()
 		&PClass::RegistrationInfo,
 		&PClassActor::RegistrationInfo,
 		&PClassInventory::RegistrationInfo,
-		&PClassAmmo::RegistrationInfo,
-		&PClassHealth::RegistrationInfo,
-		&PClassPuzzleItem::RegistrationInfo,
 		&PClassWeapon::RegistrationInfo,
 		&PClassPlayerPawn::RegistrationInfo,
 		&PClassType::RegistrationInfo,
@@ -3159,14 +3053,14 @@ void PClass::InsertIntoHash ()
 	size_t bucket;
 	PType *found;
 
-	found = TypeTable.FindType(RUNTIME_CLASS(PClass), (intptr_t)Outer, TypeName, &bucket);
+	found = TypeTable.FindType(RUNTIME_CLASS(PClass), 0, TypeName, &bucket);
 	if (found != NULL)
 	{ // This type has already been inserted
 		I_Error("Tried to register class '%s' more than once.\n", TypeName.GetChars());
 	}
 	else
 	{
-		TypeTable.AddType(this, RUNTIME_CLASS(PClass), (intptr_t)Outer, TypeName, bucket);
+		TypeTable.AddType(this, RUNTIME_CLASS(PClass), 0, TypeName, bucket);
 	}
 }
 
@@ -3204,8 +3098,7 @@ PClass *PClass::FindClass (FName zaname)
 	{
 		return NULL;
 	}
-	return static_cast<PClass *>(TypeTable.FindType(RUNTIME_CLASS(PClass),
-		/*FIXME:Outer*/0, zaname, NULL));
+	return static_cast<PClass *>(TypeTable.FindType(RUNTIME_CLASS(PClass), 0, zaname, NULL));
 }
 
 //==========================================================================
@@ -3229,7 +3122,7 @@ DObject *PClass::CreateNew() const
 
 	ConstructNative (mem);
 	((DObject *)mem)->SetClass (const_cast<PClass *>(this));
-	InitializeSpecials(mem);
+	InitializeSpecials(mem, Defaults);
 	return (DObject *)mem;
 }
 
@@ -3241,7 +3134,7 @@ DObject *PClass::CreateNew() const
 //
 //==========================================================================
 
-void PClass::InitializeSpecials(void *addr) const
+void PClass::InitializeSpecials(void *addr, void *defaults) const
 {
 	// Once we reach a native class, we can stop going up the family tree,
 	// since native classes handle initialization natively.
@@ -3250,10 +3143,10 @@ void PClass::InitializeSpecials(void *addr) const
 		return;
 	}
 	assert(ParentClass != NULL);
-	ParentClass->InitializeSpecials(addr);
+	ParentClass->InitializeSpecials(addr, defaults);
 	for (auto tao : SpecialInits)
 	{
-		tao.first->InitializeValue((BYTE*)addr + tao.second, Defaults == nullptr? nullptr : Defaults + tao.second);
+		tao.first->InitializeValue((char*)addr + tao.second, defaults == nullptr? nullptr : ((char*)defaults) + tao.second);
 	}
 }
 
@@ -3308,26 +3201,44 @@ void PClass::Derive(PClass *newclass, FName name)
 
 void PClass::InitializeDefaults()
 {
-	assert(Defaults == NULL);
-	Defaults = (BYTE *)M_Malloc(Size);
-	if (ParentClass->Defaults != NULL)
+	if (IsKindOf(RUNTIME_CLASS(PClassActor)))
 	{
-		memcpy(Defaults, ParentClass->Defaults, ParentClass->Size);
-		if (Size > ParentClass->Size)
+		assert(Defaults == NULL);
+		Defaults = (BYTE *)M_Malloc(Size);
+
+		// run the constructor on the defaults to set the vtbl pointer which is needed to run class-aware functions on them.
+		// Temporarily setting bSerialOverride prevents linking into the thinker chains.
+		auto s = DThinker::bSerialOverride;
+		DThinker::bSerialOverride = true;
+		ConstructNative(Defaults);
+		DThinker::bSerialOverride = s;
+		// We must unlink the defaults from the class list because it's just a static block of data to the engine.
+		DObject *optr = (DObject*)Defaults;
+		GC::Root = optr->ObjNext;
+		optr->ObjNext = nullptr;
+		optr->SetClass(this);
+
+
+		// Copy the defaults from the parent but leave the DObject part alone because it contains important data.
+		if (ParentClass->Defaults != NULL)
 		{
-			memset(Defaults + ParentClass->Size, 0, Size - ParentClass->Size);
+			memcpy(Defaults + sizeof(DObject), ParentClass->Defaults + sizeof(DObject), ParentClass->Size - sizeof(DObject));
+			if (Size > ParentClass->Size)
+			{
+				memset(Defaults + ParentClass->Size, 0, Size - ParentClass->Size);
+			}
 		}
-	}
-	else
-	{
-		memset(Defaults, 0, Size);
+		else
+		{
+			memset(Defaults + sizeof(DObject), 0, Size - sizeof(DObject));
+		}
 	}
 
 	if (bRuntimeClass)
 	{
 		// Copy parent values from the parent defaults.
 		assert(ParentClass != NULL);
-		ParentClass->InitializeSpecials(Defaults);
+		ParentClass->InitializeSpecials(Defaults, ParentClass->Defaults);
 
 		for (const PField *field : Fields)
 		{
@@ -3481,7 +3392,7 @@ PClass *PClass::FindClassTentative(FName name)
 
 	Derive(type, name);
 	type->Size = TentativeClass;
-	TypeTable.AddType(type, RUNTIME_CLASS(PClass), (intptr_t)type->Outer, name, bucket);
+	TypeTable.AddType(type, RUNTIME_CLASS(PClass), 0, name, bucket);
 	return type;
 }
 
@@ -3641,6 +3552,16 @@ VMFunction *PClass::FindFunction(FName clsname, FName funcname)
 	auto func = dyn_cast<PFunction>(cls->Symbols.FindSymbol(funcname, true));
 	if (!func) return nullptr;
 	return func->Variants[0].Implementation;
+}
+
+void PClass::FindFunction(VMFunction **pptr, FName clsname, FName funcname)
+{
+	auto cls = PClass::FindActor(clsname);
+	if (!cls) return;
+	auto func = dyn_cast<PFunction>(cls->Symbols.FindSymbol(funcname, true));
+	if (!func) return;
+	*pptr = func->Variants[0].Implementation;
+	FunctionPtrList.Push(pptr);
 }
 
 
@@ -3918,6 +3839,13 @@ PSymbol *PSymbolTable::AddSymbol (PSymbol *sym)
 	return sym;
 }
 
+void PSymbolTable::RemoveSymbol(PSymbol *sym)
+{
+	auto mysym = Symbols.CheckKey(sym->SymbolName);
+	if (mysym == nullptr || *mysym != sym) return;
+	Symbols.Remove(sym->SymbolName);
+}
+
 PSymbol *PSymbolTable::ReplaceSymbol(PSymbol *newsym)
 {
 	// If a symbol with a matching name exists, take its place and return it.
@@ -3932,4 +3860,103 @@ PSymbol *PSymbolTable::ReplaceSymbol(PSymbol *newsym)
 	// symbol to replace.
 	Symbols.Insert(newsym->SymbolName, newsym);
 	return NULL;
+}
+
+IMPLEMENT_CLASS(PNamespace, false, true)
+
+IMPLEMENT_POINTERS_START(PNamespace)
+IMPLEMENT_POINTER(Parent)
+IMPLEMENT_POINTERS_END
+
+PNamespace::PNamespace(int filenum, PNamespace *parent)
+{
+	Parent = parent;
+	if (parent) Symbols.SetParentTable(&parent->Symbols);
+	FileNum = filenum;
+}
+
+size_t PNamespace::PropagateMark()
+{
+	GC::Mark(Parent);
+	return Symbols.MarkSymbols() + 1;
+}
+
+FNamespaceManager::FNamespaceManager()
+{
+	GlobalNamespace = nullptr;
+}
+
+PNamespace *FNamespaceManager::NewNamespace(int filenum)
+{
+	PNamespace *parent = nullptr;
+	// The parent will be the last namespace with this or a lower filenum.
+	// This ensures that DECORATE won't see the symbols of later files.
+	for (int i = AllNamespaces.Size() - 1; i >= 0; i--)
+	{
+		if (AllNamespaces[i]->FileNum <= filenum)
+		{
+			parent = AllNamespaces[i];
+			break;
+		}
+	}
+	auto newns = new PNamespace(filenum, parent);
+	AllNamespaces.Push(newns);
+	return newns;
+}
+
+size_t FNamespaceManager::MarkSymbols()
+{
+	for (auto ns : AllNamespaces)
+	{
+		GC::Mark(ns);
+	}
+	return AllNamespaces.Size();
+}
+
+void FNamespaceManager::ReleaseSymbols()
+{
+	GlobalNamespace = nullptr;
+	AllNamespaces.Clear();
+}
+
+// removes all symbols from the symbol tables.
+// After running the compiler these are not needed anymore.
+// Only the namespaces themselves are kept because the type table references them.
+int FNamespaceManager::RemoveSymbols()
+{
+	int count = 0;
+	for (auto ns : AllNamespaces)
+	{
+		count += ns->Symbols.Symbols.CountUsed();
+		ns->Symbols.ReleaseSymbols();
+	}
+	return count;
+}
+
+void RemoveUnusedSymbols()
+{
+	// Global symbols are not needed anymore after running the compiler.
+	int count = Namespaces.RemoveSymbols();
+
+	// We do not need any non-field and non-function symbols in structs and classes anymore.
+	for (size_t i = 0; i < countof(TypeTable.TypeHash); ++i)
+	{
+		for (PType *ty = TypeTable.TypeHash[i]; ty != NULL; ty = ty->HashNext)
+		{
+			if (ty->IsKindOf(RUNTIME_CLASS(PStruct)))
+			{
+				auto it = ty->Symbols.GetIterator();
+				PSymbolTable::MapType::Pair *pair;
+				while (it.NextPair(pair))
+				{
+					if (!pair->Value->IsKindOf(RUNTIME_CLASS(PField)) && !pair->Value->IsKindOf(RUNTIME_CLASS(PFunction)))
+					{
+						ty->Symbols.RemoveSymbol(pair->Value);
+						count++;
+					}
+				}
+			}
+		}
+	}
+	DPrintf(DMSG_SPAMMY, "%d symbols removed after compilation\n", count);
 }

@@ -67,6 +67,7 @@
 #include "d_player.h"
 #include "gstrings.h"
 #include "c_consolebuffer.h"
+#include "g_levellocals.h"
 
 #include "gi.h"
 
@@ -1002,23 +1003,23 @@ void FNotifyBuffer::Draw()
 			{
 				if (!center)
 					screen->DrawText (SmallFont, color, 0, line, notify.Text,
-						DTA_CleanNoMove, true, DTA_AlphaF, alpha, TAG_DONE);
+						DTA_CleanNoMove, true, DTA_Alpha, alpha, TAG_DONE);
 				else
 					screen->DrawText (SmallFont, color, (SCREENWIDTH -
 						SmallFont->StringWidth (notify.Text)*CleanXfac)/2,
 						line, notify.Text, DTA_CleanNoMove, true,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 			}
 			else if (active_con_scaletext() == 1)
 			{
 				if (!center)
 					screen->DrawText (SmallFont, color, 0, line, notify.Text,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 				else
 					screen->DrawText (SmallFont, color, (SCREENWIDTH -
 						SmallFont->StringWidth (notify.Text))/2,
 						line, notify.Text,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 			}
 			else
 			{
@@ -1027,7 +1028,7 @@ void FNotifyBuffer::Draw()
 						DTA_VirtualWidth, screen->GetWidth() / active_con_scaletext(),
 						DTA_VirtualHeight, screen->GetHeight() / active_con_scaletext(),
 						DTA_KeepRatio, true,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 				else
 					screen->DrawText (SmallFont, color, (screen->GetWidth() -
 						SmallFont->StringWidth (notify.Text) * active_con_scaletext()) / 2 / active_con_scaletext(),
@@ -1035,7 +1036,7 @@ void FNotifyBuffer::Draw()
 						DTA_VirtualWidth, screen->GetWidth() / active_con_scaletext(),
 						DTA_VirtualHeight, screen->GetHeight() / active_con_scaletext(),
 						DTA_KeepRatio, true,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 			}
 			line += lineadv;
 			canskip = false;
@@ -1116,7 +1117,7 @@ void C_DrawConsole (bool hw2d)
 			DTA_DestWidth, screen->GetWidth(),
 			DTA_DestHeight, screen->GetHeight(),
 			DTA_ColorOverlay, conshade,
-			DTA_AlphaF, (hw2d && gamestate != GS_FULLCONSOLE) ? (double)con_alpha : 1.,
+			DTA_Alpha, (hw2d && gamestate != GS_FULLCONSOLE) ? (double)con_alpha : 1.,
 			DTA_Masked, false,
 			TAG_DONE);
 		if (conline && visheight < screen->GetHeight())
@@ -1323,6 +1324,12 @@ void C_HideConsole ()
 		ConBottom = 0;
 		HistPos = NULL;
 	}
+}
+
+DEFINE_ACTION_FUNCTION(_Console, HideConsole)
+{
+	C_HideConsole();
+	return 0;
 }
 
 static bool C_HandleKey (event_t *ev, FCommandBuffer &buffer)
@@ -1742,7 +1749,7 @@ void C_MidPrintBold (FFont *font, const char *msg)
 	}
 }
 
-DEFINE_ACTION_FUNCTION(DObject, C_MidPrint)
+DEFINE_ACTION_FUNCTION(_Console, MidPrint)
 {
 	PARAM_PROLOGUE;
 	PARAM_STRING(font);

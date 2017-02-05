@@ -26,6 +26,7 @@
 #include "dsectoreffect.h"
 #include "gi.h"
 #include "p_local.h"
+#include "g_levellocals.h"
 #include "p_3dmidtex.h"
 #include "r_data/r_interpolate.h"
 #include "statnums.h"
@@ -40,7 +41,7 @@ DSectorEffect::DSectorEffect ()
 	m_Sector = NULL;
 }
 
-void DSectorEffect::Destroy()
+void DSectorEffect::OnDestroy()
 {
 	if (m_Sector)
 	{
@@ -57,7 +58,7 @@ void DSectorEffect::Destroy()
 			m_Sector->lightingdata = NULL;
 		}
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 DSectorEffect::DSectorEffect (sector_t *sector)
@@ -88,10 +89,10 @@ DMover::DMover (sector_t *sector)
 	interpolation = NULL;
 }
 
-void DMover::Destroy()
+void DMover::OnDestroy()
 {
 	StopInterpolation();
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 void DMover::Serialize(FSerializer &arc)
@@ -279,6 +280,19 @@ EMoveResult sector_t::MoveFloor(double speed, double dest, int crush, int direct
 	return EMoveResult::ok;
 }
 
+DEFINE_ACTION_FUNCTION(_Sector, MoveFloor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_FLOAT(speed);
+	PARAM_FLOAT(dest);
+	PARAM_INT(crush);
+	PARAM_INT(dir);
+	PARAM_BOOL(hex);
+	PARAM_BOOL_DEF(inst);
+	ACTION_RETURN_INT((int)self->MoveFloor(speed, dest, crush, dir, hex, inst));
+}
+
+
 EMoveResult sector_t::MoveCeiling(double speed, double dest, int crush, int direction, bool hexencrush)
 {
 	bool	 	flag;
@@ -391,4 +405,15 @@ EMoveResult sector_t::MoveCeiling(double speed, double dest, int crush, int dire
 		break;
 	}
 	return EMoveResult::ok;
+}
+
+DEFINE_ACTION_FUNCTION(_Sector, MoveCeiling)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_FLOAT(speed);
+	PARAM_FLOAT(dest);
+	PARAM_INT(crush);
+	PARAM_INT(dir);
+	PARAM_BOOL(hex);
+	ACTION_RETURN_INT((int)self->MoveCeiling(speed, dest, crush, dir, hex));
 }

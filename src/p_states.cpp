@@ -40,6 +40,8 @@
 #include "c_dispatch.h"
 #include "v_text.h"
 #include "thingdef.h"
+#include "r_state.h"
+
 
 // stores indices for symbolic state labels for some old-style DECORATE functions.
 FStateLabelStorage StateLabels;
@@ -729,7 +731,7 @@ FState *FStateDefinitions::ResolveGotoLabel (AActor *actor, PClassActor *mytype,
 		*pt = '\0';
 		offset = pt + 1;
 	}
-	v = offset ? strtol (offset, NULL, 0) : 0;
+	v = offset ? (int)strtoll (offset, NULL, 0) : 0;
 
 	// Get the state's address.
 	if (type == mytype)
@@ -1091,4 +1093,10 @@ DEFINE_ACTION_FUNCTION(FState, DistanceTo)
 		if (other >= o1->OwnedStates && other < o1->OwnedStates + o1->NumOwnedStates) retv = int(other - self);
 	}
 	ACTION_RETURN_INT(retv);
+}
+
+DEFINE_ACTION_FUNCTION(FState, ValidateSpriteFrame)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FState);
+	ACTION_RETURN_BOOL(self->Frame < sprites[self->sprite].numframes);
 }

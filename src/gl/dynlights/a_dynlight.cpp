@@ -71,6 +71,7 @@
 #include "portal.h"
 #include "doomstat.h"
 #include "serializer.h"
+#include "g_levellocals.h"
 
 
 #include "gl/renderer/gl_renderer.h"
@@ -108,50 +109,7 @@ DEFINE_CLASS_PROPERTY(type, S, DynamicLight)
 // which is controlled by flags
 //
 //==========================================================================
-IMPLEMENT_CLASS (ADynamicLight, false, false)
-IMPLEMENT_CLASS (AVavoomLight, false, false)
-IMPLEMENT_CLASS (AVavoomLightWhite, false, false)
-IMPLEMENT_CLASS (AVavoomLightColor, false, false)
-
-void AVavoomLight::BeginPlay ()
-{
-	// This must not call Super::BeginPlay!
-	ChangeStatNum(STAT_DLIGHT);
-	if (Sector) AddZ(-Sector->floorplane.ZatPoint(this), false);
-	lighttype = PointLight;
-}
-
-void AVavoomLightWhite::BeginPlay ()
-{
-	m_Radius[0] = args[0] * 4;
-	args[LIGHT_RED] = 128;
-	args[LIGHT_GREEN] = 128;
-	args[LIGHT_BLUE] = 128;
-
-	if (gl.legacyMode && (flags4 & MF4_ATTENUATE))
-	{
-		m_Radius[0] = m_Radius[0] * 2 / 3;
-	}
-	Super::BeginPlay();
-}
-
-void AVavoomLightColor::BeginPlay ()
-{
-	int l_args[5];
-	memcpy(l_args, args, sizeof(l_args));
-	memset(args, 0, sizeof(args));
-	m_Radius[0] = l_args[0] * 4;
-	args[LIGHT_RED] = l_args[1] >> 1;
-	args[LIGHT_GREEN] = l_args[2] >> 1;
-	args[LIGHT_BLUE] = l_args[3] >> 1;
-
-	if (gl.legacyMode && (flags4 & MF4_ATTENUATE))
-	{
-		m_Radius[0] = m_Radius[0] * 2 / 3;
-	}
-
-	Super::BeginPlay();
-}
+IMPLEMENT_CLASS(ADynamicLight, false, false)
 
 static FRandom randLight;
 
@@ -173,8 +131,7 @@ void ADynamicLight::Serialize(FSerializer &arc)
 	arc("lightflags", lightflags, def->lightflags)
 		("lighttype", lighttype, def->lighttype)
 		("tickcount", m_tickCount, def->m_tickCount)
-		("currentradius", m_currentRadius, def->m_currentRadius)
-		.Array("lightradius", m_Radius, def->m_Radius, 2);
+		("currentradius", m_currentRadius, def->m_currentRadius);
 
 	if (lighttype == PulseLight)
 		arc("lastupdate", m_lastUpdate, def->m_lastUpdate)
@@ -201,15 +158,13 @@ void ADynamicLight::BeginPlay()
 	//Super::BeginPlay();
 	ChangeStatNum(STAT_DLIGHT);
 
-	m_Radius[0] = args[LIGHT_INTENSITY];
-	m_Radius[1] = args[LIGHT_SECONDARY_INTENSITY];
 	specialf1 = DAngle(double(SpawnAngle)).Normalized360().Degrees;
 	visibletoplayer = true;
 
 	if (gl.legacyMode && (flags4 & MF4_ATTENUATE))
 	{
-		m_Radius[0] = m_Radius[0] * 2 / 3;
-		m_Radius[1] = m_Radius[1] * 2 / 3;
+		args[LIGHT_INTENSITY] = args[LIGHT_INTENSITY] * 2 / 3;
+		args[LIGHT_SECONDARY_INTENSITY] = args[LIGHT_SECONDARY_INTENSITY] * 2 / 3;
 	}
 }
 
@@ -241,7 +196,7 @@ void ADynamicLight::Activate(AActor *activator)
 	//Super::Activate(activator);
 	flags2&=~MF2_DORMANT;	
 
-	m_currentRadius = float(m_Radius[0]);
+	m_currentRadius = float(args[LIGHT_INTENSITY]);
 	m_tickCount = 0;
 
 	if (lighttype == PulseLight)
@@ -249,11 +204,12 @@ void ADynamicLight::Activate(AActor *activator)
 		float pulseTime = specialf1 / TICRATE;
 		
 		m_lastUpdate = level.maptime;
-		m_cycler.SetParams(float(m_Radius[1]), float(m_Radius[0]), pulseTime);
+		m_cycler.SetParams(float(args[LIGHT_SECONDARY_INTENSITY]), float(args[LIGHT_INTENSITY]), pulseTime);
 		m_cycler.ShouldCycle(true);
 		m_cycler.SetCycleType(CYCLE_Sin);
 		m_currentRadius = m_cycler.GetVal();
 	}
+	if (m_currentRadius <= 0) m_currentRadius = 1;
 }
 
 
@@ -310,25 +266,25 @@ void ADynamicLight::Tick()
 
 	case FlickerLight:
 	{
-		BYTE rnd = randLight();
+		int rnd = randLight();
 		float pct = specialf1 / 360.f;
 		
-		m_currentRadius = float(m_Radius[rnd >= pct * 255]);
+		m_currentRadius = float(args[LIGHT_INTENSITY + (rnd >= pct * 255)]);
 		break;
 	}
 
 	case RandomFlickerLight:
 	{
-		int flickerRange = m_Radius[1] - m_Radius[0];
+		int flickerRange = args[LIGHT_SECONDARY_INTENSITY] - args[LIGHT_INTENSITY];
 		float amt = randLight() / 255.f;
 		
 		if (m_tickCount > specialf1)
 		{
 			m_tickCount = 0;
 		}
-		if (m_tickCount++ == 0 || m_currentRadius > m_Radius[1])
+		if (m_tickCount++ == 0 || m_currentRadius > args[LIGHT_SECONDARY_INTENSITY])
 		{
-			m_currentRadius = float(m_Radius[0] + (amt * flickerRange));
+			m_currentRadius = float(args[LIGHT_INTENSITY] + (amt * flickerRange));
 		}
 		break;
 	}
@@ -337,7 +293,7 @@ void ADynamicLight::Tick()
 	// These need some more work elsewhere
 	case ColorFlickerLight:
 	{
-		BYTE rnd = randLight();
+		int rnd = randLight();
 		float pct = specialf1/360.f;
 		
 		m_currentRadius = m_Radius[rnd >= pct * 255];
@@ -346,14 +302,14 @@ void ADynamicLight::Tick()
 
 	case RandomColorFlickerLight:
 	{
-		int flickerRange = m_Radius[1] - m_Radius[0];
+		int flickerRange = args[LIGHT_SECONDARY_INTENSITY] - args[LIGHT_INTENSITY];
 		float amt = randLight() / 255.f;
 		
 		m_tickCount++;
 		
 		if (m_tickCount > specialf1)
 		{
-			m_currentRadius = m_Radius[0] + (amt * flickerRange);
+			m_currentRadius = args[LIGHT_INTENSITY] + (amt * flickerRange);
 			m_tickCount = 0;
 		}
 		break;
@@ -375,9 +331,10 @@ void ADynamicLight::Tick()
 	}
 
 	case PointLight:
-		m_currentRadius = float(m_Radius[0]);
+		m_currentRadius = float(args[LIGHT_INTENSITY]);
 		break;
 	}
+	if (m_currentRadius <= 0) m_currentRadius = 1;
 	UpdateLocation();
 }
 
@@ -427,14 +384,14 @@ void ADynamicLight::UpdateLocation()
 
 		if (lighttype == FlickerLight || lighttype == RandomFlickerLight || lighttype == PulseLight)
 		{
-			intensity = float(MAX(m_Radius[0], m_Radius[1]));
+			intensity = float(MAX(args[LIGHT_INTENSITY], args[LIGHT_SECONDARY_INTENSITY]));
 		}
 		else
 		{
 			intensity = m_currentRadius;
 		}
 		radius = intensity * 2.0f;
-		assert(radius >= m_currentRadius * 2);
+		if (radius < m_currentRadius * 2) radius = m_currentRadius * 2;
 
 		if (X() != oldx || Y() != oldy || radius != oldradius)
 		{
@@ -804,10 +761,10 @@ void ADynamicLight::UnlinkLight ()
 	while (touching_sector) touching_sector = DeleteLightNode(touching_sector);
 }
 
-void ADynamicLight::Destroy()
+void ADynamicLight::OnDestroy()
 {
 	UnlinkLight();
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 

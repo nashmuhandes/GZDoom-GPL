@@ -35,6 +35,7 @@
 #include "d_player.h"
 #include "portal.h"
 #include "templates.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_cvars.h"
@@ -378,6 +379,8 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 	case GLPASS_ALL:			// Same, but also creates the dynlight data.
 		gl_SetColor(lightlevel, rel, Colormap,1.0f);
 		gl_SetFog(lightlevel, rel, &Colormap, false);
+		if (!gltexture->tex->isFullbright())
+			gl_RenderState.SetObjectColor(FlatColor | 0xff000000);
 		if (sector->special != GLSector_Skybox)
 		{
 			gl_RenderState.SetMaterial(gltexture, CLAMP_NONE, 0, -1, false);
@@ -390,6 +393,7 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 			gl_RenderState.SetMaterial(gltexture, CLAMP_XY, 0, -1, false);
 			DrawSkyboxSector(pass, (pass == GLPASS_ALL || dynlightindex > -1));
 		}
+		gl_RenderState.SetObjectColor(0xffffffff);
 		break;
 
 	case GLPASS_LIGHTSONLY:
@@ -403,7 +407,9 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 		if (renderstyle==STYLE_Add) gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE);
 		gl_SetColor(lightlevel, rel, Colormap, alpha);
 		gl_SetFog(lightlevel, rel, &Colormap, false);
-		if (!gltexture)	
+		if (!gltexture || !gltexture->tex->isFullbright())
+			gl_RenderState.SetObjectColor(FlatColor | 0xff000000);
+		if (!gltexture)
 		{
 			gl_RenderState.AlphaFunc(GL_GEQUAL, 0.f);
 			gl_RenderState.EnableTexture(false);
@@ -420,6 +426,7 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 			gl_RenderState.EnableTextureMatrix(false);
 		}
 		if (renderstyle==STYLE_Add) gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		gl_RenderState.SetObjectColor(0xffffffff);
 		break;
 
 	case GLPASS_LIGHTTEX:
@@ -545,8 +552,16 @@ void GLFlat::SetFrom3DFloor(F3DFloor *rover, bool top, bool underside)
 	lightlist_t *light = P_GetPlaneLight(sector, plane.plane, underside);
 	lightlevel = gl_ClampLight(*light->p_lightlevel);
 	
-	if (rover->flags & FF_FOG) Colormap.LightColor = (light->extra_colormap)->Fade;
-	else Colormap.CopyFrom3DLight(light);
+	if (rover->flags & FF_FOG)
+	{
+		Colormap.LightColor = (light->extra_colormap)->Fade;
+		FlatColor = 0xffffffff;
+	}
+	else
+	{
+		Colormap.CopyFrom3DLight(light);
+		FlatColor = *plane.flatcolor;
+	}
 
 
 	alpha = rover->alpha/255.0f;
@@ -582,7 +597,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 #endif
 
 	// Get the real sector for this one.
-	sector = &sectors[frontsector->sectornum];
+	sector = &level.sectors[frontsector->sectornum];
 	extsector_t::xfloor &x = sector->e->XFloor;
 	dynlightindex = -1;
 
@@ -603,6 +618,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 
 		lightlevel = gl_ClampLight(frontsector->GetFloorLight());
 		Colormap = frontsector->ColorMap;
+		FlatColor = frontsector->SpecialColors[sector_t::floor];
 		port = frontsector->ValidatePortal(sector_t::floor);
 		if ((stack = (port != NULL)))
 		{
@@ -662,6 +678,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 
 		lightlevel = gl_ClampLight(frontsector->GetCeilingLight());
 		Colormap = frontsector->ColorMap;
+		FlatColor = frontsector->SpecialColors[sector_t::ceiling];
 		port = frontsector->ValidatePortal(sector_t::ceiling);
 		if ((stack = (port != NULL)))
 		{

@@ -1,7 +1,6 @@
 #pragma once
 
-#include "a_ammo.h"
-
+#include "a_pickups.h"
 class PClassWeapon;
 class AWeapon;
 
@@ -107,7 +106,7 @@ class AWeapon : public AStateProvider
 	HAS_OBJECT_POINTERS
 public:
 	DWORD WeaponFlags;
-	PClassAmmo *AmmoType1, *AmmoType2;		// Types of ammo used by this weapon
+	PClassInventory *AmmoType1, *AmmoType2;	// Types of ammo used by this weapon
 	int AmmoGive1, AmmoGive2;				// Amount of each ammo to get when picking up weapon
 	int MinAmmo1, MinAmmo2;					// Minimum ammo needed to switch to this weapon
 	int AmmoUse1, AmmoUse2;					// How much ammo to use with each shot
@@ -126,7 +125,7 @@ public:
 	float BobRangeX, BobRangeY;				// [XA] Bobbing range. Defines how far a weapon bobs in either direction.
 
 	// In-inventory instance variables
-	TObjPtr<AAmmo> Ammo1, Ammo2;
+	TObjPtr<AInventory> Ammo1, Ammo2;
 	TObjPtr<AWeapon> SisterWeapon;
 	float FOVScale;
 	int Crosshair;							// 0 to use player's crosshair
@@ -137,17 +136,7 @@ public:
 	virtual void MarkPrecacheSounds() const;
 	
 	virtual void Serialize(FSerializer &arc) override;
-	virtual bool ShouldStay () override;
-	virtual void AttachToOwner (AActor *other) override;
-	virtual bool HandlePickup (AInventory *item) override;
-	virtual AInventory *CreateCopy (AActor *other) override;
-	virtual AInventory *CreateTossable () override;
-	virtual bool TryPickup (AActor *&toucher) override;
-	virtual bool TryPickupRestricted (AActor *&toucher) override;
-	virtual bool Use (bool pickup) override;
-	virtual void Destroy() override;
 
-	bool PickupForAmmo(AWeapon *ownedWeapon);
 	void PostMorphWeapon();
 
 	// scripted virtuals.
@@ -158,10 +147,6 @@ public:
 	FState *GetAltAtkState (bool hold);
 	
 	FState *GetStateForButtonName (FName button);
-
-
-	virtual void EndPowerup ();
-	void CallEndPowerup();
 
 	enum
 	{
@@ -182,10 +167,6 @@ public:
 		BobInverseSmooth
 	};
 
-protected:
-	AAmmo *AddAmmo (AActor *other, PClassActor *ammotype, int amount);
-	bool AddExistingAmmo (AAmmo *ammo, int amount);
-	AWeapon *AddWeapon (PClassWeapon *weapon);
 };
 
 enum
@@ -217,16 +198,5 @@ enum
 	WIF_BOT_REACTION_SKILL_THING = 1<<31, // I don't understand this
 	WIF_BOT_EXPLOSIVE =		1<<30,		// weapon fires an explosive
 	WIF_BOT_BFG =			1<<28,		// this is a BFG
-};
-
-class AWeaponGiver : public AWeapon
-{
-	DECLARE_CLASS(AWeaponGiver, AWeapon)
-
-public:
-	virtual bool TryPickup(AActor *&toucher) override;
-	virtual void Serialize(FSerializer &arc) override;
-
-	double DropAmmoFactor;
 };
 

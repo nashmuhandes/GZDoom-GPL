@@ -48,9 +48,58 @@
 #include "p_lnspec.h"
 #include "i_system.h"
 #include "gdtoa.h"
-#include "codegeneration/codegen.h"
 #include "vmbuilder.h"
 #include "version.h"
+
+static int GetIntConst(FxExpression *ex, FCompileContext &ctx)
+{
+	ex = new FxIntCast(ex, false);
+	ex = ex->Resolve(ctx);
+	return ex ? static_cast<FxConstant*>(ex)->GetValue().GetInt() : 0;
+}
+
+static double GetFloatConst(FxExpression *ex, FCompileContext &ctx)
+{
+	ex = new FxFloatCast(ex);
+	ex = ex->Resolve(ctx);
+	return ex ? static_cast<FxConstant*>(ex)->GetValue().GetFloat() : 0;
+}
+
+static FString GetStringConst(FxExpression *ex, FCompileContext &ctx)
+{
+	ex = new FxStringCast(ex);
+	ex = ex->Resolve(ctx);
+	return static_cast<FxConstant*>(ex)->GetValue().GetString();
+}
+
+int ZCCCompiler::IntConstFromNode(ZCC_TreeNode *node, PStruct *cls)
+{
+	FCompileContext ctx(OutNamespace, cls, false);
+	FxExpression *ex = new FxIntCast(ConvertNode(node), false);
+	ex = ex->Resolve(ctx);
+	if (ex == nullptr) return 0;
+	if (!ex->isConstant())
+	{
+		ex->ScriptPosition.Message(MSG_ERROR, "Expression is not constant");
+		return 0;
+	}
+	return static_cast<FxConstant*>(ex)->GetValue().GetInt();
+}
+
+FString ZCCCompiler::StringConstFromNode(ZCC_TreeNode *node, PStruct *cls)
+{
+	FCompileContext ctx(OutNamespace, cls, false);
+	FxExpression *ex = new FxStringCast(ConvertNode(node));
+	ex = ex->Resolve(ctx);
+	if (ex == nullptr) return "";
+	if (!ex->isConstant())
+	{
+		ex->ScriptPosition.Message(MSG_ERROR, "Expression is not constant");
+		return "";
+	}
+	return static_cast<FxConstant*>(ex)->GetValue().GetString();
+}
+
 
 //==========================================================================
 //
@@ -105,7 +154,12 @@ void ZCCCompiler::ProcessClass(ZCC_Class *cnode, PSymbolTreeNode *treenode)
 					cls->Enums.Push(enumType);
 					break;
 
-				case AST_Struct:		
+				case AST_Struct:	
+					if (static_cast<ZCC_Struct *>(node)->Flags & VARF_Native)
+					{
+						Error(node, "Cannot define native structs inside classes");
+						static_cast<ZCC_Struct *>(node)->Flags &= ~VARF_Native;
+					}
 					ProcessStruct(static_cast<ZCC_Struct *>(node), childnode, cls->cls);	
 					break;
 
@@ -118,6 +172,10 @@ void ZCCCompiler::ProcessClass(ZCC_Class *cnode, PSymbolTreeNode *treenode)
 					assert(0 && "Default case is just here to make GCC happy. It should never be reached");
 				}
 			}
+			break;
+
+		case AST_Property:
+			cls->Properties.Push(static_cast<ZCC_Property *>(node));
 			break;
 
 		case AST_VarDeclarator: 
@@ -218,8 +276,8 @@ void ZCCCompiler::ProcessStruct(ZCC_Struct *cnode, PSymbolTreeNode *treenode, ZC
 //
 //==========================================================================
 
-ZCCCompiler::ZCCCompiler(ZCC_AST &ast, DObject *_outer, PSymbolTable &_symbols, PSymbolTable &_outsymbols, int lumpnum)
-	: Outer(_outer), GlobalTreeNodes(&_symbols), OutputSymbols(&_outsymbols), AST(ast), Lump(lumpnum)
+ZCCCompiler::ZCCCompiler(ZCC_AST &ast, DObject *_outer, PSymbolTable &_symbols, PNamespace *_outnamespc, int lumpnum)
+	: Outer(_outer), GlobalTreeNodes(&_symbols), OutNamespace(_outnamespc), AST(ast), Lump(lumpnum)
 {
 	FScriptPosition::ResetErrorCounter();
 	// Group top-level nodes by type
@@ -250,8 +308,8 @@ ZCCCompiler::ZCCCompiler(ZCC_AST &ast, DObject *_outer, PSymbolTable &_symbols, 
 					{
 					case AST_Enum:
 						zenumType = static_cast<ZCC_Enum *>(node);
-						enumType = NewEnum(zenumType->NodeName, nullptr);
-						GlobalSymbols.AddSymbol(new PSymbolType(zenumType->NodeName, enumType));
+						enumType = NewEnum(zenumType->NodeName, OutNamespace);
+						OutNamespace->Symbols.AddSymbol(new PSymbolType(zenumType->NodeName, enumType));
 						break;
 
 					case AST_Class:
@@ -396,6 +454,7 @@ int ZCCCompiler::Compile()
 	CreateStructTypes();
 	CompileAllConstants();
 	CompileAllFields();
+	CompileAllProperties();
 	InitDefaults();
 	InitFunctions();
 	CompileStates();
@@ -414,13 +473,31 @@ void ZCCCompiler::CreateStructTypes()
 {
 	for(auto s : Structs)
 	{
+		PTypeBase *outer;
+		PSymbolTable *syms;
+
 		s->Outer = s->OuterDef == nullptr? nullptr : s->OuterDef->CType();
-		if (s->strct->Flags & ZCC_Native)
-			s->strct->Type = NewNativeStruct(s->NodeName(), nullptr);
+		if (s->Outer)
+		{
+			outer = s->Outer;
+			syms = &s->Outer->Symbols;
+		}
 		else
-			s->strct->Type = NewStruct(s->NodeName(), s->Outer);
+		{
+			outer = OutNamespace;
+			syms = &OutNamespace->Symbols;
+		}
+
+		if (s->strct->Flags & ZCC_Native)
+		{
+			s->strct->Type = NewNativeStruct(s->NodeName(), outer);
+		}
+		else
+		{
+			s->strct->Type = NewStruct(s->NodeName(), outer);
+		}
 		s->strct->Symbol = new PSymbolType(s->NodeName(), s->Type());
-		GlobalSymbols.AddSymbol(s->strct->Symbol);
+		syms->AddSymbol(s->strct->Symbol);
 
 		for (auto e : s->Enums)
 		{
@@ -523,7 +600,7 @@ void ZCCCompiler::CreateClassTypes()
 				if (c->Type() == nullptr) c->cls->Type = parent->FindClassTentative(c->NodeName());
 				c->Type()->bExported = true;	// this class is accessible to script side type casts. (The reason for this flag is that types like PInt need to be skipped.)
 				c->cls->Symbol = new PSymbolType(c->NodeName(), c->Type());
-				GlobalSymbols.AddSymbol(c->cls->Symbol);
+				OutNamespace->Symbols.AddSymbol(c->cls->Symbol);
 				Classes.Push(c);
 				OrigClasses.Delete(i--);
 				donesomething = true;
@@ -547,7 +624,7 @@ void ZCCCompiler::CreateClassTypes()
 					// create a placeholder so that the compiler can continue looking for errors.
 					c->cls->Type = RUNTIME_CLASS(DObject)->FindClassTentative(c->NodeName());
 					c->cls->Symbol = new PSymbolType(c->NodeName(), c->Type());
-					GlobalSymbols.AddSymbol(c->cls->Symbol);
+					OutNamespace->Symbols.AddSymbol(c->cls->Symbol);
 					Classes.Push(c);
 					OrigClasses.Delete(i--);
 					donesomething = true;
@@ -563,7 +640,7 @@ void ZCCCompiler::CreateClassTypes()
 		Error(c->cls, "Class %s has circular inheritance", FName(c->NodeName()).GetChars());
 		c->cls->Type = RUNTIME_CLASS(DObject)->FindClassTentative(c->NodeName());
 		c->cls->Symbol = new PSymbolType(c->NodeName(), c->Type());
-		GlobalSymbols.AddSymbol(c->cls->Symbol);
+		OutNamespace->Symbols.AddSymbol(c->cls->Symbol);
 		Classes.Push(c);
 	}
 
@@ -601,11 +678,11 @@ void ZCCCompiler::CreateClassTypes()
 //
 //==========================================================================
 
-void ZCCCompiler::CopyConstants(TArray<ZCC_ConstantWork> &dest, TArray<ZCC_ConstantDef*> &Constants, PSymbolTable *ot)
+void ZCCCompiler::CopyConstants(TArray<ZCC_ConstantWork> &dest, TArray<ZCC_ConstantDef*> &Constants, PStruct *cls, PSymbolTable *ot)
 {
 	for (auto c : Constants)
 	{
-		dest.Push({ c, ot });
+		dest.Push({ c, cls, ot });
 	}
 }
 
@@ -624,14 +701,14 @@ void ZCCCompiler::CompileAllConstants()
 	// put all constants in one list to make resolving this easier.
 	TArray<ZCC_ConstantWork> constantwork;
 
-	CopyConstants(constantwork, Constants, OutputSymbols);
+	CopyConstants(constantwork, Constants, nullptr, &OutNamespace->Symbols);
 	for (auto c : Classes)
 	{
-		CopyConstants(constantwork, c->Constants, &c->Type()->Symbols);
+		CopyConstants(constantwork, c->Constants, c->Type(), &c->Type()->Symbols);
 	}
 	for (auto s : Structs)
 	{
-		CopyConstants(constantwork, s->Constants, &s->Type()->Symbols);
+		CopyConstants(constantwork, s->Constants, s->Type(), &s->Type()->Symbols);
 	}
 
 	// Before starting to resolve the list, let's create symbols for all already resolved ones first (i.e. all literal constants), to reduce work.
@@ -652,7 +729,7 @@ void ZCCCompiler::CompileAllConstants()
 		donesomething = false;
 		for (unsigned i = 0; i < constantwork.Size(); i++)
 		{
-			if (CompileConstant(constantwork[i].node, constantwork[i].outputtable))
+			if (CompileConstant(&constantwork[i]))
 			{
 				AddConstant(constantwork[i]);
 				// Remove the constant from the list
@@ -680,6 +757,9 @@ void ZCCCompiler::AddConstant(ZCC_ConstantWork &constant)
 {
 	auto def = constant.node;
 	auto val = def->Value;
+	ExpVal &c = constant.constval;
+	
+	// This is for literal constants.
 	if (val->NodeType == AST_ExprConstant)
 	{
 		ZCC_ExprConstant *cval = static_cast<ZCC_ExprConstant *>(val);
@@ -706,14 +786,40 @@ void ZCCCompiler::AddConstant(ZCC_ConstantWork &constant)
 			Error(def->Value, "Bad type for constant definiton");
 			def->Symbol = nullptr;
 		}
-
-		if (def->Symbol == nullptr)
-		{
-			// Create a dummy constant so we don't make any undefined value warnings.
-			def->Symbol = new PSymbolConstNumeric(def->NodeName, TypeError, 0);
-		}
-		constant.outputtable->ReplaceSymbol(def->Symbol);
 	}
+	else
+	{
+		if (c.Type == TypeString)
+		{
+			def->Symbol = new PSymbolConstString(def->NodeName, c.GetString());
+		}
+		else if (c.Type->IsA(RUNTIME_CLASS(PInt)))
+		{
+			// How do we get an Enum type in here without screwing everything up???
+			//auto type = def->Type != nullptr ? def->Type : cval->Type;
+			def->Symbol = new PSymbolConstNumeric(def->NodeName, c.Type, c.GetInt());
+		}
+		else if (c.Type->IsA(RUNTIME_CLASS(PFloat)))
+		{
+			if (def->Type != nullptr)
+			{
+				Error(def, "Enum members must be integer values");
+			}
+			def->Symbol = new PSymbolConstNumeric(def->NodeName, c.Type, c.GetFloat());
+		}
+		else
+		{
+			Error(def->Value, "Bad type for constant definiton");
+			def->Symbol = nullptr;
+		}
+	}
+
+	if (def->Symbol == nullptr)
+	{
+		// Create a dummy constant so we don't make any undefined value warnings.
+		def->Symbol = new PSymbolConstNumeric(def->NodeName, TypeError, 0);
+	}
+	constant.Outputtable->ReplaceSymbol(def->Symbol);
 }
 
 //==========================================================================
@@ -725,352 +831,33 @@ void ZCCCompiler::AddConstant(ZCC_ConstantWork &constant)
 //
 //==========================================================================
 
-bool ZCCCompiler::CompileConstant(ZCC_ConstantDef *def, PSymbolTable *sym)
+bool ZCCCompiler::CompileConstant(ZCC_ConstantWork *work)
 {
-	assert(def->Symbol == nullptr);
-
-	ZCC_Expression *val = Simplify(def->Value, sym, true);
-	def->Value = val;
-	return (val->NodeType == AST_ExprConstant);
-}
-
-
-//==========================================================================
-//
-// ZCCCompiler :: Simplify
-//
-// For an expression,
-//   Evaluate operators whose arguments are both constants, replacing it
-//     with a new constant.
-//   For a binary operator with one constant argument, put it on the right-
-//     hand operand, where permitted.
-//   Perform automatic type promotion.
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::Simplify(ZCC_Expression *root, PSymbolTable *sym, bool wantconstant)
-{
-	SimplifyingConstant = wantconstant;
-	return  DoSimplify(root, sym);
-}
-
-ZCC_Expression *ZCCCompiler::DoSimplify(ZCC_Expression *root, PSymbolTable *sym)
-{
-	if (root->NodeType == AST_ExprUnary)
+	FCompileContext ctx(OutNamespace, work->cls, false);
+	FxExpression *exp = ConvertNode(work->node->Value);
+	try
 	{
-		return SimplifyUnary(static_cast<ZCC_ExprUnary *>(root), sym);
-	}
-	else if (root->NodeType == AST_ExprBinary)
-	{
-		return SimplifyBinary(static_cast<ZCC_ExprBinary *>(root), sym);
-	}
-	else if (root->Operation == PEX_ID)
-	{
-		return IdentifyIdentifier(static_cast<ZCC_ExprID *>(root), sym);
-	}
-	else if (root->Operation == PEX_MemberAccess)
-	{
-		return SimplifyMemberAccess(static_cast<ZCC_ExprMemberAccess *>(root), sym);
-	}
-	else if (root->Operation == PEX_FuncCall)
-	{
-		return SimplifyFunctionCall(static_cast<ZCC_ExprFuncCall *>(root), sym);
-	}
-	return root;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: SimplifyUnary
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::SimplifyUnary(ZCC_ExprUnary *unary, PSymbolTable *sym)
-{
-	unary->Operand = DoSimplify(unary->Operand, sym);
-	if (unary->Operand->Type == nullptr)
-	{
-		return unary;
-	}
-	ZCC_OpProto *op = PromoteUnary(unary->Operation, unary->Operand);
-	if (op == NULL)
-	{ // Oh, poo!
-		unary->Type = TypeError;
-	}
-	else if (unary->Operand->Operation == PEX_ConstValue)
-	{
-		return op->EvalConst1(static_cast<ZCC_ExprConstant *>(unary->Operand));
-	}
-	return unary;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: SimplifyBinary
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::SimplifyBinary(ZCC_ExprBinary *binary, PSymbolTable *sym)
-{
-	binary->Left = DoSimplify(binary->Left, sym);
-	binary->Right = DoSimplify(binary->Right, sym);
-	if (binary->Left->Type == nullptr || binary->Right->Type == nullptr)
-	{
-		// We do not know yet what this is so we cannot promote it (yet.)
-		return binary;
-	}
-	ZCC_OpProto *op = PromoteBinary(binary->Operation, binary->Left, binary->Right);
-	if (op == NULL)
-	{
-		binary->Type = TypeError;
-	}
-	else if (binary->Left->Operation == PEX_ConstValue &&
-		binary->Right->Operation == PEX_ConstValue)
-	{
-		return op->EvalConst2(static_cast<ZCC_ExprConstant *>(binary->Left),
-							  static_cast<ZCC_ExprConstant *>(binary->Right), AST.Strings);
-	}
-	return binary;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: SimplifyMemberAccess
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::SimplifyMemberAccess(ZCC_ExprMemberAccess *dotop, PSymbolTable *symt)
-{
-	PSymbolTable *symtable;
-
-	// TBD: Is it safe to simplify the left side here when not processing a constant?
-	dotop->Left = DoSimplify(dotop->Left, symt);
-
-	if (dotop->Left->Operation == PEX_TypeRef)
-	{ // Type refs can be evaluated now.
-		PType *ref = static_cast<ZCC_ExprTypeRef *>(dotop->Left)->RefType;
-		PSymbol *sym = ref->Symbols.FindSymbolInTable(dotop->Right, symtable);
-		if (sym != nullptr)
+		FScriptPosition::errorout = true;
+		exp = exp->Resolve(ctx);
+		if (exp == nullptr) return false;
+		FScriptPosition::errorout = false;
+		if (!exp->isConstant())
 		{
-			ZCC_Expression *expr = NodeFromSymbol(sym, dotop, symtable);
-			if (expr != nullptr)
-			{
-				return expr;
-			}
+			delete exp;
+			return false;
 		}
+		work->constval = static_cast<FxConstant*>(exp)->GetValue();
+		delete exp;
+		return true;
 	}
-	else if (dotop->Left->Operation == PEX_Super)
+	catch (...)
 	{
-		symt = symt->GetParentTable();
-		if (symt != nullptr)
-		{
-			PSymbol *sym = symt->FindSymbolInTable(dotop->Right, symtable);
-			if (sym != nullptr)
-			{
-				ZCC_Expression *expr = NodeFromSymbol(sym, dotop, symtable);
-				if (expr != nullptr)
-				{
-					return expr;
-				}
-			}
-		}
+		// eat the reported error and treat this as a temorary failure. All unresolved contants will be reported at the end.
+		FScriptPosition::errorout = false;
+		return false;
 	}
-	return dotop;
 }
 
-//==========================================================================
-//
-// ZCCCompiler :: SimplifyFunctionCall
-//
-// This may replace a function call with cast(s), since they look like the
-// same thing to the parser.
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::SimplifyFunctionCall(ZCC_ExprFuncCall *callop, PSymbolTable *sym)
-{
-	ZCC_FuncParm *parm;
-	int parmcount = 0;
-
-	parm = callop->Parameters;
-	if (parm != NULL)
-	{
-		do
-		{
-			parmcount++;
-			assert(parm->NodeType == AST_FuncParm);
-			parm->Value = DoSimplify(parm->Value, sym);
-			parm = static_cast<ZCC_FuncParm *>(parm->SiblingNext);
-		}
-		while (parm != callop->Parameters);
-	}
-	// Only simplify the 'function' part if we want to retrieve a constant.
-	// This is necessary to evaluate the type casts, but for actual functions
-	// the simplification process is destructive and has to be avoided.
-	if (SimplifyingConstant)
-	{
-		callop->Function = DoSimplify(callop->Function, sym);
-	}
-	// If the left side is a type ref, then this is actually a cast
-	// and not a function call.
-	if (callop->Function->Operation == PEX_TypeRef)
-	{
-		if (parmcount != 1)
-		{
-			Error(callop, "Type cast requires one parameter");
-			callop->ToErrorNode();
-		}
-		else
-		{
-			PType *dest = static_cast<ZCC_ExprTypeRef *>(callop->Function)->RefType;
-			const PType::Conversion *route[CONVERSION_ROUTE_SIZE];
-			int routelen = parm->Value->Type->FindConversion(dest, route, countof(route));
-			if (routelen < 0)
-			{
-				///FIXME: Need real type names
-				Error(callop, "Cannot convert %s to %s", parm->Value->Type->DescriptiveName(), dest->DescriptiveName());
-				callop->ToErrorNode();
-			}
-			else
-			{
-				ZCC_Expression *val = ApplyConversion(parm->Value, route, routelen);
-				assert(val->Type == dest);
-				return val;
-			}
-		}
-	}
-	return callop;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: PromoteUnary
-//
-// Converts the operand into a format preferred by the operator.
-//
-//==========================================================================
-
-ZCC_OpProto *ZCCCompiler::PromoteUnary(EZCCExprType op, ZCC_Expression *&expr)
-{
-	if (expr->Type == TypeError)
-	{
-		return NULL;
-	}
-	const PType::Conversion *route[CONVERSION_ROUTE_SIZE];
-	int routelen = countof(route);
-	ZCC_OpProto *proto = ZCC_OpInfo[op].FindBestProto(expr->Type, route, routelen);
-
-	if (proto != NULL)
-	{
-		expr = ApplyConversion(expr, route, routelen);
-	}
-	return proto;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: PromoteBinary
-//
-// Converts the operands into a format (hopefully) compatible with the
-// operator.
-//
-//==========================================================================
-
-ZCC_OpProto *ZCCCompiler::PromoteBinary(EZCCExprType op, ZCC_Expression *&left, ZCC_Expression *&right)
-{
-	// If either operand is of type 'error', the result is also 'error'
-	if (left->Type == TypeError || right->Type == TypeError)
-	{
-		return NULL;
-	}
-	const PType::Conversion *route1[CONVERSION_ROUTE_SIZE], *route2[CONVERSION_ROUTE_SIZE];
-	int route1len = countof(route1), route2len = countof(route2);
-	ZCC_OpProto *proto = ZCC_OpInfo[op].FindBestProto(left->Type, route1, route1len, right->Type, route2, route2len);
-	if (proto != NULL)
-	{
-		left = ApplyConversion(left, route1, route1len);
-		right = ApplyConversion(right, route2, route2len);
-	}
-	return proto;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: ApplyConversion
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::ApplyConversion(ZCC_Expression *expr, const PType::Conversion **route, int routelen)
-{
-	for (int i = 0; i < routelen; ++i)
-	{
-		if (expr->Operation != PEX_ConstValue)
-		{
-			expr = AddCastNode(route[i]->TargetType, expr);
-		}
-		else
-		{
-			route[i]->ConvertConstant(static_cast<ZCC_ExprConstant *>(expr), AST.Strings);
-		}
-	}
-	return expr;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: AddCastNode
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::AddCastNode(PType *type, ZCC_Expression *expr)
-{
-	assert(expr->Operation != PEX_ConstValue && "Expression must not be constant");
-	// TODO: add a node here
-	return expr;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: IdentifyIdentifier
-//
-// Returns a node that represents what the identifer stands for.
-//
-//==========================================================================
-
-ZCC_Expression *ZCCCompiler::IdentifyIdentifier(ZCC_ExprID *idnode, PSymbolTable *symt)
-{
-	// Check the symbol table for the identifier.
-	PSymbolTable *table;
-	PSymbol *sym = symt->FindSymbolInTable(idnode->Identifier, table);
-	// GlobalSymbols cannot be the parent of a class's symbol table so we have to look for global symbols explicitly.
-	if (sym == nullptr && symt != &GlobalSymbols) sym = GlobalSymbols.FindSymbolInTable(idnode->Identifier, table);
-	if (sym != nullptr)
-	{
-		ZCC_Expression *node = NodeFromSymbol(sym, idnode, table);
-		if (node != NULL)
-		{
-			return node;
-		}
-	}
-	else if (SimplifyingConstant)	// leave unknown identifiers alone when simplifying non-constants. It is impossible to know what they are here.
-	{
-		// Also handle line specials.
-		// To call this like a function this needs to be done differently, but for resolving constants this is ok.
-		int spec = P_FindLineSpecial(FName(idnode->Identifier).GetChars());
-		if (spec != 0)
-		{
-			ZCC_ExprConstant *val = static_cast<ZCC_ExprConstant *>(AST.InitNode(sizeof(*val), AST_ExprConstant, idnode));
-			val->Operation = PEX_ConstValue;
-			val->Type = TypeSInt32;
-			val->IntVal = spec;
-			return val;
-		}
-
-		Error(idnode, "Unknown identifier '%s'", FName(idnode->Identifier).GetChars());
-		idnode->ToErrorNode();
-	}
-	return idnode;
-}
 
 //==========================================================================
 //
@@ -1269,6 +1056,7 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 		if (field->Flags & ZCC_Protected) varflags |= VARF_Protected;
 		if (field->Flags & ZCC_Deprecated) varflags |= VARF_Deprecated;
 		if (field->Flags & ZCC_ReadOnly) varflags |= VARF_ReadOnly;
+		if (field->Flags & ZCC_Transient) varflags |= VARF_Transient;
 
 		if (field->Flags & ZCC_Native)
 		{
@@ -1277,7 +1065,7 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 
 		if (field->Flags & ZCC_Meta)
 		{
-			varflags |= VARF_Static|VARF_ReadOnly;	// metadata implies readonly
+			varflags |= VARF_Meta | VARF_Static | VARF_ReadOnly;	// metadata implies readonly
 			if (!(field->Flags & ZCC_Native))
 			{
 				// Non-native meta data is not implemented yet and requires some groundwork in the class copy code.
@@ -1287,7 +1075,7 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 
 		if (field->Type->ArraySize != nullptr)
 		{
-			fieldtype = ResolveArraySize(fieldtype, field->Type->ArraySize, &type->Symbols);
+			fieldtype = ResolveArraySize(fieldtype, field->Type->ArraySize, type);
 		}
 
 		auto name = field->Names;
@@ -1298,12 +1086,12 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 				auto thisfieldtype = fieldtype;
 				if (name->ArraySize != nullptr)
 				{
-					thisfieldtype = ResolveArraySize(thisfieldtype, name->ArraySize, &type->Symbols);
+					thisfieldtype = ResolveArraySize(thisfieldtype, name->ArraySize, type);
 				}
 				
 				if (varflags & VARF_Native)
 				{
-					auto querytype = (varflags & VARF_Static) ? type->GetClass() : type;
+					auto querytype = (varflags & VARF_Meta) ? type->GetClass() : type;
 					fd = FindField(querytype, FName(name->Name).GetChars());
 					if (fd == nullptr)
 					{
@@ -1339,6 +1127,76 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 
 //==========================================================================
 //
+// ZCCCompiler :: CompileAllProperties
+//
+// builds the property lists of all actor classes
+//
+//==========================================================================
+
+void ZCCCompiler::CompileAllProperties()
+{
+	for (auto c : Classes)
+	{
+		if (c->Properties.Size() > 0)
+			CompileProperties(c->Type(), c->Properties, c->Type()->TypeName);
+	}
+}
+
+//==========================================================================
+//
+// ZCCCompiler :: CompileProperties
+//
+// builds the internal structure of a single class or struct
+//
+//==========================================================================
+
+bool ZCCCompiler::CompileProperties(PClass *type, TArray<ZCC_Property *> &Properties, FName prefix)
+{
+	if (!type->IsKindOf(RUNTIME_CLASS(PClassActor)))
+	{
+		Error(Properties[0], "Properties can only be defined for actors");
+		return false;
+	}
+	for(auto p : Properties)
+	{
+		TArray<PField *> fields;
+		ZCC_Identifier *id = (ZCC_Identifier *)p->Body;
+
+		if (FName(p->NodeName) == FName("prefix") && Wads.GetLumpFile(Lump) == 0)
+		{
+			// only for internal definitions: Allow setting a prefix. This is only for compatiblity with the old DECORATE property parser, but not for general use.
+			prefix = id->Id;
+		}
+		else
+		{
+			do
+			{
+				auto f = dyn_cast<PField>(type->Symbols.FindSymbol(id->Id, true));
+				if (f == nullptr)
+				{
+					Error(id, "Variable %s not found in %s", FName(id->Id).GetChars(), type->TypeName.GetChars());
+				}
+				fields.Push(f);
+				id = (ZCC_Identifier*)id->SiblingNext;
+			} while (id != p->Body);
+		}
+
+		FString qualifiedname;
+		// Store the full qualified name and prepend some 'garbage' to the name so that no conflicts with other symbol types can happen.
+		// All these will be removed from the symbol table after the compiler finishes to free up the allocated space.
+		if (prefix == NAME_None) qualifiedname.Format("@property@%s", FName(p->NodeName).GetChars());
+		else qualifiedname.Format("@property@%s.%s", prefix.GetChars(), FName(p->NodeName).GetChars());
+		fields.ShrinkToFit();
+		if (!type->Symbols.AddSymbol(new PProperty(qualifiedname, fields)))
+		{
+			Error(id, "Unable to add property %s to class %s", FName(p->NodeName).GetChars(), type->TypeName.GetChars());
+		}
+	}
+	return true;
+}
+
+//==========================================================================
+//
 // ZCCCompiler :: FieldFlagsToString
 //
 // creates a string for a field's flags
@@ -1347,10 +1205,11 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 
 FString ZCCCompiler::FlagsToString(uint32_t flags)
 {
-	const char *flagnames[] = { "native", "static", "private", "protected", "latent", "final", "meta", "action", "deprecated", "readonly", "funcconst", "abstract" };
+
+	const char *flagnames[] = { "native", "static", "private", "protected", "latent", "final", "meta", "action", "deprecated", "readonly", "funcconst", "abstract", "extension", "virtual", "override", "transient", "vararg" };
 	FString build;
 
-	for (int i = 0; i < 12; i++)
+	for (size_t i = 0; i < countof(flagnames); i++)
 	{
 		if (flags & (1 << i))
 		{
@@ -1457,6 +1316,10 @@ PType *ZCCCompiler::DetermineType(PType *outertype, ZCC_TreeNode *field, FName n
 			// statelabel et.al. are not tokens - there really is no need to, it works just as well as an identifier. Maybe the same should be done for some other types, too?
 			switch (btype->UserType->Id)
 			{
+			case NAME_Voidptr:
+				retval = TypeVoidPtr;
+				break;
+
 			case NAME_StateLabel:
 				retval = TypeStateLabel;
 				break;
@@ -1511,10 +1374,15 @@ PType *ZCCCompiler::DetermineType(PType *outertype, ZCC_TreeNode *field, FName n
 		}
 		else
 		{
+			// This doesn't check the class list directly but the current symbol table to ensure that
+			// this does not reference a type that got shadowed by a more local definition.
+			// We first look in the current class and its parents, and then in the current namespace and its parents.
 			auto sym = outertype->Symbols.FindSymbol(ctype->Restriction->Id, true);
-			if (sym == nullptr) sym = GlobalSymbols.FindSymbol(ctype->Restriction->Id, false);
+			if (sym == nullptr) sym = OutNamespace->Symbols.FindSymbol(ctype->Restriction->Id, true);
 			if (sym == nullptr)
 			{
+				// A symbol with a given name cannot be reached from this definition point, so
+				// even if a class with the given name exists, it is not accessible.
 				Error(field, "%s: Unknown identifier", FName(ctype->Restriction->Id).GetChars());
 				return TypeError;
 			}
@@ -1551,10 +1419,9 @@ PType *ZCCCompiler::DetermineType(PType *outertype, ZCC_TreeNode *field, FName n
 PType *ZCCCompiler::ResolveUserType(ZCC_BasicType *type, PSymbolTable *symt)
 {
 	// Check the symbol table for the identifier.
-	PSymbolTable *table;
-	PSymbol *sym = symt->FindSymbolInTable(type->UserType->Id, table);
-	// GlobalSymbols cannot be the parent of a class's symbol table so we have to look for global symbols explicitly.
-	if (sym == nullptr && symt != &GlobalSymbols) sym = GlobalSymbols.FindSymbolInTable(type->UserType->Id, table);
+	PSymbol *sym = symt->FindSymbol(type->UserType->Id, true);
+	// We first look in the current class and its parents, and then in the current namespace and its parents.
+	if (sym == nullptr) sym = OutNamespace->Symbols.FindSymbol(type->UserType->Id, true);
 	if (sym != nullptr && sym->IsKindOf(RUNTIME_CLASS(PSymbolType)))
 	{
 		auto ptype = static_cast<PSymbolType *>(sym)->Type;
@@ -1581,7 +1448,7 @@ PType *ZCCCompiler::ResolveUserType(ZCC_BasicType *type, PSymbolTable *symt)
 //
 //==========================================================================
 
-PType *ZCCCompiler::ResolveArraySize(PType *baseType, ZCC_Expression *arraysize, PSymbolTable *sym)
+PType *ZCCCompiler::ResolveArraySize(PType *baseType, ZCC_Expression *arraysize, PStruct *cls)
 {
 	TArray<ZCC_Expression *> indices;
 
@@ -1593,15 +1460,21 @@ PType *ZCCCompiler::ResolveArraySize(PType *baseType, ZCC_Expression *arraysize,
 		node = static_cast<ZCC_Expression*>(node->SiblingNext);
 	} while (node != arraysize);
 
+
+	FCompileContext ctx(OutNamespace, cls, false);
 	for (auto node : indices)
 	{
-		auto val = Simplify(node, sym, true);
-		if (val->Operation != PEX_ConstValue || !val->Type->IsA(RUNTIME_CLASS(PInt)))
+		// There is no float->int casting here.
+		FxExpression *ex = ConvertNode(node);
+		ex = ex->Resolve(ctx);
+
+		if (ex == nullptr) return TypeError;
+		if (!ex->isConstant() || !ex->ValueType->IsA(RUNTIME_CLASS(PInt)))
 		{
 			Error(arraysize, "Array index must be an integer constant");
 			return TypeError;
 		}
-		int size = static_cast<ZCC_ExprConstant *>(val)->IntVal;
+		int size = static_cast<FxConstant*>(ex)->GetValue().GetInt();
 		if (size < 1)
 		{
 			Error(arraysize, "Array size must be positive");
@@ -1610,78 +1483,6 @@ PType *ZCCCompiler::ResolveArraySize(PType *baseType, ZCC_Expression *arraysize,
 		baseType = NewArray(baseType, size);
 	}
 	return baseType;
-}
-
-//==========================================================================
-//
-// ZCCCompiler :: GetInt - Input must be a constant expression
-//
-//==========================================================================
-
-int ZCCCompiler::GetInt(ZCC_Expression *expr)
-{
-	if (expr->Type == TypeError)
-	{
-		return 0;
-	}
-	const PType::Conversion *route[CONVERSION_ROUTE_SIZE];
-	int routelen = expr->Type->FindConversion(TypeSInt32, route, countof(route));
-	if (routelen < 0)
-	{
-		Error(expr, "Cannot convert to integer");
-		return 0;
-	}
-	else
-	{
-		if (expr->Type->IsKindOf(RUNTIME_CLASS(PFloat)))
-		{
-			Warn(expr, "Truncation of floating point value");
-		}
-		auto ex = static_cast<ZCC_ExprConstant *>(ApplyConversion(expr, route, routelen));
-		return ex->IntVal;
-	}
-}
-
-double ZCCCompiler::GetDouble(ZCC_Expression *expr)
-{
-	if (expr->Type == TypeError)
-	{
-		return 0;
-	}
-	const PType::Conversion *route[CONVERSION_ROUTE_SIZE];
-	int routelen = expr->Type->FindConversion(TypeFloat64, route, countof(route));
-	if (routelen < 0)
-	{
-		Error(expr, "Cannot convert to float");
-		return 0;
-	}
-	else
-	{
-		auto ex = static_cast<ZCC_ExprConstant *>(ApplyConversion(expr, route, routelen));
-		return ex->DoubleVal;
-	}
-}
-
-const char *ZCCCompiler::GetString(ZCC_Expression *expr, bool silent)
-{
-	if (expr->Type == TypeError)
-	{
-		return nullptr;
-	}
-	else if (expr->Type->IsKindOf(RUNTIME_CLASS(PString)))
-	{
-		return static_cast<ZCC_ExprConstant *>(expr)->StringVal->GetChars();
-	}
-	else if (expr->Type->IsKindOf(RUNTIME_CLASS(PName)))
-	{
-		// Ugh... What a mess...
-		return FName(ENamedName(static_cast<ZCC_ExprConstant *>(expr)->IntVal)).GetChars();
-	}
-	else
-	{
-		if (!silent) Error(expr, "Cannot convert to string");
-		return nullptr;
-	}
 }
 
 //==========================================================================
@@ -1706,16 +1507,22 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 			Error(property, "%s: arguments missing", prop->name);
 			return;
 		}
-		property->Values = Simplify(property->Values, &bag.Info->Symbols, true);	// need to do this before the loop so that we can find the head node again.
 		const char * p = prop->params;
 		auto exp = property->Values;
 
+		FCompileContext ctx(OutNamespace, bag.Info, false);
 		while (true)
 		{
 			FPropParam conv;
 			FPropParam pref;
 
-			if (exp->NodeType != AST_ExprConstant)
+			FxExpression *ex = ConvertNode(exp);
+			ex = ex->Resolve(ctx);
+			if (ex == nullptr)
+			{
+				return;
+			}
+			else if (!ex->isConstant())
 			{
 				// If we get TypeError, there has already been a message from deeper down so do not print another one.
 				if (exp->Type != TypeError) Error(exp, "%s: non-constant parameter", prop->name);
@@ -1728,7 +1535,7 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 			{
 
 			case 'X':	// Expression in parentheses or number. We only support the constant here. The function will have to be handled by a separate property to get past the parser.
-				conv.i = GetInt(exp);
+				conv.i = GetIntConst(ex, ctx);
 				params.Push(conv);
 				conv.exp = nullptr;
 				break;
@@ -1736,15 +1543,15 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 			case 'I':
 			case 'M':	// special case for morph styles in DECORATE . This expression-aware parser will not need this.
 			case 'N':	// special case for thing activations in DECORATE. This expression-aware parser will not need this.
-				conv.i = GetInt(exp);
+				conv.i = GetIntConst(ex, ctx);
 				break;
 
 			case 'F':
-				conv.d = GetDouble(exp);
+				conv.d = GetFloatConst(ex, ctx);
 				break;
 
 			case 'Z':	// an optional string. Does not allow any numeric value.
-				if (!GetString(exp, true))
+				if (ex->ValueType != TypeString)
 				{
 					// apply this expression to the next argument on the list.
 					params.Push(conv);
@@ -1752,21 +1559,21 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 					p++;
 					continue;
 				}
-				conv.s = GetString(exp);
+				conv.s = GetStringConst(ex, ctx);
 				break;
 
 			case 'C':	// this parser accepts colors only in string form.
 				pref.i = 1;
 			case 'S':
 			case 'T': // a filtered string (ZScript only parses filtered strings so there's nothing to do here.)
-				conv.s = GetString(exp);
+				conv.s = GetStringConst(ex, ctx);
 				break;
 
 			case 'L':	// Either a number or a list of strings
-				if (!GetString(exp, true))
+				if (ex->ValueType != TypeString)
 				{
 					pref.i = 0;
-					conv.i = GetInt(exp);
+					conv.i = GetIntConst(ex, ctx);
 				}
 				else
 				{
@@ -1776,13 +1583,13 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 
 					do
 					{
-						conv.s = GetString(exp);
+						conv.s = GetStringConst(ex, ctx);
 						if (conv.s != nullptr)
 						{
 							params.Push(conv);
 							params[0].i++;
 						}
-						exp = Simplify(static_cast<ZCC_Expression *>(exp->SiblingNext), &bag.Info->Symbols, true);
+						exp = static_cast<ZCC_Expression *>(exp->SiblingNext);
 					} while (exp != property->Values);
 					goto endofparm;
 				}
@@ -1800,7 +1607,7 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 			}
 			params.Push(conv);
 			params[0].i++;
-			exp = Simplify(static_cast<ZCC_Expression *>(exp->SiblingNext), &bag.Info->Symbols, true);
+			exp = static_cast<ZCC_Expression *>(exp->SiblingNext);
 		endofparm:
 			p++;
 			// Skip the DECORATE 'no comma' marker
@@ -1837,6 +1644,105 @@ void ZCCCompiler::DispatchProperty(FPropertyInfo *prop, ZCC_PropertyStmt *proper
 	}
 }
 
+
+//==========================================================================
+//
+// Parses an actor property's parameters and calls the handler
+//
+//==========================================================================
+
+void ZCCCompiler::DispatchScriptProperty(PProperty *prop, ZCC_PropertyStmt *property, AActor *defaults, Baggage &bag)
+{
+	ZCC_ExprConstant one;
+	unsigned parmcount = 1;
+	ZCC_TreeNode *x = property->Values;
+	while (x->SiblingNext != property->Values)
+	{
+		x = x->SiblingNext;
+		parmcount++;
+	}
+	if (parmcount == 0 && prop->Variables.Size() == 1 && prop->Variables[0]->Type == TypeBool)
+	{
+		// allow boolean properties to have the parameter omitted
+		one.Operation = PEX_ConstValue;
+		one.NodeType = AST_ExprConstant;
+		one.Type = TypeBool;
+		one.IntVal = 1;
+		property->Values = &one;
+	}
+	else if (parmcount != prop->Variables.Size())
+	{
+		Error(x, "Argument count mismatch: Got %u, expected %u", parmcount, prop->Variables.Size());
+		return;
+	}
+
+	auto exp = property->Values;
+	FCompileContext ctx(OutNamespace, bag.Info, false);
+	for (auto f : prop->Variables)
+	{
+		void *addr;
+
+		if (f->Flags & VARF_Meta)
+		{
+			addr = ((char*)bag.Info) + f->Offset;
+		}
+		else
+		{
+			addr = ((char*)defaults) + f->Offset;
+		}
+
+		FxExpression *ex = ConvertNode(exp);
+		ex = ex->Resolve(ctx);
+		if (ex == nullptr)
+		{
+			return;
+		}
+		else if (!ex->isConstant())
+		{
+			// If we get TypeError, there has already been a message from deeper down so do not print another one.
+			if (exp->Type != TypeError) Error(exp, "%s: non-constant parameter", prop->SymbolName.GetChars());
+			return;
+		}
+
+		if (f->Type == TypeBool)
+		{
+			static_cast<PBool*>(f->Type)->SetValue(addr, !!GetIntConst(ex, ctx));
+		}
+		if (f->Type->IsKindOf(RUNTIME_CLASS(PInt)))
+		{
+			static_cast<PInt*>(f->Type)->SetValue(addr, GetIntConst(ex, ctx));
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PFloat)))
+		{
+			static_cast<PFloat*>(f->Type)->SetValue(addr, GetFloatConst(ex, ctx));
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PString)))
+		{
+			*(FString*)addr = GetStringConst(ex, ctx);
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PClassPointer)))
+		{
+			auto clsname = GetStringConst(ex, ctx);
+			auto cls = PClass::FindClass(clsname);
+			if (cls == nullptr)
+			{
+				cls = static_cast<PClassPointer*>(f->Type)->ClassRestriction->FindClassTentative(clsname);
+			}
+			else if (!cls->IsDescendantOf(static_cast<PClassPointer*>(f->Type)->ClassRestriction))
+			{
+				Error(property, "class %s is not compatible with property type %s", clsname.GetChars(), static_cast<PClassPointer*>(f->Type)->ClassRestriction->TypeName.GetChars());
+			}
+			*(PClass**)addr = cls;
+		}
+		else
+		{
+			Error(property, "unhandled property type %s", f->Type->DescriptiveName());
+		}
+		exp->ToErrorNode();	// invalidate after processing.
+		exp = static_cast<ZCC_Expression *>(exp->SiblingNext);
+	}
+}
+
 //==========================================================================
 //
 // Parses an actor property
@@ -1853,7 +1759,7 @@ void ZCCCompiler::ProcessDefaultProperty(PClassActor *cls, ZCC_PropertyStmt *pro
 		if (namenode->Id == NAME_DamageFunction)
 		{
 			auto x = ConvertNode(prop->Values);
-			CreateDamageFunction(cls, (AActor *)bag.Info->Defaults, x, false, Lump);
+			CreateDamageFunction(OutNamespace, cls, (AActor *)bag.Info->Defaults, x, false, Lump);
 			((AActor *)bag.Info->Defaults)->DamageVal = -1;
 			return;
 		}
@@ -1878,17 +1784,29 @@ void ZCCCompiler::ProcessDefaultProperty(PClassActor *cls, ZCC_PropertyStmt *pro
 
 	if (property != nullptr && property->category != CAT_INFO)
 	{
-		if (cls->IsDescendantOf(*property->cls))
+		auto pcls = PClass::FindActor(property->clsname);
+		if (cls->IsDescendantOf(pcls))
 		{
 			DispatchProperty(property, prop, (AActor *)bag.Info->Defaults, bag);
 		}
 		else
 		{
-			Error(prop, "'%s' requires an actor of type '%s'\n", propname.GetChars(), (*property->cls)->TypeName.GetChars());
+			Error(prop, "'%s' requires an actor of type '%s'\n", propname.GetChars(), pcls->TypeName.GetChars());
 		}
 	}
 	else
 	{
+		propname.Insert(0, "@property@");
+		FName name(propname, true);
+		if (name != NAME_None)
+		{
+			auto propp = dyn_cast<PProperty>(cls->Symbols.FindSymbol(name, true));
+			if (propp != nullptr)
+			{
+				DispatchScriptProperty(propp, prop, (AActor *)bag.Info->Defaults, bag);
+				return;
+			}
+		}
 		Error(prop, "'%s' is an unknown actor property\n", propname.GetChars());
 	}
 }
@@ -1956,7 +1874,14 @@ void ZCCCompiler::InitDefaults()
 		if (!c->Type()->IsDescendantOf(RUNTIME_CLASS(AActor)))
 		{
 			if (c->Defaults.Size()) Error(c->cls, "%s: Non-actor classes may not have defaults", c->Type()->TypeName.GetChars());
-			if (c->Type()->ParentClass) c->Type()->ParentClass->DeriveData(c->Type());
+			if (c->Type()->ParentClass)
+			{
+				auto ti = static_cast<PClassActor *>(c->Type());
+				FString mename = ti->TypeName.GetChars();
+
+				ti->InitializeDefaults();
+				ti->ParentClass->DeriveData(ti);
+			}
 		}
 		else
 		{
@@ -1989,6 +1914,7 @@ void ZCCCompiler::InitDefaults()
 			#ifdef _DEBUG
 				bag.ClassName = c->Type()->TypeName;
 			#endif
+				bag.Namespace = OutNamespace;
 				bag.Info = ti;
 				bag.DropItemSet = false;
 				bag.StateSet = false;
@@ -2109,6 +2035,11 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 		if (f->Flags & ZCC_Deprecated) varflags |= VARF_Deprecated;
 		if (f->Flags & ZCC_Virtual) varflags |= VARF_Virtual;
 		if (f->Flags & ZCC_Override) varflags |= VARF_Override;
+		if (f->Flags & ZCC_VarArg) varflags |= VARF_VarArg;
+		if ((f->Flags & ZCC_VarArg) && !(f->Flags & ZCC_Native))
+		{
+			Error(f, "'VarArg' can only be used with native methods");
+		}
 		if (f->Flags & ZCC_Action)
 		{
 			// Non-Actors cannot have action functions.
@@ -2211,7 +2142,7 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 						// It will also lose important type info about enums, once these get implemented
 						// The code generator can do this properly for us.
 						FxExpression *x = new FxTypeCast(ConvertNode(p->Default), type, false);
-						FCompileContext ctx(c->Type(), false);
+						FCompileContext ctx(OutNamespace, c->Type(), false);
 						x = x->Resolve(ctx);
 
 						if (x != nullptr)
@@ -2300,20 +2231,12 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 		PFunction *virtsym = nullptr;
 		if (cls != nullptr && cls->ParentClass != nullptr) virtsym = dyn_cast<PFunction>(cls->ParentClass->Symbols.FindSymbol(FName(f->Name), true));
 		unsigned vindex = ~0u;
-		if (virtsym != nullptr) vindex = virtsym->Variants[0].Implementation->VirtualIndex;
-
-		if (vindex != ~0u || (varflags & VARF_Virtual))
+		if (virtsym != nullptr)
 		{
-			// Todo: Check if the declaration is legal. 
-
-			// First step: compare prototypes - if they do not match the virtual base method does not apply.
-
-			// Second step: Check flags. Possible cases:
-			// 1. Base method is final: Error.
-			// 2. This method is override: Base virtual method must exist
-			// 3. This method is virtual but not override: Base may not have a virtual method with the same prototype.
+			auto imp = virtsym->Variants[0].Implementation;
+			if (imp != nullptr) vindex = imp->VirtualIndex;
+			else Error(f, "Virtual base function %s not found in %s", FName(f->Name).GetChars(), cls->ParentClass->TypeName.GetChars());
 		}
-
 
 		if (!(f->Flags & ZCC_Native))
 		{
@@ -2327,7 +2250,7 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 				auto code = ConvertAST(c->Type(), f->Body);
 				if (code != nullptr)
 				{
-					FunctionBuildList.AddFunction(sym, code, FStringf("%s.%s", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars()), false, -1, 0, Lump);
+					FunctionBuildList.AddFunction(OutNamespace, sym, code, FStringf("%s.%s", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars()), false, -1, 0, Lump);
 				}
 			}
 		}
@@ -2596,7 +2519,7 @@ void ZCCCompiler::CompileStates()
 					{
 						state.sprite = GetSpriteIndex(sl->Sprite->GetChars());
 					}
-					// It is important to call CheckRandom before Simplify, because Simplify will resolve the function's name to nonsense
+					FCompileContext ctx(OutNamespace, c->Type(), false);
 					if (CheckRandom(sl->Duration))
 					{
 						auto func = static_cast<ZCC_ExprFuncCall *>(sl->Duration);
@@ -2604,26 +2527,16 @@ void ZCCCompiler::CompileStates()
 						{
 							Error(sl, "Random duration requires exactly 2 parameters");
 						}
-						auto p1 = Simplify(func->Parameters->Value, &c->Type()->Symbols, true);
-						auto p2 = Simplify(static_cast<ZCC_FuncParm *>(func->Parameters->SiblingNext)->Value, &c->Type()->Symbols, true);
-						int v1 = GetInt(p1);
-						int v2 = GetInt(p2);
+						int v1 = IntConstFromNode(func->Parameters->Value, c->Type());
+						int v2 = IntConstFromNode(static_cast<ZCC_FuncParm *>(func->Parameters->SiblingNext)->Value, c->Type());
 						if (v1 > v2) std::swap(v1, v2);
 						state.Tics = (int16_t)clamp<int>(v1, 0, INT16_MAX);
 						state.TicRange = (uint16_t)clamp<int>(v2 - v1, 0, UINT16_MAX);
 					}
 					else
 					{
-						auto duration = Simplify(sl->Duration, &c->Type()->Symbols, true);
-						if (duration->Operation == PEX_ConstValue)
-						{
-							state.Tics = (int16_t)clamp<int>(GetInt(duration), -1, INT16_MAX);
-							state.TicRange = 0;
-						}
-						else
-						{
-							Error(sl, "Duration is not a constant");
-						}
+						state.Tics = (int16_t)IntConstFromNode(sl->Duration, c->Type());
+						state.TicRange = 0;
 					}
 					if (sl->bBright) state.StateFlags |= STF_FULLBRIGHT;
 					if (sl->bFast) state.StateFlags |= STF_FAST;
@@ -2639,18 +2552,8 @@ void ZCCCompiler::CompileStates()
 					}
 					if (sl->Offset != nullptr)
 					{
-						auto o1 = static_cast<ZCC_Expression *>(Simplify(sl->Offset, &c->Type()->Symbols, true));
-						auto o2 = static_cast<ZCC_Expression *>(Simplify(static_cast<ZCC_Expression *>(o1->SiblingNext), &c->Type()->Symbols, true));
-
-						if (o1->Operation != PEX_ConstValue || o2->Operation != PEX_ConstValue)
-						{
-							Error(o1, "State offsets must be constant");
-						}
-						else
-						{
-							state.Misc1 = GetInt(o1);
-							state.Misc2 = GetInt(o2);
-						}
+						state.Misc1 = IntConstFromNode(sl->Offset, c->Type());
+						state.Misc2 = IntConstFromNode(static_cast<ZCC_Expression *>(sl->Offset->SiblingNext), c->Type());
 					}
 #ifdef DYNLIGHT
 					if (sl->Lights != nullptr)
@@ -2658,7 +2561,7 @@ void ZCCCompiler::CompileStates()
 						auto l = sl->Lights;
 						do
 						{
-							AddStateLight(&state, GetString(l));
+							AddStateLight(&state, StringConstFromNode(l, c->Type()));
 							l = static_cast<decltype(l)>(l->SiblingNext);
 						} while (l != sl->Lights);
 					}
@@ -2670,7 +2573,7 @@ void ZCCCompiler::CompileStates()
 						if (code != nullptr)
 						{
 							auto funcsym = CreateAnonymousFunction(c->Type(), nullptr, state.UseFlags);
-							state.ActionFunc = FunctionBuildList.AddFunction(funcsym, code, FStringf("%s.StateFunction.%d", c->Type()->TypeName.GetChars(), statedef.GetStateCount()), false, statedef.GetStateCount(), (int)sl->Frames->Len(), Lump);
+							state.ActionFunc = FunctionBuildList.AddFunction(OutNamespace, funcsym, code, FStringf("%s.StateFunction.%d", c->Type()->TypeName.GetChars(), statedef.GetStateCount()), false, statedef.GetStateCount(), (int)sl->Frames->Len(), Lump);
 						}
 					}
 
@@ -2699,23 +2602,15 @@ void ZCCCompiler::CompileStates()
 					statename.Truncate((long)statename.Len() - 1);	// remove the last '.' in the label name
 					if (sg->Offset != nullptr)
 					{
-						auto ofs = Simplify(sg->Offset, &c->Type()->Symbols, true);
-						if (ofs->Operation != PEX_ConstValue)
+						int offset = IntConstFromNode(sg->Offset, c->Type());
+						if (offset < 0)
 						{
-							Error(sg, "Constant offset expected for GOTO");
+							Error(sg, "GOTO offset must be positive");
+							offset = 0;
 						}
-						else
+						if (offset > 0)
 						{
-							int offset = GetInt(ofs);
-							if (offset < 0)
-							{
-								Error(sg, "GOTO offset must be positive");
-								offset = 0;
-							}
-							if (offset > 0)
-							{
-								statename.AppendFormat("+%d", offset);
-							}
+							statename.AppendFormat("+%d", offset);
 						}
 					}
 					if (!statedef.SetGotoLabel(statename))
@@ -3116,7 +3011,7 @@ FxExpression *ZCCCompiler::ConvertNode(ZCC_TreeNode *ast)
 
 		if (loc->Type->ArraySize != nullptr)
 		{
-			ztype = ResolveArraySize(ztype, loc->Type->ArraySize, &ConvertClass->Symbols);
+			ztype = ResolveArraySize(ztype, loc->Type->ArraySize, ConvertClass);
 		}
 
 		do
@@ -3125,7 +3020,7 @@ FxExpression *ZCCCompiler::ConvertNode(ZCC_TreeNode *ast)
 
 			if (node->ArraySize != nullptr)
 			{
-				type = ResolveArraySize(ztype, node->ArraySize, &ConvertClass->Symbols);
+				type = ResolveArraySize(ztype, node->ArraySize, ConvertClass);
 			}
 			else
 			{
@@ -3171,16 +3066,9 @@ FxExpression *ZCCCompiler::ConvertNode(ZCC_TreeNode *ast)
 		{
 			return new FxReturnStatement(nullptr, *ast);
 		}
-		else if (args.Size() == 1)
-		{
-			auto arg = args[0];
-			args[0] = nullptr;
-			return new FxReturnStatement(arg, *ast);
-		}
 		else
 		{
-			Error(ast, "Return with multiple values not implemented yet.");
-			return new FxReturnStatement(nullptr, *ast);
+			return new FxReturnStatement(args, *ast);
 		}
 	}
 

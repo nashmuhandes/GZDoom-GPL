@@ -72,6 +72,7 @@
 #include "r_utility.h"
 #include "r_data/r_interpolate.h"
 #include "c_functions.h"
+#include "g_levellocals.h"
 
 extern FILE *Logfile;
 extern bool insave;
@@ -403,9 +404,9 @@ CCMD (give)
 	Net_WriteByte (DEM_GIVECHEAT);
 	Net_WriteString (argv[1]);
 	if (argv.argc() > 2)
-		Net_WriteWord (clamp (atoi (argv[2]), 1, 32767));
+		Net_WriteLong(atoi(argv[2]));
 	else
-		Net_WriteWord (0);
+		Net_WriteLong(0);
 }
 
 CCMD (take)
@@ -416,9 +417,9 @@ CCMD (take)
 	Net_WriteByte (DEM_TAKECHEAT);
 	Net_WriteString (argv[1]);
 	if (argv.argc() > 2)
-		Net_WriteWord (clamp (atoi (argv[2]), 1, 32767));
+		Net_WriteLong(atoi (argv[2]));
 	else
-		Net_WriteWord (0);
+		Net_WriteLong (0);
 }
 
 CCMD (gameversion)
@@ -1189,18 +1190,18 @@ static void PrintSecretString(const char *string, bool thislevel)
 		{
 			if (string[1] == 'S' || string[1] == 's')
 			{
-				long secnum = strtol(string+2, (char**)&string, 10);
+				auto secnum = (unsigned)strtoull(string+2, (char**)&string, 10);
 				if (*string == ';') string++;
-				if (thislevel && secnum >= 0 && secnum < numsectors)
+				if (thislevel && secnum < level.sectors.Size())
 				{
-					if (sectors[secnum].isSecret()) colstr = TEXTCOLOR_RED;
-					else if (sectors[secnum].wasSecret()) colstr = TEXTCOLOR_GREEN;
+					if (level.sectors[secnum].isSecret()) colstr = TEXTCOLOR_RED;
+					else if (level.sectors[secnum].wasSecret()) colstr = TEXTCOLOR_GREEN;
 					else colstr = TEXTCOLOR_ORANGE;
 				}
 			}
 			else if (string[1] == 'T' || string[1] == 't')
 			{
-				long tid = strtol(string+2, (char**)&string, 10);
+				long tid = (long)strtoll(string+2, (char**)&string, 10);
 				if (*string == ';') string++;
 				FActorIterator it(tid);
 				AActor *actor;

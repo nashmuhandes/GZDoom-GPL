@@ -37,6 +37,7 @@ class PlayerPawn : Actor native
 	native Class<Actor> FlechetteType;
 	native color 		DamageFade;				// [CW] Fades for when you are being damaged.
 	native double		ViewBob;				// [SP] ViewBob Multiplier
+	native double		FullHeight;
 	
 	Default
 	{
@@ -102,12 +103,43 @@ class PlayerPawn : Actor native
 	virtual void MorphPlayerThink()
 	{
 	}
+	
+	virtual void OnRespawn()
+	{
+		if (sv_respawnprotect && (multiplayer || alwaysapplydmflags))
+		{
+			let invul = Powerup(Spawn("PowerInvulnerable"));
+			invul.EffectTics = 3 * TICRATE;
+			invul.BlendColor = 0;			// don't mess with the view
+			invul.bUndroppable = true;		// Don't drop this
+			bRespawnInvul = true;			// [RH] special effect
+		}
+	}
+	
+	// This is for SBARINFO.
+	int, int GetEffectTicsForItem(class<Inventory> item)
+	{
+		let pg = (class<PowerupGiver>)(item);
+		if (pg != null)
+		{
+			let powerupType = (class<Powerup>)(GetDefaultByType(pg).PowerupType);
+			let powerup = Powerup(FindInventory(powerupType));
+			if(powerup != null) 
+			{
+				let maxtics = GetDefaultByType(pg).EffectTics;
+				if (maxtics == 0) maxtics = powerup.default.EffectTics;
+				return powerup.EffectTics, maxtics;
+			}
+		}
+		return 0, 0;
+	}
 
 	native int GetMaxHealth();
 	native bool ResetAirSupply (bool playgasp = false);
+	native void CheckWeaponSwitch(class<Inventory> item);
 }
 
-class PlayerChunk : PlayerPawn native
+class PlayerChunk : PlayerPawn
 {
 	Default
 	{
@@ -127,8 +159,18 @@ class PlayerChunk : PlayerPawn native
 
 class PSprite : Object native
 {
+	enum PSPLayers
+	{
+		STRIFEHANDS = -1,
+		WEAPON = 1,
+		FLASH = 1000,
+		TARGETCENTER = 0x7fffffff - 2,
+		TARGETLEFT,
+		TARGETRIGHT,
+	};
+
 	native readonly State CurState; 
-	native readonly Actor Caller;
+	native Actor Caller;
 	native readonly PSprite Next;
 	native readonly PlayerInfo Owner;
 	native SpriteID Sprite;
@@ -162,12 +204,16 @@ enum EPlayerState
 
 struct PlayerInfo native	// this is what internally is known as player_t
 {
-	native readonly PlayerPawn mo;
+	// technically engine constants but the only part of the playsim using them is the player.
+	const NOFIXEDCOLORMAP = -1;
+	const NUMCOLORMAPS = 32;
+	
+	native PlayerPawn mo;
 	native uint8 playerstate;
 	native uint original_oldbuttons;
 	native readonly Class<PlayerPawn> cls;
 	native float DesiredFOV;
-	native readonly float FOV;
+	native float FOV;
 	native double viewz;
 	native double viewheight;
 	native double deltaviewheight;
@@ -243,11 +289,12 @@ struct PlayerInfo native	// this is what internally is known as player_t
 	native Actor ConversationPC;
 	native double ConversationNPCAngle;
 	native bool ConversationFaceTalker;
+	//native WeaponSlots weapons; <- defined internally
+
 /* these are not doable yet
 ticcmd_t	cmd;
 usercmd_t	original_cmd;
-userinfo_t	userinfo;				// [RH] who is this?
-FWeaponSlots weapons;
+userinfo_t	userinfo;
 */
 	
 
@@ -261,5 +308,9 @@ FWeaponSlots weapons;
 	native PSprite FindPSprite(int id);
 	native void SetLogNumber (int text);
 	native void SetLogText (String text);
+	native String GetUserName();
+	native bool GetNeverSwitch();
+	native void DropWeapon();
+	native void BringUpWeapon();
 
 }

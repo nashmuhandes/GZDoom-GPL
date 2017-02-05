@@ -56,7 +56,7 @@
 #include "v_text.h"
 #include "m_argv.h"
 
-void ParseOldDecoration(FScanner &sc, EDefinitionType def);
+void ParseOldDecoration(FScanner &sc, EDefinitionType def, PNamespace *ns);
 EXTERN_CVAR(Bool, strictdecorate);
 
 
@@ -101,12 +101,11 @@ PClassActor *DecoDerivedClass(const FScriptPosition &sc, PClassActor *parent, FN
 //
 // ParseParameter
 //
-// Parses a parameter - either a default in a function declaration 
-// or an argument in a function call.
+// Parses an argument in a function call.
 //
 //==========================================================================
 
-FxExpression *ParseParameter(FScanner &sc, PClassActor *cls, PType *type, bool constant)
+FxExpression *ParseParameter(FScanner &sc, PClassActor *cls, PType *type)
 {
 	FxExpression *x = NULL;
 	int v;
@@ -118,12 +117,7 @@ FxExpression *ParseParameter(FScanner &sc, PClassActor *cls, PType *type, bool c
 	}
 	else if (type == TypeBool || type == TypeSInt32 || type == TypeFloat64)
 	{
-		x = ParseExpression (sc, cls, constant);
-		if (constant && !x->isConstant())
-		{
-			sc.ScriptMessage("Default parameter must be constant.");
-			FScriptPosition::ErrorCounter++;
-		}
+		x = ParseExpression (sc, cls, nullptr);
 		// Do automatic coercion between bools, ints and floats.
 		if (type == TypeBool)
 		{
@@ -193,18 +187,17 @@ FxExpression *ParseParameter(FScanner &sc, PClassActor *cls, PType *type, bool c
 				x = new FxMultiNameState(sc.String, sc);
 			}
 		}
-		else if (!constant)
+		else
 		{
 			x = new FxRuntimeStateIndex(ParseExpression(sc, cls));
 		}
-		else sc.MustGetToken(TK_StringConst); // This is for the error.
 	}
 	else if (type->GetClass() == RUNTIME_CLASS(PClassPointer))
 	{	// Actor name
 		sc.SetEscape(true);
 		sc.MustGetString();
 		sc.SetEscape(false);
-		x = new FxClassTypeCast(static_cast<PClassPointer *>(type), new FxConstant(FName(sc.String), sc));
+		x = new FxClassTypeCast(static_cast<PClassPointer *>(type), new FxConstant(FName(sc.String), sc), false);
 	}
 	else
 	{
@@ -222,7 +215,7 @@ FxExpression *ParseParameter(FScanner &sc, PClassActor *cls, PType *type, bool c
 //
 //==========================================================================
 
-static void ParseConstant (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
+static void ParseConstant (FScanner &sc, PSymbolTable *symt, PClassActor *cls, PNamespace *ns)
 {
 	// Read the type and make sure it's int or float.
 	if (sc.CheckToken(TK_Int) || sc.CheckToken(TK_Float))
@@ -231,7 +224,7 @@ static void ParseConstant (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
 		sc.MustGetToken(TK_Identifier);
 		FName symname = sc.String;
 		sc.MustGetToken('=');
-		FxExpression *expr = ParseExpression (sc, cls, true);
+		FxExpression *expr = ParseExpression (sc, cls, ns);
 		sc.MustGetToken(';');
 
 		if (expr == nullptr)
@@ -283,7 +276,7 @@ static void ParseConstant (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
 //
 //==========================================================================
 
-static void ParseEnum (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
+static void ParseEnum (FScanner &sc, PSymbolTable *symt, PClassActor *cls, PNamespace *ns)
 {
 	int currvalue = 0;
 
@@ -294,7 +287,7 @@ static void ParseEnum (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
 		FName symname = sc.String;
 		if (sc.CheckToken('='))
 		{
-			FxExpression *expr = ParseExpression (sc, cls, true);
+			FxExpression *expr = ParseExpression (sc, cls, ns);
 			if (expr != nullptr)
 			{
 				if (!expr->isConstant())
@@ -339,7 +332,7 @@ static void ParseEnum (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
 //
 //==========================================================================
 
-static void ParseUserVariable (FScanner &sc, PSymbolTable *symt, PClassActor *cls)
+static void ParseUserVariable (FScanner &sc, PSymbolTable *symt, PClassActor *cls, PNamespace *ns)
 {
 	PType *type;
 	int maxelems = 1;
@@ -381,7 +374,7 @@ static void ParseUserVariable (FScanner &sc, PSymbolTable *symt, PClassActor *cl
 
 	if (sc.CheckToken('['))
 	{
-		FxExpression *expr = ParseExpression(sc, cls, true);
+		FxExpression *expr = ParseExpression(sc, cls, ns);
 		if (expr == nullptr)
 		{
 			sc.ScriptMessage("Error while resolving array size");
@@ -821,6 +814,73 @@ static bool ParsePropertyParams(FScanner &sc, FPropertyInfo *prop, AActor *defau
 
 //==========================================================================
 //
+// Parses an actor property's parameters and calls the handler
+//
+//==========================================================================
+
+static void DispatchScriptProperty(FScanner &sc, PProperty *prop, AActor *defaults, Baggage &bag)
+{
+	for (unsigned i=0; i<prop->Variables.Size();i++)
+	{
+		auto f = prop->Variables[i];
+		void *addr;
+
+		if (i > 0) sc.MustGetStringName(",");
+		if (f->Flags & VARF_Meta)
+		{
+			addr = ((char*)bag.Info) + f->Offset;
+		}
+		else
+		{
+			addr = ((char*)defaults) + f->Offset;
+		}
+
+		if (f->Type == TypeBool)
+		{
+			bool val = sc.CheckNumber() ? !!sc.Number : true;
+			static_cast<PBool*>(f->Type)->SetValue(addr, !!val);
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PInt)))
+		{
+			sc.MustGetNumber();
+			static_cast<PInt*>(f->Type)->SetValue(addr, sc.Number);
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PFloat)))
+		{
+			sc.MustGetFloat();
+			static_cast<PFloat*>(f->Type)->SetValue(addr, sc.Float);
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PString)))
+		{
+			sc.MustGetString();
+			*(FString*)addr = sc.String;
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PClassPointer)))
+		{
+			sc.MustGetString();
+			auto cls = PClass::FindClass(sc.String);
+			*(PClass**)addr = cls;
+			if (cls == nullptr)
+			{
+				cls = static_cast<PClassPointer*>(f->Type)->ClassRestriction->FindClassTentative(sc.String);
+			}
+			else if (!cls->IsDescendantOf(static_cast<PClassPointer*>(f->Type)->ClassRestriction))
+			{
+				sc.ScriptMessage("class %s is not compatible with property type %s", sc.String, static_cast<PClassPointer*>(f->Type)->ClassRestriction->TypeName.GetChars());
+				FScriptPosition::ErrorCounter++;
+			}
+			*(PClass**)addr = cls;
+		}
+		else
+		{
+			sc.ScriptMessage("unhandled property type %s", f->Type->DescriptiveName());
+			FScriptPosition::ErrorCounter++;
+		}
+	}
+}
+
+//==========================================================================
+//
 // Parses an actor property
 //
 //==========================================================================
@@ -851,13 +911,14 @@ static void ParseActorProperty(FScanner &sc, Baggage &bag)
 
 	if (prop != NULL)
 	{
-		if (bag.Info->IsDescendantOf(*prop->cls))
+		auto pcls = PClass::FindActor(prop->clsname);
+		if (bag.Info->IsDescendantOf(pcls))
 		{
 			ParsePropertyParams(sc, prop, (AActor *)bag.Info->Defaults, bag);
 		}
 		else
 		{
-			sc.ScriptMessage("'%s' requires an actor of type '%s'\n", propname.GetChars(), (*prop->cls)->TypeName.GetChars());
+			sc.ScriptMessage("'%s' requires an actor of type '%s'\n", propname.GetChars(), pcls->TypeName.GetChars());
 			FScriptPosition::ErrorCounter++;
 		}
 	}
@@ -867,6 +928,17 @@ static void ParseActorProperty(FScanner &sc, Baggage &bag)
 	}
 	else
 	{
+		propname.Insert(0, "@property@");
+		FName name(propname, true);
+		if (name != NAME_None)
+		{
+			auto propp = dyn_cast<PProperty>(bag.Info->Symbols.FindSymbol(name, true));
+			if (propp != nullptr)
+			{
+				DispatchScriptProperty(sc, propp, (AActor *)bag.Info->Defaults, bag);
+				return;
+			}
+		}
 		sc.ScriptError("'%s' is an unknown actor property\n", propname.GetChars());
 	}
 }
@@ -1033,11 +1105,12 @@ static PClassActor *ParseActorHeader(FScanner &sc, Baggage *bag)
 // Reads an actor definition
 //
 //==========================================================================
-static void ParseActor(FScanner &sc)
+static void ParseActor(FScanner &sc, PNamespace *ns)
 {
 	PClassActor *info = NULL;
 	Baggage bag;
 
+	bag.Namespace = ns;
 	bag.fromDecorate = true;
 	info = ParseActorHeader(sc, &bag);
 	sc.MustGetToken('{');
@@ -1046,15 +1119,15 @@ static void ParseActor(FScanner &sc)
 		switch (sc.TokenType)
 		{
 		case TK_Const:
-			ParseConstant (sc, &info->Symbols, info);
+			ParseConstant (sc, &info->Symbols, info, ns);
 			break;
 
 		case TK_Enum:
-			ParseEnum (sc, &info->Symbols, info);
+			ParseEnum (sc, &info->Symbols, info, ns);
 			break;
 
 		case TK_Var:
-			ParseUserVariable (sc, &info->Symbols, info);
+			ParseUserVariable (sc, &info->Symbols, info, ns);
 			break;
 
 		case TK_Identifier:
@@ -1144,7 +1217,7 @@ static void ParseDamageDefinition(FScanner &sc)
 //
 //==========================================================================
 
-void ParseDecorate (FScanner &sc)
+void ParseDecorate (FScanner &sc, PNamespace *ns)
 {
 	// Get actor class name.
 	for(;;)
@@ -1171,16 +1244,16 @@ void ParseDecorate (FScanner &sc)
 			}
 			FScanner newscanner;
 			newscanner.Open(sc.String);
-			ParseDecorate(newscanner);
+			ParseDecorate(newscanner, ns);
 			break;
 		}
 
 		case TK_Const:
-			ParseConstant (sc, &GlobalSymbols, NULL);
+			ParseConstant (sc, &ns->Symbols, NULL, ns);
 			break;
 
 		case TK_Enum:
-			ParseEnum (sc, &GlobalSymbols, NULL);
+			ParseEnum (sc, &ns->Symbols, NULL, ns);
 			break;
 
 		case ';':
@@ -1196,22 +1269,22 @@ void ParseDecorate (FScanner &sc)
 			// so let's do a special case for this.
 			if (sc.Compare("ACTOR"))
 			{
-				ParseActor (sc);
+				ParseActor (sc, ns);
 				break;
 			}
 			else if (sc.Compare("PICKUP"))
 			{
-				ParseOldDecoration (sc, DEF_Pickup);
+				ParseOldDecoration (sc, DEF_Pickup, ns);
 				break;
 			}
 			else if (sc.Compare("BREAKABLE"))
 			{
-				ParseOldDecoration (sc, DEF_BreakableDecoration);
+				ParseOldDecoration (sc, DEF_BreakableDecoration, ns);
 				break;
 			}
 			else if (sc.Compare("PROJECTILE"))
 			{
-				ParseOldDecoration (sc, DEF_Projectile);
+				ParseOldDecoration (sc, DEF_Projectile, ns);
 				break;
 			}
 			else if (sc.Compare("DAMAGETYPE"))
@@ -1221,7 +1294,7 @@ void ParseDecorate (FScanner &sc)
 			}
 		default:
 			sc.RestorePos(pos);
-			ParseOldDecoration(sc, DEF_Decoration);
+			ParseOldDecoration(sc, DEF_Decoration, ns);
 			break;
 		}
 	}
@@ -1234,6 +1307,7 @@ void ParseAllDecorate()
 	while ((lump = Wads.FindLump("DECORATE", &lastlump)) != -1)
 	{
 		FScanner sc(lump);
-		ParseDecorate(sc);
+		auto ns = Namespaces.NewNamespace(sc.LumpNum);
+		ParseDecorate(sc, ns);
 	}
 }

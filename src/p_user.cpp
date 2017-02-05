@@ -60,8 +60,7 @@
 #include "a_morph.h"
 #include "p_spec.h"
 #include "virtual.h"
-#include "a_armor.h"
-#include "a_ammo.h"
+#include "g_levellocals.h"
 
 static FRandom pr_skullpop ("SkullPop");
 
@@ -638,6 +637,19 @@ void player_t::SendPitchLimits() const
 	}
 }
 
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, GetUserName)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	ACTION_RETURN_STRING(self->userinfo.GetName());
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, GetNeverSwitch)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	ACTION_RETURN_BOOL(self->userinfo.GetNeverSwitch());
+}
+
 //===========================================================================
 //
 // APlayerPawn
@@ -651,8 +663,6 @@ IMPLEMENT_POINTERS_START(APlayerPawn)
 	IMPLEMENT_POINTER(InvSel)
 	IMPLEMENT_POINTER(FlechetteType)
 IMPLEMENT_POINTERS_END
-
-IMPLEMENT_CLASS(APlayerChunk, false, false)
 
 void APlayerPawn::Serialize(FSerializer &arc)
 {
@@ -680,7 +690,8 @@ void APlayerPawn::Serialize(FSerializer &arc)
 		("userange", UseRange, def->UseRange)
 		("aircapacity", AirCapacity, def->AirCapacity)
 		("viewheight", ViewHeight, def->ViewHeight)
-		("viewbob", ViewBob, def->ViewBob);
+		("viewbob", ViewBob, def->ViewBob)
+		("fullheight", FullHeight, def->FullHeight);
 }
 
 //===========================================================================
@@ -705,7 +716,7 @@ void APlayerPawn::BeginPlay ()
 {
 	Super::BeginPlay ();
 	ChangeStatNum (STAT_PLAYER);
-
+	FullHeight = Height;
 	// Check whether a PWADs normal sprite is to be combined with the base WADs
 	// crouch sprite. In such a case the sprites normally don't match and it is
 	// best to disable the crouch sprite.
@@ -757,11 +768,11 @@ void APlayerPawn::Tick()
 {
 	if (player != NULL && player->mo == this && player->CanCrouch() && player->playerstate != PST_DEAD)
 	{
-		Height = GetDefault()->Height * player->crouchfactor;
+		Height = FullHeight * player->crouchfactor;
 	}
 	else
 	{
-		if (health > 0) Height = GetDefault()->Height;
+		if (health > 0) Height = FullHeight;
 	}
 	Super::Tick();
 }
@@ -942,13 +953,13 @@ bool APlayerPawn::UseInventory (AInventory *item)
 //
 //===========================================================================
 
-AWeapon *APlayerPawn::BestWeapon(PClassAmmo *ammotype)
+AWeapon *APlayerPawn::BestWeapon(PClassInventory *ammotype)
 {
 	AWeapon *bestMatch = NULL;
 	int bestOrder = INT_MAX;
 	AInventory *item;
 	AWeapon *weap;
-	bool tomed = NULL != FindInventory (RUNTIME_CLASS(APowerWeaponLevel2), true);
+	bool tomed = NULL != FindInventory (PClass::FindActor(NAME_PowerWeaponLevel2), true);
 
 	// Find the best weapon the player has.
 	for (item = Inventory; item != NULL; item = item->Inventory)
@@ -1004,7 +1015,7 @@ AWeapon *APlayerPawn::BestWeapon(PClassAmmo *ammotype)
 //
 //===========================================================================
 
-AWeapon *APlayerPawn::PickNewWeapon(PClassAmmo *ammotype)
+AWeapon *APlayerPawn::PickNewWeapon(PClassInventory *ammotype)
 {
 	AWeapon *best = BestWeapon (ammotype);
 
@@ -1032,7 +1043,7 @@ AWeapon *APlayerPawn::PickNewWeapon(PClassAmmo *ammotype)
 //
 //===========================================================================
 
-void APlayerPawn::CheckWeaponSwitch(PClassAmmo *ammotype)
+void APlayerPawn::CheckWeaponSwitch(PClassInventory *ammotype)
 {
 	if (!player->userinfo.GetNeverSwitch() &&
 		player->PendingWeapon == WP_NOCHANGE && 
@@ -1048,6 +1059,13 @@ void APlayerPawn::CheckWeaponSwitch(PClassAmmo *ammotype)
 	}
 }
 
+DEFINE_ACTION_FUNCTION(APlayerPawn, CheckWeaponSwitch)
+{
+	PARAM_SELF_PROLOGUE(APlayerPawn);
+	PARAM_OBJECT(ammotype, PClassInventory);
+	self->CheckWeaponSwitch(ammotype);
+	return 0;
+}
 //===========================================================================
 //
 // APlayerPawn :: GiveDeathmatchInventory
@@ -1061,12 +1079,12 @@ void APlayerPawn::GiveDeathmatchInventory()
 {
 	for (unsigned int i = 0; i < PClassActor::AllActorClasses.Size(); ++i)
 	{
-		if (PClassActor::AllActorClasses[i]->IsDescendantOf (RUNTIME_CLASS(AKey)))
+		if (PClassActor::AllActorClasses[i]->IsDescendantOf (PClass::FindActor(NAME_Key)))
 		{
-			AKey *key = (AKey *)GetDefaultByType (PClassActor::AllActorClasses[i]);
-			if (key->KeyNumber != 0)
+			AInventory *key = (AInventory*)GetDefaultByType (PClassActor::AllActorClasses[i]);
+			if (key->special1 != 0)
 			{
-				key = static_cast<AKey *>(Spawn(static_cast<PClassActor *>(PClassActor::AllActorClasses[i])));
+				key = (AInventory*)Spawn(PClassActor::AllActorClasses[i]);
 				if (!key->CallTryPickup (this))
 				{
 					key->Destroy ();
@@ -1119,7 +1137,7 @@ void APlayerPawn::FilterCoopRespawnInventory (APlayerPawn *oldplayer)
 
 			if ((dmflags & DF_COOP_LOSE_KEYS) &&
 				defitem == NULL &&
-				item->IsKindOf(RUNTIME_CLASS(AKey)))
+				item->IsKindOf(PClass::FindActor(NAME_Key)))
 			{
 				item->Destroy();
 			}
@@ -1130,33 +1148,32 @@ void APlayerPawn::FilterCoopRespawnInventory (APlayerPawn *oldplayer)
 				item->Destroy();
 			}
 			else if ((dmflags & DF_COOP_LOSE_ARMOR) &&
-				item->IsKindOf(RUNTIME_CLASS(AArmor)))
+				item->IsKindOf(PClass::FindActor(NAME_Armor)))
 			{
 				if (defitem == NULL)
 				{
 					item->Destroy();
 				}
-				else if (item->IsKindOf(RUNTIME_CLASS(ABasicArmor)))
+				else if (item->IsKindOf(PClass::FindActor(NAME_BasicArmor)))
 				{
-					static_cast<ABasicArmor*>(item)->SavePercent = static_cast<ABasicArmor*>(defitem)->SavePercent;
+					item->IntVar(NAME_SavePercent) = defitem->IntVar(NAME_SavePercent);
 					item->Amount = defitem->Amount;
 				}
-				else if (item->IsKindOf(RUNTIME_CLASS(AHexenArmor)))
+				else if (item->IsKindOf(PClass::FindActor(NAME_HexenArmor)))
 				{
-					static_cast<AHexenArmor*>(item)->Slots[0] = static_cast<AHexenArmor*>(defitem)->Slots[0];
-					static_cast<AHexenArmor*>(item)->Slots[1] = static_cast<AHexenArmor*>(defitem)->Slots[1];
-					static_cast<AHexenArmor*>(item)->Slots[2] = static_cast<AHexenArmor*>(defitem)->Slots[2];
-					static_cast<AHexenArmor*>(item)->Slots[3] = static_cast<AHexenArmor*>(defitem)->Slots[3];
+					double *SlotsTo = (double*)item->ScriptVar(NAME_Slots, nullptr);
+					double *SlotsFrom = (double*)defitem->ScriptVar(NAME_Slots, nullptr);
+					memcpy(SlotsTo, SlotsFrom, 4 * sizeof(double)); 
 				}
 			}
 			else if ((dmflags & DF_COOP_LOSE_POWERUPS) &&
 				defitem == NULL &&
-				item->IsKindOf(RUNTIME_CLASS(APowerupGiver)))
+				item->IsKindOf(PClass::FindActor(NAME_PowerupGiver)))
 			{
 				item->Destroy();
 			}
 			else if ((dmflags & (DF_COOP_LOSE_AMMO | DF_COOP_HALVE_AMMO)) &&
-				item->IsKindOf(RUNTIME_CLASS(AAmmo)))
+				item->IsKindOf(PClass::FindActor(NAME_Ammo)))
 			{
 				if (defitem == NULL)
 				{
@@ -1352,21 +1369,22 @@ void APlayerPawn::GiveDefaultInventory ()
 	// it provides player class based protection that should not affect
 	// any other protection item.
 	PClassPlayerPawn *myclass = GetClass();
-	GiveInventoryType(RUNTIME_CLASS(AHexenArmor));
-	AHexenArmor *harmor = FindInventory<AHexenArmor>();
-	harmor->Slots[4] = myclass->HexenArmor[0];
+	GiveInventoryType(PClass::FindActor(NAME_HexenArmor));
+	auto harmor = FindInventory(NAME_HexenArmor);
+
+	double *Slots = (double*)harmor->ScriptVar(NAME_Slots, nullptr);
+	double *SlotsIncrement = (double*)harmor->ScriptVar(NAME_SlotsIncrement, nullptr);
+	Slots[4] = myclass->HexenArmor[0];
 	for (int i = 0; i < 4; ++i)
 	{
-		harmor->SlotsIncrement[i] = myclass->HexenArmor[i + 1];
+		SlotsIncrement[i] = myclass->HexenArmor[i + 1];
 	}
 
 	// BasicArmor must come right after that. It should not affect any
 	// other protection item as well but needs to process the damage
 	// before the HexenArmor does.
-	ABasicArmor *barmor = Spawn<ABasicArmor> ();
+	auto barmor = (AInventory*)Spawn(NAME_BasicArmor);
 	barmor->BecomeItem ();
-	barmor->SavePercent = 0;
-	barmor->Amount = 0;
 	AddInventory (barmor);
 
 	// Now add the items from the DECORATE definition
@@ -1686,13 +1704,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_PlayerScream)
 DEFINE_ACTION_FUNCTION(AActor, A_SkullPop)
 {
 	PARAM_SELF_PROLOGUE(AActor);
-	PARAM_CLASS_DEF(spawntype, APlayerChunk);
+	PARAM_CLASS_DEF(spawntype, APlayerPawn);
 
 	APlayerPawn *mo;
 	player_t *player;
 
 	// [GRB] Parameterized version
-	if (spawntype == NULL || !spawntype->IsDescendantOf(RUNTIME_CLASS(APlayerChunk)))
+	if (spawntype == NULL || !spawntype->IsDescendantOf(PClass::FindActor("PlayerChunk")))
 	{
 		spawntype = dyn_cast<PClassPlayerPawn>(PClass::FindClass("BloodySkull"));
 		if (spawntype == NULL)
@@ -2061,7 +2079,7 @@ void P_MovePlayer (player_t *player)
 			msecnode_t *n = player->mo->touching_sectorlist;
 			while (n != NULL)
 			{
-				fprintf (debugfile, "%td ", n->m_sector-sectors);
+				fprintf (debugfile, "%d ", n->m_sector->sectornum);
 				n = n->m_tnext;
 			}
 			fprintf (debugfile, "]\n");
@@ -2189,7 +2207,7 @@ void P_DeathThink (player_t *player)
 	player->TickPSprites();
 
 	player->onground = (player->mo->Z() <= player->mo->floorz);
-	if (player->mo->IsKindOf (RUNTIME_CLASS(APlayerChunk)))
+	if (player->mo->IsKindOf (PClass::FindActor("PlayerChunk")))
 	{ // Flying bloody skull or flying ice chunk
 		player->viewheight = 6;
 		player->deltaviewheight = 0;
@@ -2293,7 +2311,7 @@ void P_DeathThink (player_t *player)
 
 void P_CrouchMove(player_t * player, int direction)
 {
-	double defaultheight = player->mo->GetDefault()->Height;
+	double defaultheight = player->mo->FullHeight;
 	double savedheight = player->mo->Height;
 	double crouchspeed = direction * CROUCHSPEED;
 	double oldheight = player->viewheight;
@@ -3229,6 +3247,7 @@ DEFINE_FIELD(APlayerPawn, AirCapacity)
 DEFINE_FIELD(APlayerPawn, FlechetteType)
 DEFINE_FIELD(APlayerPawn, DamageFade)
 DEFINE_FIELD(APlayerPawn, ViewBob)
+DEFINE_FIELD(APlayerPawn, FullHeight)
 
 DEFINE_FIELD(PClassPlayerPawn, HealingRadiusType)
 DEFINE_FIELD(PClassPlayerPawn, DisplayName)

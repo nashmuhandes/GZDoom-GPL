@@ -41,6 +41,7 @@
 #include "p_terrain.h"
 #include "p_maputl.h"
 #include "p_spec.h"
+#include "g_levellocals.h"
 
 
 //============================================================================
@@ -121,24 +122,24 @@ void P_Attach3dMidtexLinesToSector(sector_t *sector, int lineid, int tag, bool c
 	extsector_t::midtex::plane &scrollplane = ceiling? sector->e->Midtex.Ceiling : sector->e->Midtex.Floor;
 
 	// Bit arrays that mark whether a line or sector is to be attached.
-	BYTE *found_lines = new BYTE[(numlines+7)/8];
-	BYTE *found_sectors = new BYTE[(numsectors+7)/8];
+	BYTE *found_lines = new BYTE[(level.lines.Size()+7)/8];
+	BYTE *found_sectors = new BYTE[(level.sectors.Size()+7)/8];
 
-	memset(found_lines, 0, sizeof (BYTE) * ((numlines+7)/8));
-	memset(found_sectors, 0, sizeof (BYTE) * ((numsectors+7)/8));
+	memset(found_lines, 0, sizeof (BYTE) * ((level.lines.Size()+7)/8));
+	memset(found_sectors, 0, sizeof (BYTE) * ((level.sectors.Size()+7)/8));
 
 	// mark all lines and sectors that are already attached to this one
 	// and clear the arrays. The old data will be re-added automatically
 	// from the marker arrays.
 	for (unsigned i=0; i < scrollplane.AttachedLines.Size(); i++)
 	{
-		int line = int(scrollplane.AttachedLines[i] - lines);
+		int line = scrollplane.AttachedLines[i]->Index();
 		found_lines[line>>3] |= 1 << (line&7);
 	}
 
 	for (unsigned i=0; i < scrollplane.AttachedSectors.Size(); i++)
 	{
-		int sec = int(scrollplane.AttachedSectors[i] - sectors);
+		int sec = scrollplane.AttachedSectors[i]->Index();
 		found_sectors[sec>>3] |= 1 << (sec&7);
 	}
 
@@ -151,7 +152,7 @@ void P_Attach3dMidtexLinesToSector(sector_t *sector, int lineid, int tag, bool c
 		int line;
 		while ((line = itr.Next()) >= 0)
 		{
-			line_t *ln = &lines[line];
+			line_t *ln = &level.lines[line];
 
 			if (ln->frontsector == NULL || ln->backsector == NULL || !(ln->flags & ML_3DMIDTEX))
 			{
@@ -167,7 +168,7 @@ void P_Attach3dMidtexLinesToSector(sector_t *sector, int lineid, int tag, bool c
 		int sec;
 		while ((sec = it.Next()) >= 0)
 		{
-			for (auto ln : sectors[sec].Lines)
+			for (auto ln : level.sectors[sec].Lines)
 			{
 				if (lineid != 0 && !tagManager.LineHasID(ln, lineid)) continue;
 
@@ -176,34 +177,35 @@ void P_Attach3dMidtexLinesToSector(sector_t *sector, int lineid, int tag, bool c
 					// Only consider two-sided lines with the 3DMIDTEX flag
 					continue;
 				}
-				int lineno = int(ln-lines);
-				found_lines[lineno>>3] |= 1 << (lineno&7);
+				int lineno = ln->Index();
+				found_lines[lineno >> 3] |= 1 << (lineno & 7);
 			}
 		}
 	}
 
 
-	for(int i=0; i < numlines; i++)
+	for(unsigned i=0; i < level.lines.Size(); i++)
 	{
 		if (found_lines[i>>3] & (1 << (i&7)))
 		{
-			scrollplane.AttachedLines.Push(&lines[i]);
+			auto &line = level.lines[i];
+			scrollplane.AttachedLines.Push(&line);
 
-			v = int(lines[i].frontsector - sectors);
-			assert(v < numsectors);
+			v = line.frontsector->Index();
+			assert(v < (int)level.sectors.Size());
 			found_sectors[v>>3] |= 1 << (v&7);
 
-			v = int(lines[i].backsector - sectors);
-			assert(v < numsectors);
+			v = line.backsector->Index();
+			assert(v < (int)level.sectors.Size());
 			found_sectors[v>>3] |= 1 << (v&7);
 		}
 	}
 
-	for (int i=0; i < numsectors; i++)
+	for (unsigned i=0; i < level.sectors.Size(); i++)
 	{
 		if (found_sectors[i>>3] & (1 << (i&7)))
 		{
-			scrollplane.AttachedSectors.Push(&sectors[i]);
+			scrollplane.AttachedSectors.Push(&level.sectors[i]);
 		}
 	}
 

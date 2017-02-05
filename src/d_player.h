@@ -30,7 +30,6 @@
 #include "d_ticcmd.h"
 #include "doomstat.h"
 
-#include "a_artifacts.h"
 #include "a_weapons.h"
 
 // The player data structure depends on a number
@@ -121,9 +120,9 @@ public:
 	void TweakSpeeds (double &forwardmove, double &sidemove);
 	void MorphPlayerThink ();
 	void ActivateMorphWeapon ();
-	AWeapon *PickNewWeapon (PClassAmmo *ammotype);
-	AWeapon *BestWeapon (PClassAmmo *ammotype);
-	void CheckWeaponSwitch(PClassAmmo *ammotype);
+	AWeapon *PickNewWeapon (PClassInventory *ammotype);
+	AWeapon *BestWeapon (PClassInventory *ammotype);
+	void CheckWeaponSwitch(PClassInventory *ammotype);
 	void GiveDeathmatchInventory ();
 	void FilterCoopRespawnInventory (APlayerPawn *oldplayer);
 
@@ -152,6 +151,7 @@ public:
 	int			MugShotMaxHealth;
 	int			RunHealth;
 	int			PlayerFlags;
+	double		FullHeight;
 	TObjPtr<AInventory> InvFirst;		// first inventory item displayed on inventory bar
 	TObjPtr<AInventory> InvSel;			// selected inventory item
 
@@ -177,11 +177,6 @@ public:
 	// [SP] ViewBob Multiplier
 	double		ViewBob;
 
-};
-
-class APlayerChunk : public APlayerPawn
-{
-	DECLARE_CLASS (APlayerChunk, APlayerPawn)
 };
 
 //

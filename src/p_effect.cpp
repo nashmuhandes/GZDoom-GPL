@@ -53,6 +53,7 @@
 #include "colormatcher.h"
 #include "d_player.h"
 #include "r_utility.h"
+#include "g_levellocals.h"
 
 CVAR (Int, cl_rockettrails, 1, CVAR_ARCHIVE);
 CVAR (Bool, r_rail_smartspiral, 0, CVAR_ARCHIVE);
@@ -350,17 +351,17 @@ void P_RunEffects ()
 {
 	if (players[consoleplayer].camera == NULL) return;
 
-	int	pnum = int(players[consoleplayer].camera->Sector - sectors) * numsectors;
+	int	pnum = players[consoleplayer].camera->Sector->Index() * level.sectors.Size();
 
 	AActor *actor;
 	TThinkerIterator<AActor> iterator;
 
 	while ( (actor = iterator.Next ()) )
 	{
-		if (actor->effects)
+		if (actor->effects || actor->fountaincolor)
 		{
 			// Only run the effect if the actor is potentially visible
-			int rnum = pnum + int(actor->Sector - sectors);
+			int rnum = pnum + actor->Sector->Index();
 			if (rejectmatrix == NULL || !(rejectmatrix[rnum>>3] & (1 << (rnum & 7))))
 				P_RunEffect (actor, actor->effects);
 		}
@@ -493,7 +494,7 @@ void P_RunEffect (AActor *actor, int effects)
 
 		P_DrawSplash2 (6, pos, moveangle + 180, 2, 2);
 	}
-	if (effects & FX_FOUNTAINMASK)
+	if (actor->fountaincolor)
 	{
 		// Particle fountain
 
@@ -507,7 +508,7 @@ void P_RunEffect (AActor *actor, int effects)
 			  &black,	&grey3,
 			  &grey4,	&white
 			};
-		int color = (effects & FX_FOUNTAINMASK) >> 15;
+		int color = actor->fountaincolor*2;
 		MakeFountain (actor, *fountainColors[color], *fountainColors[color+1]);
 	}
 	if (effects & FX_RESPAWNINVUL)

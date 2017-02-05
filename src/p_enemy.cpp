@@ -52,7 +52,8 @@
 #include "p_spec.h"
 #include "p_checkposition.h"
 #include "math/cmath.h"
-#include "a_ammo.h"
+#include "g_levellocals.h"
+#include "virtual.h"
 
 #include "gi.h"
 
@@ -570,8 +571,9 @@ bool P_Move (AActor *actor)
 		return true;
 	}
 
-	if (actor->movedir == DI_NODIR)
+	if (actor->movedir >= DI_NODIR)
 	{
+		actor->movedir = DI_NODIR;	// make sure it's valid.
 		return false;
 	}
 
@@ -584,9 +586,6 @@ bool P_Move (AActor *actor)
 	{
 		return false;
 	}
-
-	if ((unsigned)actor->movedir >= 8)
-		I_Error ("Weird actor->movedir!");
 
 	// killough 10/98: allow dogs to drop off of taller ledges sometimes.
 	// dropoff==1 means always allow it, dropoff==2 means only up to 128 high,
@@ -713,7 +712,7 @@ bool P_Move (AActor *actor)
 				if (actor->floorsector->SecActTarget != NULL &&
 					actor->floorz == actor->floorsector->floorplane.ZatPoint(actor->PosRelative(actor->floorsector)))
 				{
-					actor->floorsector->SecActTarget->TriggerAction(actor, SECSPAC_HitFloor);
+					actor->floorsector->TriggerSectorActions(actor, SECSPAC_HitFloor);
 				}
 				P_CheckFor3DFloorHit(actor, actor->Z());
 			}
@@ -2049,7 +2048,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Look)
 		}
 	}
 
-	if (self->target)
+	if (self->target && self->SeeState)
 	{
 		self->SetState (self->SeeState);
 	}
@@ -3228,7 +3227,7 @@ void ModifyDropAmount(AInventory *inv, int dropamount)
 
 	if (dropamount > 0)
 	{
-		if (flagmask != 0 && inv->IsKindOf(RUNTIME_CLASS(AAmmo)))
+		if (flagmask != 0 && inv->IsKindOf(PClass::FindActor(NAME_Ammo)))
 		{
 			inv->Amount = int(dropamount * dropammofactor);
 			inv->ItemFlags |= IF_IGNORESKILL;
@@ -3238,10 +3237,10 @@ void ModifyDropAmount(AInventory *inv, int dropamount)
 			inv->Amount = dropamount;
 		}
 	}
-	else if (inv->IsKindOf (RUNTIME_CLASS(AAmmo)))
+	else if (inv->IsKindOf (PClass::FindActor(NAME_Ammo)))
 	{
 		// Half ammo when dropped by bad guys.
-		int amount = static_cast<PClassAmmo *>(inv->GetClass())->DropAmount;
+		int amount = inv->IntVar("DropAmount");
 		if (amount <= 0)
 		{
 			amount = MAX(1, int(inv->Amount * dropammofactor));
@@ -3249,9 +3248,9 @@ void ModifyDropAmount(AInventory *inv, int dropamount)
 		inv->Amount = amount;
 		inv->ItemFlags |= flagmask;
 	}
-	else if (inv->IsKindOf (RUNTIME_CLASS(AWeaponGiver)))
+	else if (inv->IsKindOf (PClass::FindActor(NAME_WeaponGiver)))
 	{
-		static_cast<AWeaponGiver *>(inv)->DropAmmoFactor = dropammofactor;
+		inv->FloatVar("AmmoFactor") = dropammofactor;
 		inv->ItemFlags |= flagmask;
 	}
 	else if (inv->IsKindOf (RUNTIME_CLASS(AWeapon)))
@@ -3261,11 +3260,20 @@ void ModifyDropAmount(AInventory *inv, int dropamount)
 		static_cast<AWeapon *>(inv)->AmmoGive2 = int(static_cast<AWeapon *>(inv)->AmmoGive2 * dropammofactor);
 		inv->ItemFlags |= flagmask;
 	}			
-	else if (inv->IsKindOf (RUNTIME_CLASS(ADehackedPickup)))
+	else if (inv->IsKindOf (PClass::FindClass(NAME_DehackedPickup)))
 	{
 		// For weapons and ammo modified by Dehacked we need to flag the item.
-		static_cast<ADehackedPickup *>(inv)->droppedbymonster = true;
+		inv->BoolVar("droppedbymonster") = true;
 	}
+}
+
+// todo: make this a scripted virtual function so it can better deal with some of the classes involved.
+DEFINE_ACTION_FUNCTION(AInventory, ModifyDropAmount)
+{
+	PARAM_SELF_PROLOGUE(AInventory);
+	PARAM_INT(dropamount);
+	ModifyDropAmount(self, dropamount);
+	return 0;
 }
 
 //---------------------------------------------------------------------------
@@ -3313,11 +3321,19 @@ AInventory *P_DropItem (AActor *source, PClassActor *type, int dropamount, int c
 				AInventory *inv = static_cast<AInventory *>(mo);
 				ModifyDropAmount(inv, dropamount);
 				inv->ItemFlags |= IF_TOSSED;
-				if (inv->CallSpecialDropAction (source))
+
+				IFVIRTUALPTR(inv, AInventory, SpecialDropAction)
 				{
-					// The special action indicates that the item should not spawn
-					inv->Destroy();
-					return NULL;
+					VMValue params[2] = { inv, source };
+					int retval;
+					VMReturn ret(&retval);
+					GlobalVMStack.Call(func, params, 2, &ret, 1, nullptr);
+					if (retval)
+					{
+						// The special action indicates that the item should not spawn
+						inv->Destroy();
+						return NULL;
+					}
 				}
 				return inv;
 			}

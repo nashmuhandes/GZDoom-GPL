@@ -45,21 +45,18 @@
 #include "st_stuff.h"
 #include "m_swap.h"
 #include "a_keys.h"
-#include "a_armor.h"
 #include "templates.h"
 #include "i_system.h"
 #include "sbarinfo.h"
 #include "gi.h"
 #include "r_data/r_translate.h"
-#include "a_artifacts.h"
-#include "a_weaponpiece.h"
 #include "g_level.h"
 #include "v_palette.h"
 #include "p_acs.h"
 #include "gstrings.h"
 #include "version.h"
 #include "cmdlib.h"
-#include "a_ammo.h"
+#include "g_levellocals.h"
 
 #define ARTIFLASH_OFFSET (statusBar->invBarOffset+6)
 enum
@@ -973,17 +970,16 @@ inline void adjustRelCenter(bool relX, bool relY, const double &x, const double 
 		outY = y;
 }
 
-class DSBarInfo : public DBaseStatusBar
+class DSBarInfo
 {
-	DECLARE_CLASS(DSBarInfo, DBaseStatusBar)
-	HAS_OBJECT_POINTERS
 public:
-	DSBarInfo (SBarInfo *script=NULL) : DBaseStatusBar(script->height, script->resW, script->resH),
+	DSBarInfo (DBaseStatusBar *wrapper, SBarInfo *script=NULL) :
 		ammo1(NULL), ammo2(NULL), ammocount1(0), ammocount2(0), armor(NULL),
-		pendingPopup(POP_None), currentPopup(POP_None), lastHud(-1),
+		pendingPopup(DBaseStatusBar::POP_None), currentPopup(DBaseStatusBar::POP_None), lastHud(-1),
 		scalingWasForced(false), lastInventoryBar(NULL), lastPopup(NULL)
 	{
 		this->script = script;
+		this->wrapper = wrapper;
 
 		static const char *InventoryBarLumps[] =
 		{
@@ -1004,8 +1000,6 @@ public:
 		}
 		invBarOffset = script->Images.Size();
 		Images.Init(&patchnames[0], patchnames.Size());
-
-		CompleteBorder = script->completeBorder;
 	}
 
 	~DSBarInfo ()
@@ -1013,9 +1007,18 @@ public:
 		Images.Uninit();
 	}
 
-	void ScreenSizeChanged()
+	void _SetScaled(bool scaled)
 	{
-		Super::ScreenSizeChanged();
+		Scaled = scaled;
+	}
+
+	void _AttachToPlayer(player_t *player)
+	{
+		CPlayer = player;
+	}
+
+	void _ScreenSizeChanged()
+	{
 		if (uiscale > 0)
 		{
 			script->cleanX = uiscale;
@@ -1027,13 +1030,13 @@ public:
 		}
 	}
 
-	void Draw (EHudState state)
+	void _Draw (EHudState state)
 	{
-		DBaseStatusBar::Draw(state);
 		if (script->cleanX <= 0)
 		{ // Calculate cleanX and cleanY
-			ScreenSizeChanged();
+			wrapper->ScreenSizeChanged();
 		}
+		wrapper->GetCoords(ST_X, ST_Y);
 		int hud = STBAR_NORMAL;
 		if(state == HUD_StatusBar)
 		{
@@ -1062,14 +1065,14 @@ public:
 			else if(!Scaled)
 			{
 				scalingWasForced = true;
-				SetScaled(true, true);
+				wrapper->SetScaled(true, true);
 				setsizeneeded = true;
 			}
 		}
 
 		//prepare ammo counts
-		GetCurrentAmmo(ammo1, ammo2, ammocount1, ammocount2);
-		armor = CPlayer->mo->FindInventory<ABasicArmor>();
+		wrapper->GetCurrentAmmo(ammo1, ammo2, ammocount1, ammocount2);
+		armor = CPlayer->mo->FindInventory(NAME_BasicArmor);
 
 		if(state != HUD_AltHud)
 		{
@@ -1081,12 +1084,12 @@ public:
 				if(scalingWasForced)
 				{
 					scalingWasForced = false;
-					SetScaled(false);
+					wrapper->SetScaled(false);
 					setsizeneeded = true;
 				}
 			}
 
-			if(currentPopup != POP_None && !script->huds[hud]->FullScreenOffsets())
+			if(currentPopup != DBaseStatusBar::POP_None && !script->huds[hud]->FullScreenOffsets())
 				script->huds[hud]->Draw(NULL, this, script->popups[currentPopup-1].getXDisplacement(), script->popups[currentPopup-1].getYDisplacement(), 1.);
 			else
 				script->huds[hud]->Draw(NULL, this, 0, 0, 1.);
@@ -1108,14 +1111,14 @@ public:
 		}
 
 		// Handle popups
-		if(currentPopup != POP_None)
+		if(currentPopup != DBaseStatusBar::POP_None)
 		{
 			int popbar = 0;
-			if(currentPopup == POP_Log)
+			if(currentPopup == DBaseStatusBar::POP_Log)
 				popbar = STBAR_POPUPLOG;
-			else if(currentPopup == POP_Keys)
+			else if(currentPopup == DBaseStatusBar::POP_Keys)
 				popbar = STBAR_POPUPKEYS;
-			else if(currentPopup == POP_Status)
+			else if(currentPopup == DBaseStatusBar::POP_Status)
 				popbar = STBAR_POPUPSTATUS;
 			if(script->huds[popbar] != lastPopup)
 			{
@@ -1132,40 +1135,33 @@ public:
 		hud_scale = oldhud_scale;
 	}
 
-	void NewGame ()
+	void _NewGame ()
 	{
-		if (CPlayer != NULL)
-		{
-			AttachToPlayer (CPlayer);
-
-			// Reset the huds
-			script->ResetHuds();
-			lastHud = -1; // Reset
-		}
+		// Reset the huds
+		script->ResetHuds();
+		lastHud = -1; // Reset
 	}
 
-	bool MustDrawLog (EHudState state)
+	bool _MustDrawLog (EHudState state)
 	{
 		return script->huds[STBAR_POPUPLOG]->NumCommands() == 0;
 	}
 
-	void SetMugShotState (const char *state_name, bool wait_till_done, bool reset)
+	void _SetMugShotState (const char *state_name, bool wait_till_done, bool reset)
 	{
 		script->MugShot.SetState(state_name, wait_till_done, reset);
 	}
 
-	void Tick ()
+	void _Tick ()
 	{
-		DBaseStatusBar::Tick();
-
 		script->MugShot.Tick(CPlayer);
-		if(currentPopup != POP_None)
+		if(currentPopup != DBaseStatusBar::POP_None)
 		{
 			script->popups[currentPopup-1].tick();
 			if(script->popups[currentPopup-1].opened == false && script->popups[currentPopup-1].isDoneMoving())
 			{
 				currentPopup = pendingPopup;
-				if(currentPopup != POP_None)
+				if(currentPopup != DBaseStatusBar::POP_None)
 					script->popups[currentPopup-1].open();
 			}
 
@@ -1178,30 +1174,29 @@ public:
 			lastInventoryBar->Tick(NULL, this, false);
 	}
 
-	void ReceivedWeapon(AWeapon *weapon)
+	void _ReceivedWeapon(AWeapon *weapon)
 	{
 		script->MugShot.Grin();
 	}
 
 	// void DSBarInfo::FlashItem(const PClass *itemtype) - Is defined with CommandDrawSelectedInventory
-	void FlashItem(const PClass *itemtype);
+	void _FlashItem(const PClass *itemtype);
 
-	void ShowPop(int popnum)
+	void _ShowPop(int popnum)
 	{
-		DBaseStatusBar::ShowPop(popnum);
 		if(popnum != currentPopup)
 		{
 			pendingPopup = popnum;
 		}
 		else
-			pendingPopup = POP_None;
-		if(currentPopup != POP_None)
+			pendingPopup = DBaseStatusBar::POP_None;
+		if(currentPopup != DBaseStatusBar::POP_None)
 			script->popups[currentPopup-1].close();
 		else
 		{
 			currentPopup = pendingPopup;
-			pendingPopup = POP_None;
-			if(currentPopup != POP_None)
+			pendingPopup = DBaseStatusBar::POP_None;
+			if(currentPopup != DBaseStatusBar::POP_None)
 				script->popups[currentPopup-1].open();
 		}
 	}
@@ -1272,10 +1267,10 @@ public:
 						DTA_ClipTop, static_cast<int>(dcy),
 						DTA_ClipRight, static_cast<int>(MIN<double>(INT_MAX, dcr)),
 						DTA_ClipBottom, static_cast<int>(MIN<double>(INT_MAX, dcb)),
-						DTA_Translation, translate ? GetTranslation() : 0,
+						DTA_TranslationIndex, translate ? GetTranslation() : 0,
 						DTA_ColorOverlay, dim ? DIM_OVERLAY : 0,
 						DTA_CenterBottomOffset, (offsetflags & SBarInfoCommand::CENTER_BOTTOM) == SBarInfoCommand::CENTER_BOTTOM,
-						DTA_AlphaF, Alpha,
+						DTA_Alpha, Alpha,
 						DTA_AlphaChannel, alphaMap,
 						DTA_FillColor, 0,
 						TAG_DONE);
@@ -1289,10 +1284,10 @@ public:
 						DTA_ClipTop, static_cast<int>(dcy),
 						DTA_ClipRight, static_cast<int>(MIN<double>(INT_MAX, dcr)),
 						DTA_ClipBottom, static_cast<int>(MIN<double>(INT_MAX, dcb)),
-						DTA_Translation, translate ? GetTranslation() : 0,
+						DTA_TranslationIndex, translate ? GetTranslation() : 0,
 						DTA_ColorOverlay, dim ? DIM_OVERLAY : 0,
 						DTA_CenterBottomOffset, (offsetflags & SBarInfoCommand::CENTER_BOTTOM) == SBarInfoCommand::CENTER_BOTTOM,
-						DTA_AlphaF, Alpha,
+						DTA_Alpha, Alpha,
 						TAG_DONE);
 				}
 			}
@@ -1349,10 +1344,10 @@ public:
 						DTA_ClipTop, static_cast<int>(rcy),
 						DTA_ClipRight, static_cast<int>(rcr),
 						DTA_ClipBottom, static_cast<int>(rcb),
-						DTA_Translation, translate ? GetTranslation() : 0,
+						DTA_TranslationIndex, translate ? GetTranslation() : 0,
 						DTA_ColorOverlay, dim ? DIM_OVERLAY : 0,
 						DTA_CenterBottomOffset, (offsetflags & SBarInfoCommand::CENTER_BOTTOM) == SBarInfoCommand::CENTER_BOTTOM,
-						DTA_AlphaF, Alpha,
+						DTA_Alpha, Alpha,
 						DTA_AlphaChannel, alphaMap,
 						DTA_FillColor, 0,
 						TAG_DONE);
@@ -1366,10 +1361,10 @@ public:
 						DTA_ClipTop, static_cast<int>(rcy),
 						DTA_ClipRight, static_cast<int>(rcr),
 						DTA_ClipBottom, static_cast<int>(rcb),
-						DTA_Translation, translate ? GetTranslation() : 0,
+						DTA_TranslationIndex, translate ? GetTranslation() : 0,
 						DTA_ColorOverlay, dim ? DIM_OVERLAY : 0,
 						DTA_CenterBottomOffset, (offsetflags & SBarInfoCommand::CENTER_BOTTOM) == SBarInfoCommand::CENTER_BOTTOM,
-						DTA_AlphaF, Alpha,
+						DTA_Alpha, Alpha,
 						TAG_DONE);
 				}
 			}
@@ -1387,7 +1382,7 @@ public:
 
 		const BYTE* str = (const BYTE*) cstring;
 		const EColorRange boldTranslation = EColorRange(translation ? translation - 1 : NumTextColors - 1);
-		FRemapTable *remap = font->GetColorTranslation(translation);
+		int fontcolor = translation;
 
 		if(fullScreenOffsets)
 		{
@@ -1413,7 +1408,7 @@ public:
 			{
 				EColorRange newColor = V_ParseFontColor(++str, translation, boldTranslation);
 				if(newColor != CR_UNDEFINED)
-					remap = font->GetColorTranslation(newColor);
+					fontcolor = newColor;
 				continue;
 			}
 
@@ -1422,20 +1417,22 @@ public:
 				width = font->GetCharWidth((unsigned char) *str);
 			else
 				width = font->GetCharWidth((unsigned char) script->spacingCharacter);
-			FTexture* character = font->GetChar((unsigned char) *str, &width);
-			if(character == NULL) //missing character.
+			FTexture* c = font->GetChar((unsigned char) *str, &width);
+			if(c == NULL) //missing character.
 			{
 				str++;
 				continue;
 			}
+			int character = (unsigned char)*str;
+
 			if(script->spacingCharacter == '\0') //If we are monospaced lets use the offset
-				ax += (character->LeftOffset+1); //ignore x offsets since we adapt to character size
+				ax += (c->LeftOffset+1); //ignore x offsets since we adapt to character size
 
 			double rx, ry, rw, rh;
 			rx = ax + xOffset;
 			ry = ay + yOffset;
-			rw = character->GetScaledWidthDouble();
-			rh = character->GetScaledHeightDouble();
+			rw = c->GetScaledWidthDouble();
+			rh = c->GetScaledHeightDouble();
 
 			if(script->spacingCharacter != '\0')
 			{
@@ -1489,39 +1486,42 @@ public:
 				double salpha = (Alpha *HR_SHADOW);
 				double srx = rx + (shadowX*xScale);
 				double sry = ry + (shadowY*yScale);
-				screen->DrawTexture(character, srx, sry,
+				screen->DrawChar(font, CR_UNTRANSLATED, srx, sry, character,
 					DTA_DestWidthF, rw,
 					DTA_DestHeightF, rh,
-					DTA_AlphaF, salpha,
+					DTA_Alpha, salpha,
 					DTA_FillColor, 0,
 					TAG_DONE);
 			}
-			screen->DrawTexture(character, rx, ry,
+			screen->DrawChar(font, fontcolor, rx, ry, character,
 				DTA_DestWidthF, rw,
 				DTA_DestHeightF, rh,
-				DTA_Translation, remap,
-				DTA_AlphaF, Alpha,
+				DTA_Alpha, Alpha,
 				TAG_DONE);
 			if(script->spacingCharacter == '\0')
-				ax += width + spacing - (character->LeftOffset+1);
+				ax += width + spacing - (c->LeftOffset+1);
 			else //width gets changed at the call to GetChar()
 				ax += font->GetCharWidth((unsigned char) script->spacingCharacter) + spacing;
 			str++;
 		}
 	}
 
-	FRemapTable* GetTranslation() const
+	uint32_t GetTranslation() const
 	{
 		if(gameinfo.gametype & GAME_Raven)
-			return translationtables[TRANSLATION_PlayersExtra][int(CPlayer - players)];
-		return translationtables[TRANSLATION_Players][int(CPlayer - players)];
+			return TRANSLATION(TRANSLATION_PlayersExtra, int(CPlayer - players));
+		return TRANSLATION(TRANSLATION_Players, int(CPlayer - players));
 	}
 
-	AAmmo *ammo1, *ammo2;
+	AInventory *ammo1, *ammo2;
 	int ammocount1, ammocount2;
-	ABasicArmor *armor;
+	AInventory *armor;
 	FImageCollection Images;
 	unsigned int invBarOffset;
+	player_t *CPlayer = nullptr;
+	DBaseStatusBar *wrapper;
+	bool Scaled;
+	int ST_X, ST_Y;
 
 private:
 	SBarInfo *script;
@@ -1533,20 +1533,6 @@ private:
 	SBarInfoMainBlock *lastPopup;
 };
 
-IMPLEMENT_CLASS(DSBarInfo, false, true)
-
-IMPLEMENT_POINTERS_START(DSBarInfo)
-	IMPLEMENT_POINTER(ammo1)
-	IMPLEMENT_POINTER(ammo2)
-	IMPLEMENT_POINTER(armor)
-IMPLEMENT_POINTERS_END
-
-DBaseStatusBar *CreateCustomStatusBar (int script)
-{
-	if(SBarInfoScript[script] == NULL)
-		I_FatalError("Tried to create a status bar with no script!");
-	return new DSBarInfo(SBarInfoScript[script]);
-}
 
 void SBarInfoMainBlock::DrawAux(const SBarInfoMainBlock *block, DSBarInfo *statusBar, int xOffset, int yOffset, double alpha)
 {
@@ -1565,7 +1551,7 @@ void SBarInfoMainBlock::DrawAux(const SBarInfoMainBlock *block, DSBarInfo *statu
 		else if(!statusBar->Scaled)
 		{
 			rescale = true;
-			statusBar->SetScaled(true, true);
+			statusBar->wrapper->SetScaled(true, true);
 		}
 	}
 
@@ -1576,8 +1562,111 @@ void SBarInfoMainBlock::DrawAux(const SBarInfoMainBlock *block, DSBarInfo *statu
 		if(FullScreenOffsets())
 			hud_scale = false;
 		else
-			statusBar->SetScaled(false);
+			statusBar->wrapper->SetScaled(false);
 	}
 }
 
 #include "sbarinfo_commands.cpp"
+
+
+//==========================================================================
+//
+// SBarinfoWrapper
+//
+// This class abstracts SBARINFO from the rest of the engine.
+// The idea is, when status bars are moved to ZScript that only
+// this small wrapper class needs to be dealt with and the implementation
+// can be left alone.
+//
+//==========================================================================
+
+
+DSBarInfoWrapper::DSBarInfoWrapper(SBarInfo *script)
+	: DBaseStatusBar(script->height, script->resW, script->resH)
+{
+	core = new DSBarInfo(this, script);
+	core->_SetScaled(Scaled);
+	CompleteBorder = script->completeBorder;
+}
+
+void DSBarInfoWrapper::OnDestroy()
+{
+	if (core != nullptr) delete core;
+	Super::OnDestroy();
+}
+
+void DSBarInfoWrapper::SetScaled(bool scale, bool force)
+{
+	Super::SetScaled(scale, force);
+	core->_SetScaled(Scaled);
+}
+
+void DSBarInfoWrapper::AttachToPlayer(player_t *player)
+{
+	Super::AttachToPlayer(player);
+	core->_AttachToPlayer(player);
+}
+
+void DSBarInfoWrapper::ScreenSizeChanged()
+{
+	Super::ScreenSizeChanged();
+	core->_ScreenSizeChanged();
+}
+
+void DSBarInfoWrapper::Draw(EHudState state)
+{
+	Super::Draw(state);
+	core->_Draw(state);
+}
+
+void DSBarInfoWrapper::NewGame()
+{
+	Super::NewGame();
+	if (CPlayer != NULL)
+	{
+		AttachToPlayer(CPlayer);
+		core->_NewGame();
+	}
+}
+
+bool DSBarInfoWrapper::MustDrawLog(EHudState state)
+{
+	return core->_MustDrawLog(state);
+}
+
+void DSBarInfoWrapper::SetMugShotState(const char *state_name, bool wait_till_done, bool reset)
+{
+	core->_SetMugShotState(state_name, wait_till_done, reset);
+}
+
+void DSBarInfoWrapper::Tick()
+{
+	DBaseStatusBar::Tick();
+	core->_Tick();
+}
+
+void DSBarInfoWrapper::ReceivedWeapon(AWeapon *weapon)
+{
+	core->_ReceivedWeapon(weapon);
+}
+
+void DSBarInfoWrapper::FlashItem(const PClass *itemtype)
+{
+	core->_FlashItem(itemtype);
+}
+
+void DSBarInfoWrapper::ShowPop(int popnum)
+{
+	DBaseStatusBar::ShowPop(popnum);	//DBaseStatusBar supercall
+	core->_ShowPop(popnum);
+}
+
+IMPLEMENT_CLASS(DSBarInfoWrapper, false, false)
+
+DBaseStatusBar *CreateCustomStatusBar(int script)
+{
+	if (SBarInfoScript[script] == NULL)
+		I_FatalError("Tried to create a status bar with no script!");
+	return new DSBarInfoWrapper(SBarInfoScript[script]);
+}
+

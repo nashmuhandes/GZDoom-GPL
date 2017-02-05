@@ -27,6 +27,7 @@
 
 #include "p_lnspec.h"
 #include "p_local.h"
+#include "g_levellocals.h"
 #include "a_sharedglobal.h"
 #include "r_sky.h"
 #include "gl/renderer/gl_renderer.h"
@@ -210,7 +211,7 @@ sector_t * gl_FakeFlat(sector_t * sec, sector_t * dest, area_t in_area, bool bac
 	}
 
 #ifdef _DEBUG
-	if (sec-sectors==560)
+	if (sec->sectornum==560)
 	{
 		int a = 0;
 	}

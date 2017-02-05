@@ -12,13 +12,12 @@
 #include "m_swap.h"
 #include "templates.h"
 #include "a_keys.h"
-#include "a_armor.h"
-#include "a_ammo.h"
 #include "gi.h"
 #include "g_level.h"
 #include "colormatcher.h"
 #include "v_palette.h"
 #include "cmdlib.h"
+#include "g_levellocals.h"
 
 // Number of tics to move the popscreen up and down.
 #define POP_TIME (TICRATE/8)
@@ -261,7 +260,7 @@ public:
 					item != NULL;
 					item = item->Inventory)
 				{
-					if (item->IsKindOf (RUNTIME_CLASS(AKey)))
+					if (item->IsKindOf (PClass::FindActor(NAME_Key)))
 					{
 						if (i == KeyPopPos)
 						{
@@ -408,7 +407,7 @@ private:
 		DrawImage (&HealthBar, 49, 7);
 
 		// Armor
-		item = CPlayer->mo->FindInventory<ABasicArmor>();
+		item = CPlayer->mo->FindInventory(NAME_BasicArmor);
 		if (item != NULL && item->Amount > 0)
 		{
 			DrawImage (TexMan(item->Icon), 2, 9);
@@ -416,7 +415,7 @@ private:
 		}
 
 		// Ammo
-		AAmmo *ammo1, *ammo2;
+		AInventory *ammo1, *ammo2;
 		int ammocount1, ammocount2;
 
 		GetCurrentAmmo (ammo1, ammo2, ammocount1, ammocount2);
@@ -436,7 +435,7 @@ private:
 		}
 
 		// Sigil
-		item = CPlayer->mo->FindInventory(PClass::FindActor(NAME_Sigil));
+		item = CPlayer->mo->FindInventory(NAME_Sigil);
 		if (item != NULL)
 		{
 			DrawImage (TexMan(item->Icon), 253, 7);
@@ -452,7 +451,7 @@ private:
 				screen->DrawTexture (Images[CursorImage],
 					42 + 35*i + ST_X, 12 + ST_Y,
 					DTA_Bottom320x200, Scaled,
-					DTA_AlphaF, 1. - ItemFlash,
+					DTA_Alpha, 1. - ItemFlash,
 					TAG_DONE);
 			}
 			if (item->Icon.isValid())
@@ -473,7 +472,7 @@ private:
 			TAG_DONE);
 
 		// Draw armor
-		ABasicArmor *armor = CPlayer->mo->FindInventory<ABasicArmor>();
+		auto armor = CPlayer->mo->FindInventory(NAME_BasicArmor);
 		if (armor != NULL && armor->Amount != 0)
 		{
 			DrINumberOuter (armor->Amount, 35, -10, false, 7);
@@ -484,7 +483,7 @@ private:
 		}
 
 		// Draw ammo
-		AAmmo *ammo1, *ammo2;
+		AInventory *ammo1, *ammo2;
 		int ammocount1, ammocount2;
 
 		GetCurrentAmmo (ammo1, ammo2, ammocount1, ammocount2);
@@ -524,7 +523,7 @@ private:
 						DTA_HUDRules, HUD_Normal,
 						DTA_LeftOffset, cursor->GetWidth(),
 						DTA_TopOffset, cursor->GetHeight(),
-						DTA_AlphaF, ItemFlash,
+						DTA_Alpha, ItemFlash,
 						TAG_DONE);
 				}
 				DrINumberOuter (CPlayer->mo->InvSel->Amount, -51, -10, false, 7);
@@ -548,7 +547,7 @@ private:
 					{
 						screen->DrawTexture (Images[CursorImage], -100+i*35, -21,
 							DTA_HUDRules, HUD_HorizCenter,
-							DTA_Alpha, TRANSLUC75,
+							DTA_Alpha, 0.75,
 							TAG_DONE);
 					}
 					if (item->Icon.isValid())
@@ -581,7 +580,7 @@ private:
 		left = screen->GetWidth()/2 - 160*CleanXfac;
 		top = bottom + height * yscale;
 
-		screen->DrawTexture (Images[back], left, top, DTA_CleanNoMove, true, DTA_AlphaF, 0.75, TAG_DONE);
+		screen->DrawTexture (Images[back], left, top, DTA_CleanNoMove, true, DTA_Alpha, 0.75, TAG_DONE);
 		screen->DrawTexture (Images[bars], left, top, DTA_CleanNoMove, true, TAG_DONE);
 
 
@@ -633,7 +632,7 @@ private:
 				i < endpos && item != NULL;
 				item = item->Inventory)
 			{
-				if (!item->IsKindOf (RUNTIME_CLASS(AKey)))
+				if (!item->IsKindOf (PClass::FindActor(NAME_Key)))
 					continue;
 				
 				if (i < pos)
@@ -678,7 +677,7 @@ private:
 				item != NULL;
 				item = item->Inventory)
 			{
-				if (item->IsKindOf (RUNTIME_CLASS(AKey)))
+				if (item->IsKindOf (PClass::FindActor(NAME_Key)))
 				{
 					i++;
 				}
@@ -846,7 +845,217 @@ private:
 	int CurrentPop, PendingPop, PopHeight, PopHeightChange;
 	int KeyPopPos, KeyPopScroll;
 	double ItemFlash;
+
+	void DrINumberOuter(signed int val, int x, int y, bool center = false, int w = 9) const;
+	void DrBNumberOuterFont(signed int val, int x, int y, int w = 3) const;
+	void DrawDimImage(FTexture *image, int x, int y, bool dimmed) const;
+	void DrawImage(FTexture *image, int x, int y/*, FRemapTable *translation = NULL*/) const;
+
 };
+
+//---------------------------------------------------------------------------
+//
+// PROC DrINumberOuter
+//
+// Draws a number outside the status bar, possibly scaled.
+//
+//---------------------------------------------------------------------------
+
+void DStrifeStatusBar::DrINumberOuter(signed int val, int x, int y, bool center, int w) const
+{
+	bool negative = false;
+
+	x += w * 2;
+	if (val < 0)
+	{
+		negative = true;
+		val = -val;
+	}
+	else if (val == 0)
+	{
+		screen->DrawTexture(Images[imgINumbers], x + 1, y + 1,
+			DTA_FillColor, 0, DTA_Alpha, HR_SHADOW,
+			DTA_HUDRules, center ? HUD_HorizCenter : HUD_Normal, TAG_DONE);
+		screen->DrawTexture(Images[imgINumbers], x, y,
+			DTA_HUDRules, center ? HUD_HorizCenter : HUD_Normal, TAG_DONE);
+		return;
+	}
+
+	int oval = val;
+	int ox = x;
+
+	// First the shadow
+	while (val != 0)
+	{
+		screen->DrawTexture(Images[imgINumbers + val % 10], x + 1, y + 1,
+			DTA_FillColor, 0, DTA_Alpha, HR_SHADOW,
+			DTA_HUDRules, center ? HUD_HorizCenter : HUD_Normal, TAG_DONE);
+		x -= w;
+		val /= 10;
+	}
+	if (negative)
+	{
+		screen->DrawTexture(Images[imgNEGATIVE], x + 1, y + 1,
+			DTA_FillColor, 0, DTA_Alpha, HR_SHADOW,
+			DTA_HUDRules, center ? HUD_HorizCenter : HUD_Normal, TAG_DONE);
+	}
+
+	// Then the real deal
+	val = oval;
+	x = ox;
+	while (val != 0)
+	{
+		screen->DrawTexture(Images[imgINumbers + val % 10], x, y,
+			DTA_HUDRules, center ? HUD_HorizCenter : HUD_Normal, TAG_DONE);
+		x -= w;
+		val /= 10;
+	}
+	if (negative)
+	{
+		screen->DrawTexture(Images[imgNEGATIVE], x, y,
+			DTA_HUDRules, center ? HUD_HorizCenter : HUD_Normal, TAG_DONE);
+	}
+}
+
+
+//---------------------------------------------------------------------------
+//
+// PROC DrBNumberOuter
+//
+// Draws a three digit number using the real big font outside the status bar.
+//
+//---------------------------------------------------------------------------
+
+void DStrifeStatusBar::DrBNumberOuterFont(signed int val, int x, int y, int size) const
+{
+	int xpos;
+	int w, v;
+	bool negative = false;
+	FTexture *pic;
+
+	w = 0;
+	BigFont->GetChar('0', &w);
+
+	if (w > 1)
+	{
+		w--;
+	}
+	xpos = x + w / 2 + (size - 1)*w;
+
+	if (val == 0)
+	{
+		pic = BigFont->GetChar('0', &v);
+		screen->DrawChar(BigFont, CR_UNTRANSLATED, xpos - v / 2 + 2, y + 2, '0',
+			DTA_HUDRules, HUD_Normal,
+			DTA_Alpha, HR_SHADOW,
+			DTA_FillColor, 0,
+			TAG_DONE);
+		screen->DrawChar(BigFont, CR_UNTRANSLATED, xpos - v / 2, y, '0',
+			DTA_HUDRules, HUD_Normal,
+			TAG_DONE);
+		return;
+	}
+	else if (val < 0)
+	{
+		negative = true;
+		val = -val;
+	}
+
+	int oval = val;
+	int oxpos = xpos;
+
+	// First the shadow
+	while (val != 0)
+	{
+		pic = BigFont->GetChar('0' + val % 10, &v);
+		screen->DrawChar(BigFont, CR_UNTRANSLATED, xpos - v / 2 + 2, y + 2,
+			DTA_HUDRules, HUD_Normal,
+			DTA_Alpha, HR_SHADOW,
+			DTA_FillColor, 0,
+			TAG_DONE);
+		val /= 10;
+		xpos -= w;
+	}
+	if (negative)
+	{
+		pic = BigFont->GetChar('-', &v);
+		if (pic != NULL)
+		{
+			screen->DrawChar(BigFont, CR_UNTRANSLATED, xpos - v / 2 + 2, y + 2, '-',
+				DTA_HUDRules, HUD_Normal,
+				DTA_Alpha, HR_SHADOW,
+				DTA_FillColor, 0,
+				TAG_DONE);
+		}
+	}
+
+	// Then the foreground number
+	val = oval;
+	xpos = oxpos;
+	while (val != 0)
+	{
+		pic = BigFont->GetChar('0' + val % 10, &v);
+		screen->DrawChar(BigFont, CR_UNTRANSLATED, xpos - v / 2, y, '0',
+			DTA_HUDRules, HUD_Normal,
+			TAG_DONE);
+		val /= 10;
+		xpos -= w;
+	}
+	if (negative)
+	{
+		pic = BigFont->GetChar('-', &v);
+		if (pic != NULL)
+		{
+			screen->DrawChar(BigFont, CR_UNTRANSLATED, xpos - v / 2, y, '-',
+				DTA_HUDRules, HUD_Normal,
+				TAG_DONE);
+		}
+	}
+}
+
+//---------------------------------------------------------------------------
+//
+// PROC DrawImage
+//
+// Draws an image with the status bar's upper-left corner as the origin.
+//
+//---------------------------------------------------------------------------
+
+void DStrifeStatusBar::DrawImage(FTexture *img,
+	int x, int y) const
+{
+	if (img != NULL)
+	{
+		screen->DrawTexture(img, x + ST_X, y + ST_Y,
+			DTA_Bottom320x200, Scaled,
+			TAG_DONE);
+	}
+}
+
+//---------------------------------------------------------------------------
+//
+// PROC DrawImage
+//
+// Draws an optionally dimmed image with the status bar's upper-left corner
+// as the origin.
+//
+//---------------------------------------------------------------------------
+
+void DStrifeStatusBar::DrawDimImage(FTexture *img,
+	int x, int y, bool dimmed) const
+{
+	if (img != NULL)
+	{
+		screen->DrawTexture(img, x + ST_X, y + ST_Y,
+			DTA_ColorOverlay, dimmed ? DIM_OVERLAY : 0,
+			DTA_Bottom320x200, Scaled,
+			TAG_DONE);
+	}
+}
+
+
+
+
 
 IMPLEMENT_CLASS(DStrifeStatusBar, false, false);
 

@@ -209,6 +209,18 @@ begin:
 		reg.a[a] = GC::ReadBarrier(*(DObject **)ptr);
 		reg.atag[a] = ATAG_OBJECT;
 		NEXTOP;
+	OP(LOS):
+		ASSERTA(a); ASSERTA(B); ASSERTKD(C);
+		GETADDR(PB,KC,X_READ_NIL);
+		reg.a[a] = *(DObject **)ptr;
+		reg.atag[a] = ATAG_OBJECT;
+		NEXTOP;
+	OP(LOS_R):
+		ASSERTA(a); ASSERTA(B); ASSERTD(C);
+		GETADDR(PB,RC,X_READ_NIL);
+		reg.a[a] = *(DObject **)ptr;
+		reg.atag[a] = ATAG_OBJECT;
+		NEXTOP;
 	OP(LP):
 		ASSERTA(a); ASSERTA(B); ASSERTKD(C);
 		GETADDR(PB,KC,X_READ_NIL);
@@ -399,21 +411,30 @@ begin:
 		reg.s[a] = reg.s[B];
 		NEXTOP;
 	OP(MOVEA):
+	{
 		ASSERTA(a); ASSERTA(B);
-		reg.a[a] = reg.a[B];
-		reg.atag[a] = reg.atag[B];
+		b = B;
+		reg.a[a] = reg.a[b];
+		reg.atag[a] = reg.atag[b];
 		NEXTOP;
+	}
 	OP(MOVEV2):
+	{
 		ASSERTF(a); ASSERTF(B);
-		reg.f[a] = reg.f[B];
-		reg.f[a+1] = reg.f[B+1];
+		b = B;
+		reg.f[a] = reg.f[b];
+		reg.f[a + 1] = reg.f[b + 1];
 		NEXTOP;
+	}
 	OP(MOVEV3):
+	{
 		ASSERTF(a); ASSERTF(B);
-		reg.f[a] = reg.f[B];
-		reg.f[a+1] = reg.f[B+1];
-		reg.f[a+2] = reg.f[B+2];
+		b = B;
+		reg.f[a] = reg.f[b];
+		reg.f[a + 1] = reg.f[b + 1];
+		reg.f[a + 2] = reg.f[b + 2];
 		NEXTOP;
+	}
 	OP(DYNCAST_R) :
 		ASSERTA(a); ASSERTA(B);	ASSERTA(C);
 		b = B;
@@ -424,6 +445,18 @@ begin:
 		ASSERTA(a); ASSERTA(B);	ASSERTKA(C);
 		b = B;
 		reg.a[a] = (reg.a[b] && ((DObject*)(reg.a[b]))->IsKindOf((PClass*)(konsta[C].o))) ? reg.a[b] : nullptr;
+		reg.atag[a] = ATAG_OBJECT;
+		NEXTOP;
+	OP(DYNCASTC_R) :
+		ASSERTA(a); ASSERTA(B);	ASSERTA(C);
+		b = B;
+		reg.a[a] = (reg.a[b] && ((PClass*)(reg.a[b]))->IsDescendantOf((PClass*)(reg.a[C]))) ? reg.a[b] : nullptr;
+		reg.atag[a] = ATAG_OBJECT;
+		NEXTOP;
+	OP(DYNCASTC_K) :
+		ASSERTA(a); ASSERTA(B);	ASSERTKA(C);
+		b = B;
+		reg.a[a] = (reg.a[b] && ((PClass*)(reg.a[b]))->IsDescendantOf((PClass*)(konsta[C].o))) ? reg.a[b] : nullptr;
 		reg.atag[a] = ATAG_OBJECT;
 		NEXTOP;
 	OP(CAST):
@@ -737,6 +770,14 @@ begin:
 		// be executed.
 		assert(0);
 		NEXTOP;
+
+	OP(NEW_K):
+	OP(NEW):
+	{
+		PClass *cls = (PClass*)(pc->op == OP_NEW ? reg.a[C] : konsta[C].v);
+		reg.a[B] = cls->CreateNew();
+		NEXTOP;
+	}
 
 	OP(TRY):
 		assert(try_depth < MAX_TRY_DEPTH);
@@ -1737,9 +1778,21 @@ static void DoCast(const VMRegisters &reg, const VMFrame *f, int a, int b, int c
 		break;
 
 	case CAST_P2S:
+	{
 		ASSERTS(a); ASSERTA(b);
-		reg.s[a].Format("%s<%p>", reg.atag[b] == ATAG_OBJECT ? (reg.a[b] == nullptr? "Object" : ((DObject*)reg.a[b])->GetClass()->TypeName.GetChars() ) : "Pointer", reg.a[b]);
-		break;
+		if (reg.a[b] == nullptr) reg.s[a] = "null";
+		else if (reg.atag[b] == ATAG_OBJECT)
+		{
+			auto op = static_cast<DObject*>(reg.a[b]);
+			if (op->IsKindOf(RUNTIME_CLASS(PClass))) reg.s[a].Format("Class<%s>", static_cast<PClass*>(op)->TypeName.GetChars());
+			else reg.s[a].Format("Object<%p>", ((DObject*)reg.a[b])->GetClass()->TypeName.GetChars());
+		}
+		else
+		{
+			reg.s[a].Format("%s<%p>", "Pointer", reg.a[b]);
+		}
+		break; 
+	}
 
 	case CAST_S2I:
 		ASSERTD(a); ASSERTS(b);

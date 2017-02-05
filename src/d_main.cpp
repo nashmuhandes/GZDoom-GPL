@@ -110,6 +110,7 @@
 #include "p_local.h"
 #include "autosegs.h"
 #include "fragglescript/t_fs.h"
+#include "g_levellocals.h"
 
 EXTERN_CVAR(Bool, hud_althud)
 void DrawHUD();
@@ -787,13 +788,13 @@ void D_Display ()
 			screen->DrawBlendingRect();
 			if (automapactive)
 			{
-				int saved_ST_Y = ST_Y;
+				int saved_ST_Y = gST_Y;
 				if (hud_althud && viewheight == SCREENHEIGHT)
 				{
-					ST_Y = viewheight;
+					gST_Y = viewheight;
 				}
 				AM_Drawer ();
-				ST_Y = saved_ST_Y;
+				gST_Y = saved_ST_Y;
 			}
 			if (!automapactive || viewactive)
 			{
@@ -1062,6 +1063,7 @@ void D_PageTicker (void)
 
 void D_PageDrawer (void)
 {
+	screen->Clear(0, 0, SCREENWIDTH, SCREENHEIGHT, 0, 0);
 	if (Page != NULL)
 	{
 		screen->DrawTexture (Page, 0, 0,
@@ -1069,11 +1071,9 @@ void D_PageDrawer (void)
 			DTA_Masked, false,
 			DTA_BilinearFilter, true,
 			TAG_DONE);
-		screen->FillBorder (NULL);
 	}
 	else
 	{
-		screen->Clear (0, 0, SCREENWIDTH, SCREENHEIGHT, 0, 0);
 		if (!PageBlank)
 		{
 			screen->DrawText (SmallFont, CR_WHITE, 0, 0, "Page graphic goes here", TAG_DONE);
@@ -1397,6 +1397,10 @@ void ParseCVarInfo()
 				else if (stricmp(sc.String, "noarchive") == 0)
 				{
 					cvarflags &= ~CVAR_ARCHIVE;
+				}
+				else if (stricmp(sc.String, "cheat") == 0)
+				{
+					cvarflags |= CVAR_CHEAT;
 				}
 				else
 				{
@@ -2517,6 +2521,9 @@ void D_DoomMain (void)
 
 		// Create replacements for dehacked pickups
 		FinishDehPatch();
+		
+		// clean up the compiler symbols which are not needed any longer.
+		RemoveUnusedSymbols();
 
 		InitActorNumsFromMapinfo();
 		InitSpawnablesFromMapinfo();
@@ -2704,6 +2711,7 @@ void D_DoomMain (void)
 		S_Shutdown();					// free all channels and delete playlist
 		C_ClearAliases();				// CCMDs won't be reinitialized so these need to be deleted here
 		DestroyCVarsFlagged(CVAR_MOD);	// Delete any cvar left by mods
+		FS_Close();						// destroy the global FraggleScript.
 
 		GC::FullGC();					// clean up before taking down the object list.
 
@@ -2715,7 +2723,6 @@ void D_DoomMain (void)
 			*(afunc->VMPointer) = NULL;
 		}
 
-		ReleaseGlobalSymbols();
 		PClass::StaticShutdown();
 
 		GC::FullGC();					// perform one final garbage collection after shutdown
@@ -2727,6 +2734,7 @@ void D_DoomMain (void)
 
 		restart++;
 		PClass::bShutdown = false;
+		PClass::bVMOperational = false;
 	}
 	while (1);
 }

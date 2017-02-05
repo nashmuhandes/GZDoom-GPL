@@ -37,6 +37,7 @@
 #include "v_video.h"
 #include "g_level.h"
 #include "gi.h"
+#include "g_levellocals.h"
 #include "textures/textures.h"
 
 class DReadThisMenu : public DMenu
@@ -104,7 +105,7 @@ void DReadThisMenu::Drawer()
 	{
 		screen->DrawTexture (prevpic, 0, 0, DTA_Fullscreen, true, TAG_DONE);
 	}
-	screen->DrawTexture (tex, 0, 0, DTA_Fullscreen, true, DTA_AlphaF, alpha,	TAG_DONE);
+	screen->DrawTexture (tex, 0, 0, DTA_Fullscreen, true, DTA_Alpha, alpha,	TAG_DONE);
 
 }
 

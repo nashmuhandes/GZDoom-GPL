@@ -552,6 +552,13 @@ PClassActor *PClassActor::GetReplacement(bool lookskill)
 	return rep;
 }
 
+DEFINE_ACTION_FUNCTION(AActor, GetReplacement)
+{
+	PARAM_PROLOGUE;
+	PARAM_POINTER(c, PClassActor);
+	ACTION_RETURN_POINTER(c->GetReplacement());
+}
+
 //==========================================================================
 //
 // PClassActor :: GetReplacee
@@ -593,6 +600,13 @@ PClassActor *PClassActor::GetReplacee(bool lookskill)
 	rep = rep->GetReplacee(false);
 	Replacee = savedrep;
 	return rep;
+}
+
+DEFINE_ACTION_FUNCTION(AActor, GetReplacee)
+{
+	PARAM_PROLOGUE;
+	PARAM_POINTER(c, PClassActor);
+	ACTION_RETURN_POINTER(c->GetReplacee());
 }
 
 //==========================================================================
@@ -743,6 +757,14 @@ bool DamageTypeDefinition::IgnoreArmor(FName type)
 	if (dtd) return dtd->NoArmor;
 	return false;
 }
+
+DEFINE_ACTION_FUNCTION(_DamageTypeDefinition, IgnoreArmor)
+{
+	PARAM_PROLOGUE;
+	PARAM_NAME(type);
+	ACTION_RETURN_BOOL(DamageTypeDefinition::IgnoreArmor(type));
+}
+
 
 //==========================================================================
 //

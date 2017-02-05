@@ -347,7 +347,7 @@ public:
 
 	DFsScript();
 	~DFsScript();
-	void Destroy() override;
+	void OnDestroy() override;
 	void Serialize(FSerializer &ar);
 
 	DFsVariable *NewVariable(const char *name, int vtype);
@@ -662,7 +662,7 @@ class DRunningScript : public DObject
 
 public:
 	DRunningScript(AActor *trigger=NULL, DFsScript *owner = NULL, int index = 0) ;
-	void Destroy() override;
+	void OnDestroy() override;
 	void Serialize(FSerializer &arc);
 
 	TObjPtr<DFsScript> script;
@@ -695,9 +695,10 @@ public:
 	TObjPtr<DRunningScript> RunningScripts;
 	TArray<TObjPtr<AActor> > SpawnedThings;
 	bool nocheckposition;
+	bool setcolormaterial;
 
 	DFraggleThinker();
-	void Destroy() override;
+	void OnDestroy() override;
 
 
 	void Serialize(FSerializer & arc);

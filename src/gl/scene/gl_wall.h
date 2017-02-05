@@ -301,6 +301,7 @@ public:
 	FMaterial *gltexture;
 
 	FColormap Colormap;	// light and fog
+	PalEntry FlatColor;
 	ERenderStyle renderstyle;
 
 	float alpha;
@@ -375,6 +376,7 @@ public:
 	AActor * actor;
 	particle_t * particle;
 	TArray<lightlist_t> *lightlist;
+	DRotator Angles;
 
 	void SplitSprite(sector_t * frontsector, bool translucent);
 	void SetLowerParam();

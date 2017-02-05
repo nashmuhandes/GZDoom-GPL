@@ -15,6 +15,7 @@ uniform float uAlphaThreshold;
 
 // colors
 uniform vec4 uObjectColor;
+uniform vec4 uObjectColor2;
 uniform vec4 uDynLightColor;
 uniform vec4 uFogColor;
 uniform float uDesaturationFactor;
@@ -41,6 +42,7 @@ uniform vec4 uLightAttr;
 #define uLightFactor uLightAttr.g
 #define uLightDist uLightAttr.r
 uniform int uFogEnabled;
+uniform int uPalLightLevels;
 
 // dynamic lights
 uniform int uLightIndex;

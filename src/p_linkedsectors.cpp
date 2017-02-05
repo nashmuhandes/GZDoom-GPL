@@ -37,6 +37,7 @@
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "p_spec.h"
+#include "g_levellocals.h"
 
 enum
 {
@@ -86,6 +87,13 @@ bool sector_t::IsLinked(sector_t *other, bool ceiling) const
 	return false;
 }
 
+DEFINE_ACTION_FUNCTION(_Sector, isLinked)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_POINTER(other, sector_t);
+	PARAM_BOOL(ceiling);
+	ACTION_RETURN_BOOL(self->IsLinked(other, ceiling));
+}
 
 //============================================================================
 //
@@ -322,9 +330,9 @@ bool P_AddSectorLinks(sector_t *control, int tag, INTBOOL ceiling, int movetype)
 		while ((sec = itr.Next()) >= 0)
 		{
 			// Don't attach to self!
-			if (control != &sectors[sec])
+			if (control != &level.sectors[sec])
 			{
-				AddSingleSector(scrollplane, &sectors[sec], movetype);
+				AddSingleSector(scrollplane, &level.sectors[sec], movetype);
 			}
 		}
 	}
@@ -353,7 +361,7 @@ void P_AddSectorLinksByID(sector_t *control, int id, INTBOOL ceiling)
 	int line;
 	while ((line = itr.Next()) >= 0)
 	{
-		line_t *ld = &lines[line];
+		line_t *ld = &level.lines[line];
 
 		if (ld->special == Static_Init && ld->args[1] == Init_SectorLink)
 		{

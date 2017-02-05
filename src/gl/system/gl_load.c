@@ -17,11 +17,12 @@ static void* AppleGLGetProcAddress (const char *name)
 }
 #endif /* __APPLE__ */
 
-#if defined(__sgi) || defined (__sun)
+/* BEGINNING OF MANUAL CHANGES, DO NOT REMOVE! */
+#if defined(__sgi) || defined (__sun) || defined(__unix__)
 #include <dlfcn.h>
 #include <stdio.h>
 
-static void* SunGetProcAddress (const GLubyte* name)
+static void* PosixGetProcAddress (const GLubyte* name)
 {
   static void* h = NULL;
   static void* gpa;
@@ -37,7 +38,7 @@ static void* SunGetProcAddress (const GLubyte* name)
   else
     return dlsym(h, (const char*)name);
 }
-#endif /* __sgi || __sun */
+#endif /* __sgi || __sun || __unix__ */
 
 #if defined(_WIN32)
 
@@ -77,8 +78,9 @@ static PROC WinGetProcAddress(const char *name)
 	#if defined(__APPLE__)
 		#define IntGetProcAddress(name) AppleGLGetProcAddress(name)
 	#else
-		#if defined(__sgi) || defined(__sun)
-			#define IntGetProcAddress(name) SunGetProcAddress(name)
+		#if defined(__sgi) || defined(__sun) || defined(__unix__)
+			#define IntGetProcAddress(name) PosixGetProcAddress((const GLubyte*)name)
+/* END OF MANUAL CHANGES, DO NOT REMOVE! */
 		#else /* GLX */
 		    #include <GL/glx.h>
 
@@ -98,6 +100,7 @@ int ogl_ext_EXT_texture_filter_anisotropic = ogl_LOAD_FAILED;
 int ogl_ext_EXT_texture_sRGB = ogl_LOAD_FAILED;
 int ogl_ext_KHR_debug = ogl_LOAD_FAILED;
 int ogl_ext_ARB_invalidate_subdata = ogl_LOAD_FAILED;
+int ogl_ext_EXT_abgr = ogl_LOAD_FAILED;
 
 void (CODEGEN_FUNCPTR *_ptrc_glBufferStorage)(GLenum target, GLsizeiptr size, const void * data, GLbitfield flags) = NULL;
 
@@ -2377,7 +2380,7 @@ typedef struct ogl_StrToExtMap_s
 	PFN_LOADFUNCPOINTERS LoadExtension;
 } ogl_StrToExtMap;
 
-static ogl_StrToExtMap ExtensionMap[11] = {
+static ogl_StrToExtMap ExtensionMap[12] = {
 	{"GL_APPLE_client_storage", &ogl_ext_APPLE_client_storage, NULL},
 	{"GL_ARB_buffer_storage", &ogl_ext_ARB_buffer_storage, Load_ARB_buffer_storage},
 	{"GL_ARB_shader_storage_buffer_object", &ogl_ext_ARB_shader_storage_buffer_object, Load_ARB_shader_storage_buffer_object},
@@ -2389,9 +2392,10 @@ static ogl_StrToExtMap ExtensionMap[11] = {
 	{"GL_EXT_texture_sRGB", &ogl_ext_EXT_texture_sRGB, NULL},
 	{"GL_KHR_debug", &ogl_ext_KHR_debug, Load_KHR_debug},
 	{"GL_ARB_invalidate_subdata", &ogl_ext_ARB_invalidate_subdata, Load_ARB_invalidate_subdata},
+	{"GL_EXT_abgr", &ogl_ext_EXT_abgr, NULL},
 };
 
-static int g_extensionMapSize = 11;
+static int g_extensionMapSize = 12;
 
 static ogl_StrToExtMap *FindExtEntry(const char *extensionName)
 {
@@ -2419,6 +2423,7 @@ static void ClearExtensionVars(void)
 	ogl_ext_EXT_texture_sRGB = ogl_LOAD_FAILED;
 	ogl_ext_KHR_debug = ogl_LOAD_FAILED;
 	ogl_ext_ARB_invalidate_subdata = ogl_LOAD_FAILED;
+	ogl_ext_EXT_abgr = ogl_LOAD_FAILED;
 }
 
 

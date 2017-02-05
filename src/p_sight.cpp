@@ -29,6 +29,7 @@
 #include "r_state.h"
 
 #include "stats.h"
+#include "g_levellocals.h"
 
 static FRandom pr_botchecksight ("BotCheckSight");
 static FRandom pr_checksight ("CheckSight");
@@ -483,7 +484,7 @@ int SightCheck::P_SightBlockLinesIterator (int x, int y)
 
 	for (list = blockmaplump + offset + 1; *list != -1; list++)
 	{
-		if (!P_SightCheckLine (&lines[*list]))
+		if (!P_SightCheckLine (&level.lines[*list]))
 		{
 			if (!portalfound) return 0;
 			else res = -1;
@@ -823,7 +824,7 @@ bool P_CheckSight (AActor *t1, AActor *t2, int flags)
 
 	const sector_t *s1 = t1->Sector;
 	const sector_t *s2 = t2->Sector;
-	int pnum = int(s1 - sectors) * numsectors + int(s2 - sectors);
+	int pnum = int(s1->Index()) * level.sectors.Size() + int(s2->Index());
 
 //
 // check for trivial rejection

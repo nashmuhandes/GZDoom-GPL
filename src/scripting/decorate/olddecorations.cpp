@@ -65,40 +65,6 @@ struct FExtraInfo
 	double DeathHeight, BurnHeight;
 };
 
-class AFakeInventory : public AInventory
-{
-	DECLARE_CLASS (AFakeInventory, AInventory);
-public:
-	bool Respawnable;
-
-	bool ShouldRespawn ()
-	{
-		return Respawnable && Super::ShouldRespawn();
-	}
-
-	bool TryPickup (AActor *&toucher)
-	{
-		INTBOOL success = P_ExecuteSpecial(special, NULL, toucher, false,
-			args[0], args[1], args[2], args[3], args[4]);
-
-		if (success)
-		{
-			GoAwayAndDie ();
-			return true;
-		}
-		return false;
-	}
-
-	void DoPickupSpecial (AActor *toucher)
-	{
-		// The special was already executed by TryPickup, so do nothing here
-	}
-};
-
-IMPLEMENT_CLASS(AFakeInventory, false, false)
-
-DEFINE_FIELD(AFakeInventory, Respawnable)
-
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
 
 // PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
@@ -127,16 +93,6 @@ static const char *RenderStyles[] =
 
 //==========================================================================
 //
-//==========================================================================
-DEFINE_CLASS_PROPERTY(respawns, 0, FakeInventory)
-{
-	defaults->Respawnable = true;
-}
-
-
-
-//==========================================================================
-//
 // ParseOldDecoration
 //
 // Reads an old style decoration object
@@ -144,7 +100,7 @@ DEFINE_CLASS_PROPERTY(respawns, 0, FakeInventory)
 //==========================================================================
 PClassActor *DecoDerivedClass(const FScriptPosition &sc, PClassActor *parent, FName typeName);
 
-void ParseOldDecoration(FScanner &sc, EDefinitionType def)
+void ParseOldDecoration(FScanner &sc, EDefinitionType def, PNamespace *ns)
 {
 	Baggage bag;
 	TArray<FState> StateArray;
@@ -154,12 +110,13 @@ void ParseOldDecoration(FScanner &sc, EDefinitionType def)
 	PClassActor *parent;
 	FName typeName;
 
-	parent = (def == DEF_Pickup) ? RUNTIME_CLASS(AFakeInventory) : RUNTIME_CLASS(AActor);
+	parent = (def == DEF_Pickup) ? PClass::FindActor("FakeInventory") : RUNTIME_CLASS(AActor);
 
 	sc.MustGetString();
 	typeName = FName(sc.String);
 	type = DecoDerivedClass(FScriptPosition(sc), parent, typeName);
 	ResetBaggage(&bag, parent);
+	bag.Namespace = ns;
 	bag.Info = type;
 	bag.fromDecorate = true;
 #ifdef _DEBUG
@@ -360,7 +317,7 @@ void ParseOldDecoration(FScanner &sc, EDefinitionType def)
 static void ParseInsideDecoration (Baggage &bag, AActor *defaults,
 	FExtraInfo &extra, EDefinitionType def, FScanner &sc, TArray<FState> &StateArray, TArray<FScriptPosition> &SourceLines)
 {
-	AFakeInventory *const inv = static_cast<AFakeInventory *>(defaults);
+	AInventory *const inv = static_cast<AInventory *>(defaults);
 	char sprite[5] = "TNT1";
 
 	sc.MustGetString ();
@@ -584,11 +541,11 @@ static void ParseInsideDecoration (Baggage &bag, AActor *defaults,
 		else if (def == DEF_Pickup && sc.Compare ("PickupMessage"))
 		{
 			sc.MustGetString ();
-			static_cast<PClassInventory *>(bag.Info)->PickupMessage = sc.String;
+			static_cast<PClassInventory *>(bag.Info)->PickupMsg = sc.String;
 		}
 		else if (def == DEF_Pickup && sc.Compare ("Respawns"))
 		{
-			inv->Respawnable = true;
+			inv->BoolVar("Respawnable") = true;
 		}
 		else if (def == DEF_BreakableDecoration && sc.Compare ("SolidOnDeath"))
 		{
@@ -678,7 +635,7 @@ static void ParseSpriteFrames (PClassActor *info, TArray<FState> &states, TArray
 			char *stop;
 
 			*colon = 0;
-			rate = strtol (token, &stop, 10);
+			rate = (int)strtoll (token, &stop, 10);
 			if (stop == token || rate < 1 || rate > 65534)
 			{
 				sc.ScriptError ("Rates must be in the range [0,65534]");
