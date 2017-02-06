@@ -12,9 +12,11 @@
 #include <zlib.h>
 #include <new>
 #include <algorithm>
+#include <forward_list>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cassert>
 #include <direct.h>
 #include <io.h>
 #include <limits>
+#include <memory>

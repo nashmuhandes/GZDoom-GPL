@@ -1,40 +1,31 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2005-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** r_opengl.cpp
 **
 ** OpenGL system interface
 **
-**---------------------------------------------------------------------------
-** Copyright 2005 Tim Stump
-** Copyright 2005-2013 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
 */
+
 #include "gl/system/gl_system.h"
 #include "tarray.h"
 #include "doomtype.h"
@@ -154,10 +145,10 @@ void gl_LoadExtensions()
 		else Printf("Emulating OpenGL v %s\n", version);
 	}
 
-	gl.version = strtod(version, NULL) + 0.01f;
+	float gl_version = (float)strtod(version, NULL) + 0.01f;
 
-	// Don't even start if it's lower than 3.0
-	if ((gl.version < 2.0 || !CheckExtension("GL_EXT_framebuffer_object")) && gl.version < 3.0)
+	// Don't even start if it's lower than 2.0 or no framebuffers are available (The framebuffer extension is needed for glGenerateMipmapsEXT!)
+	if ((gl_version < 2.0f || !CheckExtension("GL_EXT_framebuffer_object")) && gl_version < 3.0f)
 	{
 		I_FatalError("Unsupported OpenGL version.\nAt least OpenGL 2.0 with framebuffer support is required to run " GAMENAME ".\n");
 	}
@@ -166,76 +157,86 @@ void gl_LoadExtensions()
 	gl.glslversion = strtod((char*)glGetString(GL_SHADING_LANGUAGE_VERSION), NULL) + 0.01f;
 
 	gl.vendorstring = (char*)glGetString(GL_VENDOR);
-	gl.lightmethod = LM_SOFTWARE;
 
-	if ((gl.version >= 3.3f || CheckExtension("GL_ARB_sampler_objects")) && !Args->CheckParm("-nosampler"))
+	// first test for optional features
+	if (CheckExtension("GL_ARB_texture_compression")) gl.flags |= RFL_TEXTURE_COMPRESSION;
+	if (CheckExtension("GL_EXT_texture_compression_s3tc")) gl.flags |= RFL_TEXTURE_COMPRESSION_S3TC;
+
+	if ((gl_version >= 3.3f || CheckExtension("GL_ARB_sampler_objects")) && !Args->CheckParm("-nosampler"))
 	{
 		gl.flags |= RFL_SAMPLER_OBJECTS;
 	}
 	
-	// Buffer lighting is only feasible with GLSL 1.3 and higher, even if 1.2 supports the extension.
-	if (gl.version > 3.0f && (gl.version >= 3.3f || CheckExtension("GL_ARB_uniform_buffer_object")))
+	// The minimum requirement for the modern render path are GL 3.0 + uniform buffers. Also exclude the Linux Mesa driver at GL 3.0 because it errors out on shader compilation.
+	if (gl_version < 3.0f || (gl_version < 3.1f && (!CheckExtension("GL_ARB_uniform_buffer_object") || strstr(gl.vendorstring, "X.Org") != nullptr)))
 	{
-		gl.lightmethod = LM_DEFERRED;
-	}
-
-	if (CheckExtension("GL_ARB_texture_compression")) gl.flags |= RFL_TEXTURE_COMPRESSION;
-	if (CheckExtension("GL_EXT_texture_compression_s3tc")) gl.flags |= RFL_TEXTURE_COMPRESSION_S3TC;
-
-	if (Args->CheckParm("-noshader") || gl.glslversion < 1.2f)
-	{
-		gl.version = 2.11f;
+		gl.legacyMode = true;
+		gl.lightmethod = LM_LEGACY;
+		gl.buffermethod = BM_LEGACY;
 		gl.glslversion = 0;
-		gl.lightmethod = LM_SOFTWARE;
-	}
-	else if (gl.version < 3.0f)
-	{
-		if (CheckExtension("GL_NV_GPU_shader4") || CheckExtension("GL_EXT_GPU_shader4")) gl.glslversion = 1.21f;	// for pre-3.0 drivers that support capable hardware. Needed for Apple.
-		else gl.glslversion = 0;
-	}
-	else if (gl.version < 4.f)
-	{
-		if (strstr(gl.vendorstring, "ATI Tech")) 
-		{
-			gl.version = 2.11f;
-			gl.glslversion = 1.21f;
-			gl.lightmethod = LM_SOFTWARE;		// do not use uniform buffers with the fallback shader, it may cause problems.
-		}
+		gl.flags |= RFL_NO_CLIP_PLANES;
 	}
 	else
 	{
-		// don't use GL 4.x features when running in GL 3 emulation mode.
-		if (CheckExtension("GL_ARB_buffer_storage"))
+		gl.legacyMode = false;
+		gl.lightmethod = LM_DEFERRED;
+		gl.buffermethod = BM_DEFERRED;
+		if (gl_version < 4.f)
 		{
-			// work around a problem with older AMD drivers: Their implementation of shader storage buffer objects is piss-poor and does not match uniform buffers even closely.
-			// Recent drivers, GL 4.4 don't have this problem, these can easily be recognized by also supporting the GL_ARB_buffer_storage extension.
-			if (CheckExtension("GL_ARB_shader_storage_buffer_object"))
+#ifdef _WIN32
+			if (strstr(gl.vendorstring, "ATI Tech"))
 			{
-				// Shader storage buffer objects are broken on current Intel drivers.
-				if (strstr(gl.vendorstring, "Intel") == NULL)
-				{
-					gl.flags |= RFL_SHADER_STORAGE_BUFFER;
-				}
+				gl.flags |= RFL_NO_CLIP_PLANES;	// gl_ClipDistance is horribly broken on ATI GL3 drivers for Windows.
 			}
-			gl.flags |= RFL_BUFFER_STORAGE;
-			gl.lightmethod = LM_DIRECT;
+#endif
+		}
+		else if (gl_version < 4.5f)
+		{
+			// don't use GL 4.x features when running a GL 3.x context.
+			if (CheckExtension("GL_ARB_buffer_storage"))
+			{
+				// work around a problem with older AMD drivers: Their implementation of shader storage buffer objects is piss-poor and does not match uniform buffers even closely.
+				// Recent drivers, GL 4.4 don't have this problem, these can easily be recognized by also supporting the GL_ARB_buffer_storage extension.
+				if (CheckExtension("GL_ARB_shader_storage_buffer_object"))
+				{
+					// Shader storage buffer objects are broken on current Intel drivers.
+					if (strstr(gl.vendorstring, "Intel") == NULL)
+					{
+						gl.flags |= RFL_SHADER_STORAGE_BUFFER;
+					}
+				}
+				gl.flags |= RFL_BUFFER_STORAGE;
+				gl.lightmethod = LM_DIRECT;
+				gl.buffermethod = BM_PERSISTENT;
+			}
 		}
 		else
 		{
-			gl.version = 3.3f;
+			// Assume that everything works without problems on GL 4.5 drivers where these things are core features.
+			gl.flags |= RFL_SHADER_STORAGE_BUFFER | RFL_BUFFER_STORAGE;
+			gl.lightmethod =	LM_DIRECT;
+			gl.buffermethod = BM_PERSISTENT;
 		}
-	}
 
-	const char *lm = Args->CheckValue("-lightmethod");
-	if (lm != NULL)
-	{
-		if (!stricmp(lm, "deferred") && gl.lightmethod == LM_DIRECT) gl.lightmethod = LM_DEFERRED;	
-		if (!stricmp(lm, "textured")) gl.lightmethod = LM_SOFTWARE;
+		if (gl_version >= 4.3f || CheckExtension("GL_ARB_invalidate_subdata")) gl.flags |= RFL_INVALIDATE_BUFFER;
+		if (gl_version >= 4.3f || CheckExtension("GL_KHR_debug")) gl.flags |= RFL_DEBUG;
+
+		const char *lm = Args->CheckValue("-lightmethod");
+		if (lm != NULL)
+		{
+			if (!stricmp(lm, "deferred") && gl.lightmethod == LM_DIRECT) gl.lightmethod = LM_DEFERRED;
+		}
+
+		lm = Args->CheckValue("-buffermethod");
+		if (lm != NULL)
+		{
+			if (!stricmp(lm, "deferred") && gl.buffermethod == BM_PERSISTENT) gl.buffermethod = BM_DEFERRED;
+		}
 	}
 
 	int v;
 	
-	if (gl.lightmethod != LM_SOFTWARE && !(gl.flags & RFL_SHADER_STORAGE_BUFFER))
+	if (!gl.legacyMode && !(gl.flags & RFL_SHADER_STORAGE_BUFFER))
 	{
 		glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, &v);
 		gl.maxuniforms = v;
@@ -255,23 +256,27 @@ void gl_LoadExtensions()
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &gl.max_texturesize);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-	// fudge a bit with the framebuffer stuff to avoid redundancies in the main code. Some of the older cards do not have the ARB stuff but the calls are nearly identical.
-	FUDGE_FUNC(glGenerateMipmap, EXT);
-	FUDGE_FUNC(glGenFramebuffers, EXT);
-	FUDGE_FUNC(glBindFramebuffer, EXT);
-	FUDGE_FUNC(glDeleteFramebuffers, EXT);
-	FUDGE_FUNC(glFramebufferTexture2D, EXT);
-	FUDGE_FUNC(glGenerateMipmap, EXT);
-	FUDGE_FUNC(glGenFramebuffers, EXT);
-	FUDGE_FUNC(glBindFramebuffer, EXT);
-	FUDGE_FUNC(glDeleteFramebuffers, EXT);
-	FUDGE_FUNC(glFramebufferTexture2D, EXT);
-	FUDGE_FUNC(glFramebufferRenderbuffer, EXT);
-	FUDGE_FUNC(glGenRenderbuffers, EXT);
-	FUDGE_FUNC(glDeleteRenderbuffers, EXT);
-	FUDGE_FUNC(glRenderbufferStorage, EXT);
-	FUDGE_FUNC(glBindRenderbuffer, EXT);
-	gl_PatchMenu();
+	if (gl.legacyMode)
+	{
+		// fudge a bit with the framebuffer stuff to avoid redundancies in the main code. Some of the older cards do not have the ARB stuff but the calls are nearly identical.
+		FUDGE_FUNC(glGenerateMipmap, EXT);
+		FUDGE_FUNC(glGenFramebuffers, EXT);
+		FUDGE_FUNC(glBindFramebuffer, EXT);
+		FUDGE_FUNC(glDeleteFramebuffers, EXT);
+		FUDGE_FUNC(glFramebufferTexture2D, EXT);
+		FUDGE_FUNC(glGenerateMipmap, EXT);
+		FUDGE_FUNC(glGenFramebuffers, EXT);
+		FUDGE_FUNC(glBindFramebuffer, EXT);
+		FUDGE_FUNC(glDeleteFramebuffers, EXT);
+		FUDGE_FUNC(glFramebufferTexture2D, EXT);
+		FUDGE_FUNC(glFramebufferRenderbuffer, EXT);
+		FUDGE_FUNC(glGenRenderbuffers, EXT);
+		FUDGE_FUNC(glDeleteRenderbuffers, EXT);
+		FUDGE_FUNC(glRenderbufferStorage, EXT);
+		FUDGE_FUNC(glBindRenderbuffer, EXT);
+		FUDGE_FUNC(glCheckFramebufferStatus, EXT);
+		gl_PatchMenu();
+	}
 }
 
 //==========================================================================
@@ -283,16 +288,16 @@ void gl_LoadExtensions()
 void gl_PrintStartupLog()
 {
 	int v = 0;
-	if (gl.version >= 3.2) glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &v);
+	if (!gl.legacyMode) glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &v);
 
 	Printf ("GL_VENDOR: %s\n", glGetString(GL_VENDOR));
 	Printf ("GL_RENDERER: %s\n", glGetString(GL_RENDERER));
 	Printf ("GL_VERSION: %s (%s profile)\n", glGetString(GL_VERSION), (v & GL_CONTEXT_CORE_PROFILE_BIT)? "Core" : "Compatibility");
 	Printf ("GL_SHADING_LANGUAGE_VERSION: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
-	Printf ("GL_EXTENSIONS:");
+	Printf (PRINT_LOG, "GL_EXTENSIONS:");
 	for (unsigned i = 0; i < m_Extensions.Size(); i++)
 	{
-		Printf(" %s", m_Extensions[i].GetChars());
+		Printf(PRINT_LOG, " %s", m_Extensions[i].GetChars());
 	}
 
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &v);
@@ -302,7 +307,7 @@ void gl_PrintStartupLog()
 	glGetIntegerv(GL_MAX_VARYING_FLOATS, &v);
 	Printf ("Max. varying: %d\n", v);
 	
-	if (gl.lightmethod != LM_SOFTWARE && !(gl.flags & RFL_SHADER_STORAGE_BUFFER))
+	if (!gl.legacyMode && !(gl.flags & RFL_SHADER_STORAGE_BUFFER))
 	{
 		glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &v);
 		Printf ("Max. uniform block size: %d\n", v);
@@ -319,7 +324,7 @@ void gl_PrintStartupLog()
 	}
 
 	// For shader-less, the special alphatexture translation must be changed to actually set the alpha, because it won't get translated by a shader.
-	if (gl.glslversion == 0)
+	if (gl.legacyMode)
 	{
 		FRemapTable *remap = translationtables[TRANSLATION_Standard][8];
 		for (int i = 0; i < 256; i++)

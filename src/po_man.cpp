@@ -27,47 +27,18 @@
 #include "po_man.h"
 #include "p_setup.h"
 #include "vectors.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "p_blockmap.h"
 #include "p_maputl.h"
 #include "r_utility.h"
 #include "p_blockmap.h"
+#include "g_levellocals.h"
 
 // MACROS ------------------------------------------------------------------
 
 #define PO_MAXPOLYSEGS 64
 
 // TYPES -------------------------------------------------------------------
-
-inline vertex_t *side_t::V1() const
-{
-	return this == linedef->sidedef[0]? linedef->v1 : linedef->v2;
-}
-
-inline vertex_t *side_t::V2() const
-{
-	return this == linedef->sidedef[0]? linedef->v2 : linedef->v1;
-}
-
-
-FArchive &operator<< (FArchive &arc, FPolyObj *&poly)
-{
-	return arc.SerializePointer (polyobjs, (BYTE **)&poly, sizeof(FPolyObj));
-}
-
-FArchive &operator<< (FArchive &arc, const FPolyObj *&poly)
-{
-	return arc.SerializePointer (polyobjs, (BYTE **)&poly, sizeof(FPolyObj));
-}
-
-inline FArchive &operator<< (FArchive &arc, podoortype_t &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (podoortype_t)val;
-	return arc;
-}
-
 
 class DRotatePoly : public DPolyAction
 {
@@ -87,7 +58,7 @@ class DMovePoly : public DPolyAction
 	DECLARE_CLASS (DMovePoly, DPolyAction)
 public:
 	DMovePoly (int polyNum);
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 protected:
 	DMovePoly ();
@@ -102,7 +73,7 @@ class DMovePolyTo : public DPolyAction
 	DECLARE_CLASS(DMovePolyTo, DPolyAction)
 public:
 	DMovePolyTo(int polyNum);
-	void Serialize(FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick();
 protected:
 	DMovePolyTo();
@@ -118,7 +89,7 @@ class DPolyDoor : public DMovePoly
 	DECLARE_CLASS (DPolyDoor, DMovePoly)
 public:
 	DPolyDoor (int polyNum, podoortype_t type);
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 protected:
 	DAngle m_Direction;
@@ -167,8 +138,6 @@ static void ReleaseAllPolyNodes();
 
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
-extern seg_t *segs;
-
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
 polyblock_t **PolyBlockMap;
@@ -191,18 +160,23 @@ static FPolyNode *FreePolyNodes;
 //
 //==========================================================================
 
-IMPLEMENT_POINTY_CLASS (DPolyAction)
-	DECLARE_POINTER(m_Interpolation)
-END_POINTERS
+IMPLEMENT_CLASS(DPolyAction, false, true)
+
+IMPLEMENT_POINTERS_START(DPolyAction)
+	IMPLEMENT_POINTER(m_Interpolation)
+IMPLEMENT_POINTERS_END
 
 DPolyAction::DPolyAction ()
 {
 }
 
-void DPolyAction::Serialize (FArchive &arc)
+void DPolyAction::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_PolyObj << m_Speed << m_Dist << m_Interpolation;
+	arc("polyobj", m_PolyObj)
+		("speed", m_Speed)
+		("dist", m_Dist)
+		("interpolation", m_Interpolation);
 }
 
 DPolyAction::DPolyAction (int polyNum)
@@ -213,7 +187,7 @@ DPolyAction::DPolyAction (int polyNum)
 	SetInterpolation ();
 }
 
-void DPolyAction::Destroy()
+void DPolyAction::OnDestroy()
 {
 	FPolyObj *poly = PO_GetPolyobj (m_PolyObj);
 
@@ -223,7 +197,7 @@ void DPolyAction::Destroy()
 	}
 
 	StopInterpolation();
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 void DPolyAction::Stop()
@@ -254,7 +228,7 @@ void DPolyAction::StopInterpolation ()
 //
 //==========================================================================
 
-IMPLEMENT_CLASS (DRotatePoly)
+IMPLEMENT_CLASS(DRotatePoly, false, false)
 
 DRotatePoly::DRotatePoly ()
 {
@@ -271,20 +245,17 @@ DRotatePoly::DRotatePoly (int polyNum)
 //
 //==========================================================================
 
-IMPLEMENT_CLASS (DMovePoly)
+IMPLEMENT_CLASS(DMovePoly, false, false)
 
 DMovePoly::DMovePoly ()
 {
 }
 
-void DMovePoly::Serialize (FArchive &arc)
+void DMovePoly::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Angle << m_Speed;
-	if (SaveVersion >= 4548)
-	{
-		arc << m_Speedv;
-	}
+	arc("angle", m_Angle)
+		("speedv", m_Speedv);
 }
 
 DMovePoly::DMovePoly (int polyNum)
@@ -301,16 +272,17 @@ DMovePoly::DMovePoly (int polyNum)
 //
 //==========================================================================
 
-IMPLEMENT_CLASS(DMovePolyTo)
+IMPLEMENT_CLASS(DMovePolyTo, false, false)
 
 DMovePolyTo::DMovePolyTo()
 {
 }
 
-void DMovePolyTo::Serialize(FArchive &arc)
+void DMovePolyTo::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
-	arc << m_Speedv << m_Target;
+	arc("speedv", m_Speedv)
+		("target", m_Target);
 }
 
 DMovePolyTo::DMovePolyTo(int polyNum)
@@ -325,16 +297,21 @@ DMovePolyTo::DMovePolyTo(int polyNum)
 //
 //==========================================================================
 
-IMPLEMENT_CLASS (DPolyDoor)
+IMPLEMENT_CLASS(DPolyDoor, false, false)
 
 DPolyDoor::DPolyDoor ()
 {
 }
 
-void DPolyDoor::Serialize (FArchive &arc)
+void DPolyDoor::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Direction << m_TotalDist << m_Tics << m_WaitTics << m_Type << m_Close;
+	arc.Enum("type", m_Type)
+		("direction", m_Direction)
+		("totaldist", m_TotalDist)
+		("tics", m_Tics)
+		("waittics", m_WaitTics)
+		("close", m_Close);
 }
 
 DPolyDoor::DPolyDoor (int polyNum, podoortype_t type)
@@ -1327,6 +1304,17 @@ void FPolyObj::RecalcActorFloorCeil(FBoundingBox bounds) const
 
 	while ((actor = it.Next()) != NULL)
 	{
+		// skip everything outside the bounding box.
+		if (actor->X() + actor->radius <= bounds.Left() ||
+			actor->X() - actor->radius >= bounds.Right() ||
+			actor->Y() + actor->radius <= bounds.Bottom() ||
+			actor->Y() - actor->radius >= bounds.Top())
+		{
+			continue;
+		}
+		// Todo: Be a little more thorough with what gets altered here
+		// because this can dislocate a lot of items that were spawned on 
+		// the lower side of a sector boundary.
 		P_FindFloorCeiling(actor);
 	}
 }
@@ -1429,11 +1417,11 @@ static void InitBlockMap (void)
 
 static void InitSideLists ()
 {
-	for (int i = 0; i < numsides; ++i)
+	for (unsigned i = 0; i < level.sides.Size(); ++i)
 	{
-		if (sides[i].linedef != NULL &&
-			(sides[i].linedef->special == Polyobj_StartLine ||
-			 sides[i].linedef->special == Polyobj_ExplicitLine))
+		if (level.sides[i].linedef != NULL &&
+			(level.sides[i].linedef->special == Polyobj_StartLine ||
+				level.sides[i].linedef->special == Polyobj_ExplicitLine))
 		{
 			KnownPolySides.Push (i);
 		}
@@ -1491,7 +1479,7 @@ static void IterFindPolySides (FPolyObj *po, side_t *side)
 	assert(sidetemp != NULL);
 
 	vnum.Clear();
-	vnum.Push(DWORD(side->V1() - vertexes));
+	vnum.Push(DWORD(side->V1()->Index()));
 	vnumat = 0;
 
 	while (vnum.Size() != vnumat)
@@ -1499,8 +1487,8 @@ static void IterFindPolySides (FPolyObj *po, side_t *side)
 		DWORD sidenum = sidetemp[vnum[vnumat++]].b.first;
 		while (sidenum != NO_SIDE)
 		{
-			po->Sidedefs.Push(&sides[sidenum]);
-			AddPolyVert(vnum, DWORD(sides[sidenum].V2() - vertexes));
+			po->Sidedefs.Push(&level.sides[sidenum]);
+			AddPolyVert(vnum, DWORD(level.sides[sidenum].V2()->Index()));
 			sidenum = sidetemp[sidenum].b.next;
 		}
 	}
@@ -1534,7 +1522,7 @@ static void SpawnPolyobj (int index, int tag, int type)
 		po->bBlocked = false;
 		po->bHasPortals = 0;
 
-		side_t *sd = &sides[i];
+		side_t *sd = &level.sides[i];
 		
 		if (sd->linedef->special == Polyobj_StartLine &&
 			sd->linedef->args[0] == tag)
@@ -1570,14 +1558,14 @@ static void SpawnPolyobj (int index, int tag, int type)
 			i = KnownPolySides[ii];
 
 			if (i >= 0 &&
-				sides[i].linedef->special == Polyobj_ExplicitLine &&
-				sides[i].linedef->args[0] == tag)
+				level.sides[i].linedef->special == Polyobj_ExplicitLine &&
+				level.sides[i].linedef->args[0] == tag)
 			{
-				if (!sides[i].linedef->args[1])
+				if (!level.sides[i].linedef->args[1])
 				{
-					I_Error("SpawnPolyobj: Explicit line missing order number in poly %d, linedef %d.\n", tag, int(sides[i].linedef - lines));
+					I_Error("SpawnPolyobj: Explicit line missing order number in poly %d, linedef %d.\n", tag, level.sides[i].linedef->Index());
 				}
-				po->Sidedefs.Push (&sides[i]);
+				po->Sidedefs.Push (&level.sides[i]);
 			}
 		}
 		qsort(&po->Sidedefs[0], po->Sidedefs.Size(), sizeof(po->Sidedefs[0]), posicmp);
@@ -1775,7 +1763,14 @@ void PO_Init (void)
 			}
 		}
 	}
-
+	// clear all polyobj specials so that they do not obstruct using other lines.
+	for (auto &line : level.lines)
+	{
+		if (line.special == Polyobj_ExplicitLine || line.special == Polyobj_StartLine)
+		{
+			line.special = 0;
+		}
+	}
 }
 
 //==========================================================================

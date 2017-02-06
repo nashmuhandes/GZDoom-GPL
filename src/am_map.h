@@ -24,10 +24,11 @@
 #define __AMMAP_H__
 
 struct event_t;
-class FArchive;
+class FSerializer;
 
 
 void AM_StaticInit();
+void AM_ClearColorsets();	// reset data for a restart.
 
 // Called by main loop.
 bool AM_Responder (event_t* ev, bool last);
@@ -46,7 +47,7 @@ void AM_Stop (void);
 void AM_NewResolution ();
 void AM_ToggleMap ();
 void AM_LevelInit ();
-void AM_SerializeMarkers(FArchive &arc);
+void AM_SerializeMarkers(FSerializer &arc);
 
 
 #endif

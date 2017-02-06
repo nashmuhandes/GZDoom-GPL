@@ -1,41 +1,28 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2010-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_framebuffer.cpp
 ** Implementation of the non-hardware specific parts of the
 ** OpenGL frame buffer
-**
-**---------------------------------------------------------------------------
-** Copyright 2000-2007 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -49,7 +36,6 @@
 #include "vectors.h"
 #include "v_palette.h"
 #include "templates.h"
-#include "farchive.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_framebuffer.h"
@@ -64,8 +50,10 @@
 #include "gl/utility/gl_clock.h"
 #include "gl/utility/gl_templates.h"
 #include "gl/gl_functions.h"
+#include "gl/renderer/gl_2ddrawer.h"
+#include "gl_debug.h"
 
-IMPLEMENT_CLASS(OpenGLFrameBuffer)
+IMPLEMENT_CLASS(OpenGLFrameBuffer, false, false)
 EXTERN_CVAR (Float, vid_brightness)
 EXTERN_CVAR (Float, vid_contrast)
 EXTERN_CVAR (Bool, vid_vsync)
@@ -93,6 +81,15 @@ CUSTOM_CVAR(Int, vid_hwgamma, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITC
 OpenGLFrameBuffer::OpenGLFrameBuffer(void *hMonitor, int width, int height, int bits, int refreshHz, bool fullscreen) : 
 	Super(hMonitor, width, height, bits, refreshHz, fullscreen) 
 {
+	// SetVSync needs to be at the very top to workaround a bug in Nvidia's OpenGL driver.
+	// If wglSwapIntervalEXT is called after glBindFramebuffer in a frame the setting is not changed!
+	SetVSync(vid_vsync);
+
+	// Make sure all global variables tracking OpenGL context state are reset..
+	FHardwareTexture::InitGlobalState();
+	FMaterial::InitGlobalState();
+	gl_RenderState.Reset();
+
 	GLRenderer = new FGLRenderer(this);
 	memcpy (SourcePalette, GPalette.BaseColors, sizeof(PalEntry)*256);
 	UpdatePalette ();
@@ -100,13 +97,14 @@ OpenGLFrameBuffer::OpenGLFrameBuffer(void *hMonitor, int width, int height, int 
 	LastCamera = NULL;
 
 	InitializeState();
+	mDebug = std::make_shared<FGLDebug>();
+	mDebug->Update();
 	gl_SetupMenu();
 	gl_GenerateGlobalBrightmapFromColormap();
 	DoSetGamma();
 	needsetgamma = true;
 	swapped = false;
 	Accel2D = true;
-	SetVSync(vid_vsync);
 }
 
 OpenGLFrameBuffer::~OpenGLFrameBuffer()
@@ -150,17 +148,13 @@ void OpenGLFrameBuffer::InitializeState()
 	glEnable(GL_BLEND);
 	glEnable(GL_DEPTH_CLAMP);
 	glDisable(GL_DEPTH_TEST);
-	glEnable(GL_TEXTURE_2D);
+	if (gl.legacyMode) glEnable(GL_TEXTURE_2D);
 	glDisable(GL_LINE_SMOOTH);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	//int trueH = GetTrueHeight();
-	//int h = GetHeight();
-	//glViewport(0, (trueH - h)/2, GetWidth(), GetHeight()); 
-
-	GLRenderer->Initialize();
+	GLRenderer->Initialize(GetWidth(), GetHeight());
 	GLRenderer->SetOutputViewport(nullptr);
 	Begin2D(false);
 }
@@ -170,9 +164,6 @@ void OpenGLFrameBuffer::InitializeState()
 // Updates the screen
 //
 //==========================================================================
-
-// Testing only for now. 
-CVAR(Bool, gl_draw_sync, true, 0) //false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 void OpenGLFrameBuffer::Update()
 {
@@ -187,20 +178,26 @@ void OpenGLFrameBuffer::Update()
 	DrawRateStuff();
 	GLRenderer->Flush();
 
-	if (GetTrueHeight() != GetHeight())
-	{
-		if (GLRenderer != NULL) 
-			GLRenderer->ClearBorders();
-
-		Begin2D(false);
-	}
-	if (gl_draw_sync || !swapped)
-	{
-		Swap();
-	}
+	Swap();
 	swapped = false;
 	Unlock();
 	CheckBench();
+
+	if (!IsFullscreen())
+	{
+		int clientWidth = GetClientWidth();
+		int clientHeight = GetClientHeight();
+		if (clientWidth > 0 && clientHeight > 0 && (Width != clientWidth || Height != clientHeight))
+		{
+			// Do not call Resize here because it's only for software canvases
+			Pitch = Width = clientWidth;
+			Height = clientHeight;
+			V_OutputResized(Width, Height);
+			GLRenderer->mVBO->OutputResized(Width, Height);
+		}
+	}
+
+	GLRenderer->SetOutputViewport(nullptr);
 }
 
 
@@ -210,20 +207,27 @@ void OpenGLFrameBuffer::Update()
 //
 //==========================================================================
 
+CVAR(Bool, gl_finishbeforeswap, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+extern int camtexcount;
+
 void OpenGLFrameBuffer::Swap()
 {
+	bool swapbefore = gl_finishbeforeswap && camtexcount == 0;
 	Finish.Reset();
 	Finish.Clock();
-	glFinish();
-	if (needsetgamma) 
+	if (swapbefore) glFinish();
+	if (needsetgamma)
 	{
 		//DoSetGamma();
 		needsetgamma = false;
 	}
 	SwapBuffers();
+	if (!swapbefore) glFinish();
 	Finish.Unclock();
 	swapped = true;
+	camtexcount = 0;
 	FHardwareTexture::UnbindAll();
+	mDebug->Update();
 }
 
 //===========================================================================
@@ -253,8 +257,8 @@ void OpenGLFrameBuffer::DoSetGamma()
 		for (int i = 0; i < 256; i++)
 		{
 			double val = i * contrast - (contrast - 1) * 127;
-			if(gamma != 1) val = pow(val, invgamma) / norm;
 			val += bright * 128;
+			if(gamma != 1) val = pow(val, invgamma) / norm;
 
 			gammaTable[i] = gammaTable[i + 256] = gammaTable[i + 512] = (WORD)clamp<double>(val*256, 0, 0xffff);
 		}
@@ -306,6 +310,9 @@ void OpenGLFrameBuffer::UpdatePalette()
 	bb>>=8;
 
 	palette_brightness = (rr*77 + gg*143 + bb*35)/255;
+
+	if (GLRenderer)
+		GLRenderer->ClearTonemapPalette();
 }
 
 void OpenGLFrameBuffer::GetFlashedPalette (PalEntry pal[256])
@@ -386,7 +393,8 @@ bool OpenGLFrameBuffer::Begin2D(bool)
 
 void OpenGLFrameBuffer::DrawTextureParms(FTexture *img, DrawParms &parms)
 {
-	if (GLRenderer != NULL) GLRenderer->DrawTexture(img, parms);
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr)
+		GLRenderer->m2DDrawer->AddTexture(img, parms);
 }
 
 //==========================================================================
@@ -396,8 +404,8 @@ void OpenGLFrameBuffer::DrawTextureParms(FTexture *img, DrawParms &parms)
 //==========================================================================
 void OpenGLFrameBuffer::DrawLine(int x1, int y1, int x2, int y2, int palcolor, uint32 color)
 {
-	if (GLRenderer != NULL) 
-		GLRenderer->DrawLine(x1, y1, x2, y2, palcolor, color);
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr) 
+		GLRenderer->m2DDrawer->AddLine(x1, y1, x2, y2, palcolor, color);
 }
 
 //==========================================================================
@@ -407,8 +415,8 @@ void OpenGLFrameBuffer::DrawLine(int x1, int y1, int x2, int y2, int palcolor, u
 //==========================================================================
 void OpenGLFrameBuffer::DrawPixel(int x1, int y1, int palcolor, uint32 color)
 {
-	if (GLRenderer != NULL) 
-		GLRenderer->DrawPixel(x1, y1, palcolor, color);
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr)
+		GLRenderer->m2DDrawer->AddPixel(x1, y1, palcolor, color);
 }
 
 //==========================================================================
@@ -425,8 +433,8 @@ void OpenGLFrameBuffer::Dim(PalEntry)
 
 void OpenGLFrameBuffer::Dim(PalEntry color, float damount, int x1, int y1, int w, int h)
 {
-	if (GLRenderer != NULL) 
-		GLRenderer->Dim(color, damount, x1, y1, w, h);
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr)
+		GLRenderer->m2DDrawer->AddDim(color, damount, x1, y1, w, h);
 }
 
 //==========================================================================
@@ -437,8 +445,8 @@ void OpenGLFrameBuffer::Dim(PalEntry color, float damount, int x1, int y1, int w
 void OpenGLFrameBuffer::FlatFill (int left, int top, int right, int bottom, FTexture *src, bool local_origin)
 {
 
-	if (GLRenderer != NULL) 
-		GLRenderer->FlatFill(left, top, right, bottom, src, local_origin);
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr)
+		GLRenderer->m2DDrawer->AddFlatFill(left, top, right, bottom, src, local_origin);
 }
 
 //==========================================================================
@@ -448,8 +456,8 @@ void OpenGLFrameBuffer::FlatFill (int left, int top, int right, int bottom, FTex
 //==========================================================================
 void OpenGLFrameBuffer::Clear(int left, int top, int right, int bottom, int palcolor, uint32 color)
 {
-	if (GLRenderer != NULL) 
-		GLRenderer->Clear(left, top, right, bottom, palcolor, color);
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr)
+		GLRenderer->m2DDrawer->AddClear(left, top, right, bottom, palcolor, color);
 }
 
 //==========================================================================
@@ -462,12 +470,11 @@ void OpenGLFrameBuffer::Clear(int left, int top, int right, int bottom, int palc
 
 void OpenGLFrameBuffer::FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
 	double originx, double originy, double scalex, double scaley,
-	DAngle rotation, FDynamicColormap *colormap, int lightlevel)
+	DAngle rotation, FDynamicColormap *colormap, PalEntry flatcolor, int lightlevel, int bottomclip)
 {
-	if (GLRenderer != NULL)
+	if (GLRenderer != nullptr && GLRenderer->m2DDrawer != nullptr && npoints >= 3)
 	{
-		GLRenderer->FillSimplePoly(texture, points, npoints, originx, originy, scalex, scaley,
-			rotation, colormap, lightlevel);
+		GLRenderer->m2DDrawer->AddPoly(texture, points, npoints, originx, originy, scalex, scaley, rotation, colormap, flatcolor, lightlevel);
 	}
 }
 
@@ -480,15 +487,41 @@ void OpenGLFrameBuffer::FillSimplePoly(FTexture *texture, FVector2 *points, int 
 
 void OpenGLFrameBuffer::GetScreenshotBuffer(const BYTE *&buffer, int &pitch, ESSType &color_type)
 {
+	const auto &viewport = GLRenderer->mOutputLetterbox;
+
+	// Grab what is in the back buffer.
+	// We cannot rely on SCREENWIDTH/HEIGHT here because the output may have been scaled.
+	TArray<uint8_t> pixels;
+	pixels.Resize(viewport.width * viewport.height * 3);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadPixels(viewport.left, viewport.top, viewport.width, viewport.height, GL_RGB, GL_UNSIGNED_BYTE, &pixels[0]);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+
+	// Copy to screenshot buffer:
 	int w = SCREENWIDTH;
 	int h = SCREENHEIGHT;
 
 	ReleaseScreenshotBuffer();
 	ScreenshotBuffer = new BYTE[w * h * 3];
 
-	glPixelStorei(GL_PACK_ALIGNMENT, 1);
-	glReadPixels(0,(GetTrueHeight() - GetHeight()) / 2,w,h,GL_RGB,GL_UNSIGNED_BYTE,ScreenshotBuffer);
-	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	float rcpWidth = 1.0f / w;
+	float rcpHeight = 1.0f / h;
+	for (int y = 0; y < h; y++)
+	{
+		for (int x = 0; x < w; x++)
+		{
+			float u = (x + 0.5f) * rcpWidth;
+			float v = (y + 0.5f) * rcpHeight;
+			int sx = u * viewport.width;
+			int sy = v * viewport.height;
+			int sindex = (sx + sy * viewport.width) * 3;
+			int dindex = (x + y * w) * 3;
+			ScreenshotBuffer[dindex] = pixels[sindex];
+			ScreenshotBuffer[dindex + 1] = pixels[sindex + 1];
+			ScreenshotBuffer[dindex + 2] = pixels[sindex + 2];
+		}
+	}
+
 	pitch = -w*3;
 	color_type = SS_RGB;
 	buffer = ScreenshotBuffer + w * 3 * (h - 1);

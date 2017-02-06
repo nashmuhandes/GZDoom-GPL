@@ -354,19 +354,20 @@ void FBackdropTexture::Render()
 //
 //
 //=============================================================================
-
-FListMenuItemPlayerDisplay::FListMenuItemPlayerDisplay(FListMenuDescriptor *menu, int x, int y, PalEntry c1, PalEntry c2, bool np, FName action)
-: FListMenuItem(x, y, action)
+IMPLEMENT_CLASS(DListMenuItemPlayerDisplay, false, false)
+DListMenuItemPlayerDisplay::DListMenuItemPlayerDisplay(FListMenuDescriptor *menu, int x, int y, PalEntry c1, PalEntry c2, bool np, FName action)
+: DMenuItemBase(x, y, action)
 {
 	mOwner = menu;
 
+	FRemapTable *bdremap = translationtables[TRANSLATION_Players][MAXPLAYERS + 1];
 	for (int i = 0; i < 256; i++)
 	{
 		int r = c1.r + c2.r * i / 255;
 		int g = c1.g + c2.g * i / 255;
 		int b = c1.b + c2.b * i / 255;
-		mRemap.Remap[i] = ColorMatcher.Pick (r, g, b);
-		mRemap.Palette[i] = PalEntry(255, r, g, b);
+		bdremap->Remap[i] = ColorMatcher.Pick (r, g, b);
+		bdremap->Palette[i] = PalEntry(255, r, g, b);
 	}
 	mBackdrop = new FBackdropTexture;
 	mPlayerClass = NULL;
@@ -388,7 +389,7 @@ FListMenuItemPlayerDisplay::FListMenuItemPlayerDisplay(FListMenuDescriptor *menu
 //
 //=============================================================================
 
-FListMenuItemPlayerDisplay::~FListMenuItemPlayerDisplay()
+void DListMenuItemPlayerDisplay::OnDestroy()
 {
 	delete mBackdrop;
 }
@@ -399,7 +400,7 @@ FListMenuItemPlayerDisplay::~FListMenuItemPlayerDisplay()
 //
 //=============================================================================
 
-void FListMenuItemPlayerDisplay::UpdateRandomClass()
+void DListMenuItemPlayerDisplay::UpdateRandomClass()
 {
 	if (--mRandomTimer < 0)
 	{
@@ -425,7 +426,7 @@ void FListMenuItemPlayerDisplay::UpdateRandomClass()
 //
 //=============================================================================
 
-void FListMenuItemPlayerDisplay::UpdateTranslation()
+void DListMenuItemPlayerDisplay::UpdateTranslation()
 {
 	int PlayerColor = players[consoleplayer].userinfo.GetColor();
 	int	PlayerSkin = players[consoleplayer].userinfo.GetSkin();
@@ -445,7 +446,7 @@ void FListMenuItemPlayerDisplay::UpdateTranslation()
 //
 //=============================================================================
 
-void FListMenuItemPlayerDisplay::SetPlayerClass(int classnum, bool force)
+void DListMenuItemPlayerDisplay::SetPlayerClass(int classnum, bool force)
 {
 	if (classnum < 0 || classnum >= (int)PlayerClasses.Size ())
 	{
@@ -475,7 +476,7 @@ void FListMenuItemPlayerDisplay::SetPlayerClass(int classnum, bool force)
 //
 //=============================================================================
 
-bool FListMenuItemPlayerDisplay::UpdatePlayerClass()
+bool DListMenuItemPlayerDisplay::UpdatePlayerClass()
 {
 	if (mOwner->mSelectedItem >= 0)
 	{
@@ -497,7 +498,7 @@ bool FListMenuItemPlayerDisplay::UpdatePlayerClass()
 //
 //=============================================================================
 
-bool FListMenuItemPlayerDisplay::SetValue(int i, int value)
+bool DListMenuItemPlayerDisplay::SetValue(int i, int value)
 {
 	switch (i)
 	{
@@ -529,7 +530,7 @@ bool FListMenuItemPlayerDisplay::SetValue(int i, int value)
 //
 //=============================================================================
 
-void FListMenuItemPlayerDisplay::Ticker()
+void DListMenuItemPlayerDisplay::Ticker()
 {
 	if (mClassNum < 0) UpdateRandomClass();
 
@@ -549,7 +550,7 @@ void FListMenuItemPlayerDisplay::Ticker()
 //
 //=============================================================================
 
-void FListMenuItemPlayerDisplay::Drawer(bool selected)
+void DListMenuItemPlayerDisplay::Drawer(bool selected)
 {
 	if (mMode == 0 && !UpdatePlayerClass())
 	{
@@ -574,10 +575,10 @@ void FListMenuItemPlayerDisplay::Drawer(bool selected)
 	int x = (mXpos - 160) * CleanXfac + (SCREENWIDTH>>1);
 	int y = (mYpos - 100) * CleanYfac + (SCREENHEIGHT>>1);
 
-	screen->DrawTexture (mBackdrop, x, y - 1,
+	screen->DrawTexture(mBackdrop, x, y - 1,
 		DTA_DestWidth, 72 * CleanXfac,
 		DTA_DestHeight, 80 * CleanYfac,
-		DTA_Translation, &mRemap,
+		DTA_TranslationIndex, TRANSLATION(TRANSLATION_Players, MAXPLAYERS + 1),
 		DTA_Masked, true,
 		TAG_DONE);
 
@@ -605,13 +606,12 @@ void FListMenuItemPlayerDisplay::Drawer(bool selected)
 		FTexture *tex = TexMan(sprframe->Texture[mRotation]);
 		if (tex != NULL && tex->UseType != FTexture::TEX_Null)
 		{
-			FRemapTable *trans = NULL;
-			if (mTranslate) trans = translationtables[TRANSLATION_Players](MAXPLAYERS);
+			int trans = mTranslate? TRANSLATION(TRANSLATION_Players, MAXPLAYERS) : 0;
 			screen->DrawTexture (tex,
 				x + 36*CleanXfac, y + 71*CleanYfac,
 				DTA_DestWidthF, tex->GetScaledWidthDouble() * CleanXfac * Scale.X,
 				DTA_DestHeightF, tex->GetScaledHeightDouble() * CleanYfac * Scale.Y,
-				DTA_Translation, trans,
+				DTA_TranslationIndex, trans,
 				DTA_FlipX, sprframe->Flip & (1 << mRotation),
 				TAG_DONE);
 		}

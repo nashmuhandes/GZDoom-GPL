@@ -10,8 +10,9 @@ class DSectorEffect : public DThinker
 public:
 	DSectorEffect (sector_t *sector);
 
-	void Serialize (FArchive &arc);
-	void Destroy();
+	
+	void Serialize(FSerializer &arc);
+	void OnDestroy() override;
 
 	sector_t *GetSector() const { return m_Sector; }
 
@@ -32,8 +33,9 @@ protected:
 private:
 protected:
 	DMover ();
-	void Serialize (FArchive &arc);
-	void Destroy();
+	
+	void Serialize(FSerializer &arc);
+	void OnDestroy() override;
 };
 
 class DMovingFloor : public DMover

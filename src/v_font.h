@@ -39,7 +39,6 @@
 class DCanvas;
 struct FRemapTable;
 class FTexture;
-class FArchive;
 
 enum EColorRange
 {
@@ -67,7 +66,8 @@ enum EColorRange
 	CR_PURPLE,
 	CR_DARKGRAY,
 	CR_CYAN,
-	NUM_TEXT_COLORS
+	NUM_TEXT_COLORS,
+	FORCE_DWORD = 0x7fffffff	// required for script access.
 };
 
 extern int NumTextColors;
@@ -88,6 +88,7 @@ public:
 	int GetDefaultKerning () const { return GlobalKerning; }
 	virtual void LoadTranslations();
 	void Preload() const;
+	const char *GetName() const { return Name; }
 
 	static FFont *FindFont (const char *fontname);
 	static void StaticPreloadFonts();
@@ -134,8 +135,6 @@ protected:
 
 	friend void V_ClearFonts();
 	friend void V_RetranslateFonts();
-
-	friend FArchive &SerializeFFontPtr (FArchive &arc, FFont* &font);
 };
 
 

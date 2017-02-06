@@ -27,11 +27,12 @@ public:
 	int AddRef();
 	int DelRef(bool force = false);
 
-	virtual void Destroy();
+	void OnDestroy() override;
 	virtual void UpdateInterpolation() = 0;
 	virtual void Restore() = 0;
 	virtual void Interpolate(double smoothratio) = 0;
-	virtual void Serialize(FArchive &arc);
+	
+	virtual void Serialize(FSerializer &arc);
 };
 
 //==========================================================================

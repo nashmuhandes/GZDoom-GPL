@@ -30,30 +30,9 @@
 #include "doomstat.h"
 #include "r_state.h"
 #include "gi.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "p_spec.h"
-
-//============================================================================
-//
-// 
-//
-//============================================================================
-
-inline FArchive &operator<< (FArchive &arc, DCeiling::ECeiling &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DCeiling::ECeiling)val;
-	return arc;
-}
-
-inline FArchive &operator<< (FArchive &arc, DCeiling::ECrushMode &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DCeiling::ECrushMode)val;
-	return arc;
-}
+#include "g_levellocals.h"
 
 //============================================================================
 //
@@ -61,7 +40,7 @@ inline FArchive &operator<< (FArchive &arc, DCeiling::ECrushMode &type)
 //
 //============================================================================
 
-IMPLEMENT_CLASS (DCeiling)
+IMPLEMENT_CLASS(DCeiling, false, false)
 
 DCeiling::DCeiling ()
 {
@@ -73,23 +52,23 @@ DCeiling::DCeiling ()
 //
 //============================================================================
 
-void DCeiling::Serialize (FArchive &arc)
+void DCeiling::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Type
-		<< m_BottomHeight
-		<< m_TopHeight
-		<< m_Speed
-		<< m_Speed1
-		<< m_Speed2
-		<< m_Crush
-		<< m_Silent
-		<< m_Direction
-		<< m_Texture
-		<< m_NewSpecial
-		<< m_Tag
-		<< m_OldDirection
-		<< m_CrushMode;
+	arc.Enum("type", m_Type)
+		("bottomheight", m_BottomHeight)
+		("topheight", m_TopHeight)
+		("speed", m_Speed)
+		("speed1", m_Speed1)
+		("speed2", m_Speed2)
+		("crush", m_Crush)
+		("silent", m_Silent)
+		("direction", m_Direction)
+		("texture", m_Texture)
+		("newspecial", m_NewSpecial)
+		("tag", m_Tag)
+		("olddirecton", m_OldDirection)
+		.Enum("crushmode", m_CrushMode);
 }
 
 //============================================================================
@@ -207,7 +186,7 @@ void DCeiling::Tick ()
 				case DCeiling::ceilLowerAndCrush:
 					if (m_CrushMode == ECrushMode::crushSlowdown)
 						m_Speed = 1. / 8;
-						break;
+					break;
 
 				default:
 					break;
@@ -237,6 +216,12 @@ DCeiling::DCeiling (sector_t *sec, double speed1, double speed2, int silent)
 	m_Speed = m_Speed1 = speed1;
 	m_Speed2 = speed2;
 	m_Silent = silent;
+	m_BottomHeight = 0;
+	m_TopHeight = 0;
+	m_Direction = 0;
+	m_Texture = FNullTextureID();
+	m_Tag = 0;
+	m_OldDirection = 0;
 }
 
 //============================================================================
@@ -259,7 +244,7 @@ bool P_CreateCeiling(sector_t *sec, DCeiling::ECeiling type, line_t *line, int t
 	
 	// new door thinker
 	DCeiling *ceiling = new DCeiling (sec, speed, speed2, silent & ~4);
-	vertex_t *spot = sec->lines[0]->v1;
+	vertex_t *spot = sec->Lines[0]->v1;
 
 	switch (type)
 	{
@@ -310,7 +295,7 @@ bool P_CreateCeiling(sector_t *sec, DCeiling::ECeiling type, line_t *line, int t
 		break;
 
 	case DCeiling::ceilLowerToHighestFloor:
-		targheight = sec->FindHighestFloorSurrounding (&spot);
+		targheight = sec->FindHighestFloorSurrounding (&spot) + height;
 		ceiling->m_BottomHeight = sec->ceilingplane.PointToDist (spot, targheight);
 		ceiling->m_Direction = -1;
 		break;
@@ -360,13 +345,13 @@ bool P_CreateCeiling(sector_t *sec, DCeiling::ECeiling type, line_t *line, int t
 		break;
 
 	case DCeiling::ceilLowerToFloor:
-		targheight = sec->FindHighestFloorPoint (&spot);
+		targheight = sec->FindHighestFloorPoint (&spot) + height;
 		ceiling->m_BottomHeight = sec->ceilingplane.PointToDist (spot, targheight);
 		ceiling->m_Direction = -1;
 		break;
 
 	case DCeiling::ceilRaiseToFloor:	// [RH] What's this for?
-		targheight = sec->FindHighestFloorPoint (&spot);
+		targheight = sec->FindHighestFloorPoint (&spot) + height;
 		ceiling->m_TopHeight = sec->ceilingplane.PointToDist (spot, targheight);
 		ceiling->m_Direction = 1;
 		break;
@@ -475,6 +460,22 @@ bool P_CreateCeiling(sector_t *sec, DCeiling::ECeiling type, line_t *line, int t
 	return ceiling != NULL;
 }
 
+DEFINE_ACTION_FUNCTION(DCeiling, CreateCeiling)
+{
+	PARAM_PROLOGUE;
+	PARAM_POINTER_NOT_NULL(sec, sector_t);
+	PARAM_INT(type);
+	PARAM_POINTER(ln, line_t);
+	PARAM_FLOAT(speed);
+	PARAM_FLOAT(speed2);
+	PARAM_FLOAT_DEF(height);
+	PARAM_INT_DEF(crush);
+	PARAM_INT_DEF(silent);
+	PARAM_INT_DEF(change);
+	PARAM_INT_DEF(crushmode);
+	ACTION_RETURN_BOOL(P_CreateCeiling(sec, (DCeiling::ECeiling)type, ln, 0, speed, speed2, height, crush, silent, change, (DCeiling::ECrushMode)crushmode));
+}
+
 //============================================================================
 //
 // EV_DoCeiling
@@ -499,7 +500,7 @@ bool EV_DoCeiling (DCeiling::ECeiling type, line_t *line,
 	{
 		if (!line || !(sec = line->backsector))
 			return rtn;
-		secnum = (int)(sec-sectors);
+		secnum = sec->sectornum;
 		// [RH] Hack to let manual crushers be retriggerable, too
 		tag ^= secnum | 0x1000000;
 		P_ActivateInStasisCeiling (tag);
@@ -517,7 +518,7 @@ bool EV_DoCeiling (DCeiling::ECeiling type, line_t *line,
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		rtn |= P_CreateCeiling(&sectors[secnum], type, line, tag, speed, speed2, height, crush, silent, change, hexencrush);
+		rtn |= P_CreateCeiling(&level.sectors[secnum], type, line, tag, speed, speed2, height, crush, silent, change, hexencrush);
 	}
 	return rtn;
 }
@@ -553,21 +554,31 @@ void P_ActivateInStasisCeiling (int tag)
 //
 //============================================================================
 
-bool EV_CeilingCrushStop (int tag)
+bool EV_CeilingCrushStop (int tag, bool remove)
 {
 	bool rtn = false;
 	DCeiling *scan;
 	TThinkerIterator<DCeiling> iterator;
 
-	while ( (scan = iterator.Next ()) )
+	scan = iterator.Next();
+	while (scan != nullptr)
 	{
+		DCeiling *next = iterator.Next();
 		if (scan->m_Tag == tag && scan->m_Direction != 0)
 		{
-			SN_StopSequence (scan->m_Sector, CHAN_CEILING);
-			scan->m_OldDirection = scan->m_Direction;
-			scan->m_Direction = 0;		// in-stasis;
+			if (!remove)
+			{
+				SN_StopSequence(scan->m_Sector, CHAN_CEILING);
+				scan->m_OldDirection = scan->m_Direction;
+				scan->m_Direction = 0;		// in-stasis;
+			}
+			else
+			{
+				scan->Destroy();
+			}
 			rtn = true;
 		}
+		scan = next;
 	}
 
 	return rtn;

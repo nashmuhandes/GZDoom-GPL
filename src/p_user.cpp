@@ -49,22 +49,26 @@
 #include "doomdef.h"
 #include "c_dispatch.h"
 #include "tarray.h"
-#include "thingdef/thingdef.h"
 #include "g_level.h"
 #include "d_net.h"
 #include "gstrings.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "r_renderer.h"
 #include "d_player.h"
 #include "r_utility.h"
 #include "p_blockmap.h"
 #include "a_morph.h"
 #include "p_spec.h"
+#include "virtual.h"
+#include "g_levellocals.h"
 
 static FRandom pr_skullpop ("SkullPop");
 
 // [RH] # of ticks to complete a turn180
 #define TURN180_TICKS	((TICRATE / 4) + 1)
+
+// [SP] Allows respawn in single player
+CVAR(Bool, sv_singleplayerrespawn, false, CVAR_SERVERINFO | CVAR_LATCH)
 
 // Variables for prediction
 CVAR (Bool, cl_noprediction, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
@@ -91,9 +95,19 @@ static int PredictionLerptics;
 
 static player_t PredictionPlayerBackup;
 static BYTE PredictionActorBackup[sizeof(APlayerPawn)];
-static TArray<sector_t *> PredictionTouchingSectorsBackup;
 static TArray<AActor *> PredictionSectorListBackup;
-static TArray<msecnode_t *> PredictionSector_sprev_Backup;
+
+static TArray<sector_t *> PredictionTouchingSectorsBackup;
+static TArray<msecnode_t *> PredictionTouchingSectors_sprev_Backup;
+
+static TArray<sector_t *> PredictionRenderSectorsBackup;
+static TArray<msecnode_t *> PredictionRenderSectors_sprev_Backup;
+
+static TArray<sector_t *> PredictionPortalSectorsBackup;
+static TArray<msecnode_t *> PredictionPortalSectors_sprev_Backup;
+
+static TArray<FLinePortal *> PredictionPortalLinesBackup;
+static TArray<portnode_t *> PredictionPortalLines_sprev_Backup;
 
 // [GRB] Custom player classes
 TArray<FPlayerClass> PlayerClasses;
@@ -237,11 +251,6 @@ CCMD (playerclasses)
 
 // 16 pixels of bob
 #define MAXBOB			16.
-
-FArchive &operator<< (FArchive &arc, player_t *&p)
-{
-	return arc.SerializePointer (players, (BYTE **)&p, sizeof(*players));
-}
 
 // The player_t constructor. Since LogText is not a POD, we cannot just
 // memset it all to 0.
@@ -489,14 +498,33 @@ void player_t::SetLogNumber (int num)
 	}
 }
 
+DEFINE_ACTION_FUNCTION(_PlayerInfo, SetLogNumber)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_INT(log);
+	self->SetLogNumber(log);
+	return 0;
+}
+
 void player_t::SetLogText (const char *text)
 {
 	LogText = text;
 
-	// Print log text to console
-	AddToConsole(-1, TEXTCOLOR_GOLD);
-	AddToConsole(-1, LogText);
-	AddToConsole(-1, "\n");
+	if (mo->CheckLocalView(consoleplayer))
+	{
+		// Print log text to console
+		AddToConsole(-1, TEXTCOLOR_GOLD);
+		AddToConsole(-1, LogText);
+		AddToConsole(-1, "\n");
+	}
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, SetLogText)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_STRING(log);
+	self->SetLogText(log);
+	return 0;
 }
 
 int player_t::GetSpawnClass()
@@ -511,7 +539,7 @@ int player_t::GetSpawnClass()
 //
 //===========================================================================
 
-IMPLEMENT_CLASS(PClassPlayerPawn)
+IMPLEMENT_CLASS(PClassPlayerPawn, false, false)
 
 PClassPlayerPawn::PClassPlayerPawn()
 {
@@ -589,16 +617,6 @@ bool PClassPlayerPawn::GetPainFlash(FName type, PalEntry *color) const
 	return false;
 }
 
-void PClassPlayerPawn::ReplaceClassRef(PClass *oldclass, PClass *newclass)
-{
-	Super::ReplaceClassRef(oldclass, newclass);
-	APlayerPawn *def = (APlayerPawn*)Defaults;
-	if (def != NULL)
-	{
-		if (def->FlechetteType == oldclass) def->FlechetteType = static_cast<PClassInventory *>(newclass);
-	}
-}
-
 //===========================================================================
 //
 // player_t :: SendPitchLimits
@@ -619,42 +637,61 @@ void player_t::SendPitchLimits() const
 	}
 }
 
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, GetUserName)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	ACTION_RETURN_STRING(self->userinfo.GetName());
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, GetNeverSwitch)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	ACTION_RETURN_BOOL(self->userinfo.GetNeverSwitch());
+}
+
 //===========================================================================
 //
 // APlayerPawn
 //
 //===========================================================================
 
-IMPLEMENT_POINTY_CLASS (APlayerPawn)
- DECLARE_POINTER(InvFirst)
- DECLARE_POINTER(InvSel)
-END_POINTERS
+IMPLEMENT_CLASS(APlayerPawn, false, true)
 
-IMPLEMENT_CLASS (APlayerChunk)
+IMPLEMENT_POINTERS_START(APlayerPawn)
+	IMPLEMENT_POINTER(InvFirst)
+	IMPLEMENT_POINTER(InvSel)
+	IMPLEMENT_POINTER(FlechetteType)
+IMPLEMENT_POINTERS_END
 
-void APlayerPawn::Serialize (FArchive &arc)
+void APlayerPawn::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
+	auto def = (APlayerPawn*)GetDefault();
 
-	arc << JumpZ
-		<< MaxHealth
-		<< RunHealth
-		<< SpawnMask
-		<< ForwardMove1
-		<< ForwardMove2
-		<< SideMove1
-		<< SideMove2
-		<< ScoreIcon
-		<< InvFirst
-		<< InvSel
-		<< MorphWeapon
-		<< DamageFade
-		<< PlayerFlags
-		<< FlechetteType;
-	arc << GruntSpeed << FallingScreamMinSpeed << FallingScreamMaxSpeed;
-	arc << UseRange;
-	arc << AirCapacity;
-	arc << ViewHeight;
+	arc("jumpz", JumpZ, def->JumpZ)
+		("maxhealth", MaxHealth, def->MaxHealth)
+		("runhealth", RunHealth, def->RunHealth)
+		("spawnmask", SpawnMask, def->SpawnMask)
+		("forwardmove1", ForwardMove1, def->ForwardMove1)
+		("forwardmove2", ForwardMove2, def->ForwardMove2)
+		("sidemove1", SideMove1, def->SideMove1)
+		("sidemove2", SideMove2, def->SideMove2)
+		("scoreicon", ScoreIcon, def->ScoreIcon)
+		("invfirst", InvFirst)
+		("invsel", InvSel)
+		("morphweapon", MorphWeapon, def->MorphWeapon)
+		("damagefade", DamageFade, def->DamageFade)
+		("playerflags", PlayerFlags, def->PlayerFlags)
+		("flechettetype", FlechetteType, def->FlechetteType)
+		("gruntspeed", GruntSpeed, def->GruntSpeed)
+		("fallingscreammin", FallingScreamMinSpeed, def->FallingScreamMinSpeed)
+		("fallingscreammaxn", FallingScreamMaxSpeed, def->FallingScreamMaxSpeed)
+		("userange", UseRange, def->UseRange)
+		("aircapacity", AirCapacity, def->AirCapacity)
+		("viewheight", ViewHeight, def->ViewHeight)
+		("viewbob", ViewBob, def->ViewBob)
+		("fullheight", FullHeight, def->FullHeight);
 }
 
 //===========================================================================
@@ -679,7 +716,7 @@ void APlayerPawn::BeginPlay ()
 {
 	Super::BeginPlay ();
 	ChangeStatNum (STAT_PLAYER);
-
+	FullHeight = Height;
 	// Check whether a PWADs normal sprite is to be combined with the base WADs
 	// crouch sprite. In such a case the sprites normally don't match and it is
 	// best to disable the crouch sprite.
@@ -731,11 +768,11 @@ void APlayerPawn::Tick()
 {
 	if (player != NULL && player->mo == this && player->CanCrouch() && player->playerstate != PST_DEAD)
 	{
-		Height = GetDefault()->Height * player->crouchfactor;
+		Height = FullHeight * player->crouchfactor;
 	}
 	else
 	{
-		if (health > 0) Height = GetDefault()->Height;
+		if (health > 0) Height = FullHeight;
 	}
 	Super::Tick();
 }
@@ -916,13 +953,13 @@ bool APlayerPawn::UseInventory (AInventory *item)
 //
 //===========================================================================
 
-AWeapon *APlayerPawn::BestWeapon(PClassAmmo *ammotype)
+AWeapon *APlayerPawn::BestWeapon(PClassInventory *ammotype)
 {
 	AWeapon *bestMatch = NULL;
 	int bestOrder = INT_MAX;
 	AInventory *item;
 	AWeapon *weap;
-	bool tomed = NULL != FindInventory (RUNTIME_CLASS(APowerWeaponLevel2), true);
+	bool tomed = NULL != FindInventory (PClass::FindActor(NAME_PowerWeaponLevel2), true);
 
 	// Find the best weapon the player has.
 	for (item = Inventory; item != NULL; item = item->Inventory)
@@ -978,7 +1015,7 @@ AWeapon *APlayerPawn::BestWeapon(PClassAmmo *ammotype)
 //
 //===========================================================================
 
-AWeapon *APlayerPawn::PickNewWeapon(PClassAmmo *ammotype)
+AWeapon *APlayerPawn::PickNewWeapon(PClassInventory *ammotype)
 {
 	AWeapon *best = BestWeapon (ammotype);
 
@@ -1006,7 +1043,7 @@ AWeapon *APlayerPawn::PickNewWeapon(PClassAmmo *ammotype)
 //
 //===========================================================================
 
-void APlayerPawn::CheckWeaponSwitch(PClassAmmo *ammotype)
+void APlayerPawn::CheckWeaponSwitch(PClassInventory *ammotype)
 {
 	if (!player->userinfo.GetNeverSwitch() &&
 		player->PendingWeapon == WP_NOCHANGE && 
@@ -1022,6 +1059,13 @@ void APlayerPawn::CheckWeaponSwitch(PClassAmmo *ammotype)
 	}
 }
 
+DEFINE_ACTION_FUNCTION(APlayerPawn, CheckWeaponSwitch)
+{
+	PARAM_SELF_PROLOGUE(APlayerPawn);
+	PARAM_OBJECT(ammotype, PClassInventory);
+	self->CheckWeaponSwitch(ammotype);
+	return 0;
+}
 //===========================================================================
 //
 // APlayerPawn :: GiveDeathmatchInventory
@@ -1035,12 +1079,12 @@ void APlayerPawn::GiveDeathmatchInventory()
 {
 	for (unsigned int i = 0; i < PClassActor::AllActorClasses.Size(); ++i)
 	{
-		if (PClassActor::AllActorClasses[i]->IsDescendantOf (RUNTIME_CLASS(AKey)))
+		if (PClassActor::AllActorClasses[i]->IsDescendantOf (PClass::FindActor(NAME_Key)))
 		{
-			AKey *key = (AKey *)GetDefaultByType (PClassActor::AllActorClasses[i]);
-			if (key->KeyNumber != 0)
+			AInventory *key = (AInventory*)GetDefaultByType (PClassActor::AllActorClasses[i]);
+			if (key->special1 != 0)
 			{
-				key = static_cast<AKey *>(Spawn(static_cast<PClassActor *>(PClassActor::AllActorClasses[i])));
+				key = (AInventory*)Spawn(PClassActor::AllActorClasses[i]);
 				if (!key->CallTryPickup (this))
 				{
 					key->Destroy ();
@@ -1093,7 +1137,7 @@ void APlayerPawn::FilterCoopRespawnInventory (APlayerPawn *oldplayer)
 
 			if ((dmflags & DF_COOP_LOSE_KEYS) &&
 				defitem == NULL &&
-				item->IsKindOf(RUNTIME_CLASS(AKey)))
+				item->IsKindOf(PClass::FindActor(NAME_Key)))
 			{
 				item->Destroy();
 			}
@@ -1104,33 +1148,32 @@ void APlayerPawn::FilterCoopRespawnInventory (APlayerPawn *oldplayer)
 				item->Destroy();
 			}
 			else if ((dmflags & DF_COOP_LOSE_ARMOR) &&
-				item->IsKindOf(RUNTIME_CLASS(AArmor)))
+				item->IsKindOf(PClass::FindActor(NAME_Armor)))
 			{
 				if (defitem == NULL)
 				{
 					item->Destroy();
 				}
-				else if (item->IsKindOf(RUNTIME_CLASS(ABasicArmor)))
+				else if (item->IsKindOf(PClass::FindActor(NAME_BasicArmor)))
 				{
-					static_cast<ABasicArmor*>(item)->SavePercent = static_cast<ABasicArmor*>(defitem)->SavePercent;
+					item->IntVar(NAME_SavePercent) = defitem->IntVar(NAME_SavePercent);
 					item->Amount = defitem->Amount;
 				}
-				else if (item->IsKindOf(RUNTIME_CLASS(AHexenArmor)))
+				else if (item->IsKindOf(PClass::FindActor(NAME_HexenArmor)))
 				{
-					static_cast<AHexenArmor*>(item)->Slots[0] = static_cast<AHexenArmor*>(defitem)->Slots[0];
-					static_cast<AHexenArmor*>(item)->Slots[1] = static_cast<AHexenArmor*>(defitem)->Slots[1];
-					static_cast<AHexenArmor*>(item)->Slots[2] = static_cast<AHexenArmor*>(defitem)->Slots[2];
-					static_cast<AHexenArmor*>(item)->Slots[3] = static_cast<AHexenArmor*>(defitem)->Slots[3];
+					double *SlotsTo = (double*)item->ScriptVar(NAME_Slots, nullptr);
+					double *SlotsFrom = (double*)defitem->ScriptVar(NAME_Slots, nullptr);
+					memcpy(SlotsTo, SlotsFrom, 4 * sizeof(double)); 
 				}
 			}
 			else if ((dmflags & DF_COOP_LOSE_POWERUPS) &&
 				defitem == NULL &&
-				item->IsKindOf(RUNTIME_CLASS(APowerupGiver)))
+				item->IsKindOf(PClass::FindActor(NAME_PowerupGiver)))
 			{
 				item->Destroy();
 			}
 			else if ((dmflags & (DF_COOP_LOSE_AMMO | DF_COOP_HALVE_AMMO)) &&
-				item->IsKindOf(RUNTIME_CLASS(AAmmo)))
+				item->IsKindOf(PClass::FindActor(NAME_Ammo)))
 			{
 				if (defitem == NULL)
 				{
@@ -1204,6 +1247,12 @@ int APlayerPawn::GetMaxHealth() const
 	return MaxHealth > 0? MaxHealth : ((i_compatflags&COMPATF_DEHHEALTH)? 100 : deh.MaxHealth);
 }
 
+DEFINE_ACTION_FUNCTION(APlayerPawn, GetMaxHealth)
+{
+	PARAM_SELF_PROLOGUE(APlayerPawn);
+	ACTION_RETURN_INT(self->GetMaxHealth());
+}
+
 //===========================================================================
 //
 // APlayerPawn :: UpdateWaterLevel
@@ -1257,6 +1306,13 @@ bool APlayerPawn::ResetAirSupply (bool playgasp)
 	return wasdrowning;
 }
 
+DEFINE_ACTION_FUNCTION(APlayerPawn, ResetAirSupply)
+{
+	PARAM_SELF_PROLOGUE(APlayerPawn);
+	PARAM_BOOL_DEF(playgasp);
+	ACTION_RETURN_BOOL(self->ResetAirSupply(playgasp));
+}
+
 //===========================================================================
 //
 // Animations
@@ -1265,28 +1321,38 @@ bool APlayerPawn::ResetAirSupply (bool playgasp)
 
 void APlayerPawn::PlayIdle ()
 {
-	if (InStateSequence(state, SeeState))
-		SetState (SpawnState);
+	IFVIRTUAL(APlayerPawn, PlayIdle)
+	{
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
 }
 
 void APlayerPawn::PlayRunning ()
 {
-	if (InStateSequence(state, SpawnState) && SeeState != NULL)
-		SetState (SeeState);
+	IFVIRTUAL(APlayerPawn, PlayRunning)
+	{
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
 }
 
 void APlayerPawn::PlayAttacking ()
 {
-	if (MissileState != NULL) SetState (MissileState);
+	IFVIRTUAL(APlayerPawn, PlayAttacking)
+	{
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
 }
 
 void APlayerPawn::PlayAttacking2 ()
 {
-	if (MeleeState != NULL) SetState (MeleeState);
-}
-
-void APlayerPawn::ThrowPoisonBag ()
-{
+	IFVIRTUAL(APlayerPawn, PlayAttacking2)
+	{
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
 }
 
 //===========================================================================
@@ -1303,21 +1369,22 @@ void APlayerPawn::GiveDefaultInventory ()
 	// it provides player class based protection that should not affect
 	// any other protection item.
 	PClassPlayerPawn *myclass = GetClass();
-	GiveInventoryType(RUNTIME_CLASS(AHexenArmor));
-	AHexenArmor *harmor = FindInventory<AHexenArmor>();
-	harmor->Slots[4] = myclass->HexenArmor[0];
+	GiveInventoryType(PClass::FindActor(NAME_HexenArmor));
+	auto harmor = FindInventory(NAME_HexenArmor);
+
+	double *Slots = (double*)harmor->ScriptVar(NAME_Slots, nullptr);
+	double *SlotsIncrement = (double*)harmor->ScriptVar(NAME_SlotsIncrement, nullptr);
+	Slots[4] = myclass->HexenArmor[0];
 	for (int i = 0; i < 4; ++i)
 	{
-		harmor->SlotsIncrement[i] = myclass->HexenArmor[i + 1];
+		SlotsIncrement[i] = myclass->HexenArmor[i + 1];
 	}
 
 	// BasicArmor must come right after that. It should not affect any
 	// other protection item as well but needs to process the damage
 	// before the HexenArmor does.
-	ABasicArmor *barmor = Spawn<ABasicArmor> ();
+	auto barmor = (AInventory*)Spawn(NAME_BasicArmor);
 	barmor->BecomeItem ();
-	barmor->SavePercent = 0;
-	barmor->Amount = 0;
 	AddInventory (barmor);
 
 	// Now add the items from the DECORATE definition
@@ -1328,42 +1395,49 @@ void APlayerPawn::GiveDefaultInventory ()
 		PClassActor *ti = PClass::FindActor (di->Name);
 		if (ti)
 		{
-			AInventory *item = FindInventory (ti);
-			if (item != NULL)
+			if (!ti->IsDescendantOf(RUNTIME_CLASS(AInventory)))
 			{
-				item->Amount = clamp<int>(
-					item->Amount + (di->Amount ? di->Amount : ((AInventory *)item->GetDefault ())->Amount),
-					0, item->MaxAmount);
+				Printf(TEXTCOLOR_ORANGE "%s is not an inventory item and cannot be given to a player as start item.\n", ti->TypeName.GetChars());
 			}
 			else
 			{
-				item = static_cast<AInventory *>(Spawn (ti));
-				item->ItemFlags |= IF_IGNORESKILL;	// no skill multiplicators here
-				item->Amount = di->Amount;
-				if (item->IsKindOf (RUNTIME_CLASS (AWeapon)))
+				AInventory *item = FindInventory(ti);
+				if (item != NULL)
 				{
-					// To allow better control any weapon is emptied of
-					// ammo before being given to the player.
-					static_cast<AWeapon*>(item)->AmmoGive1 =
-					static_cast<AWeapon*>(item)->AmmoGive2 = 0;
+					item->Amount = clamp<int>(
+						item->Amount + (di->Amount ? di->Amount : ((AInventory *)item->GetDefault())->Amount),
+						0, item->MaxAmount);
 				}
-				AActor *check;
-				if (!item->CallTryPickup(this, &check))
+				else
 				{
-					if (check != this)
+					item = static_cast<AInventory *>(Spawn(ti));
+					item->ItemFlags |= IF_IGNORESKILL;	// no skill multiplicators here
+					item->Amount = di->Amount;
+					if (item->IsKindOf(RUNTIME_CLASS(AWeapon)))
 					{
-						// Player was morphed. This is illegal at game start.
-						// This problem is only detectable when it's too late to do something about it...
-						I_Error("Cannot give morph items when starting a game");
+						// To allow better control any weapon is emptied of
+						// ammo before being given to the player.
+						static_cast<AWeapon*>(item)->AmmoGive1 =
+							static_cast<AWeapon*>(item)->AmmoGive2 = 0;
 					}
-					item->Destroy ();
-					item = NULL;
+					AActor *check;
+					if (!item->CallTryPickup(this, &check))
+					{
+						if (check != this)
+						{
+							// Player was morphed. This is illegal at game start.
+							// This problem is only detectable when it's too late to do something about it...
+							I_Error("Cannot give morph items when starting a game");
+						}
+						item->Destroy();
+						item = NULL;
+					}
 				}
-			}
-			if (item != NULL && item->IsKindOf (RUNTIME_CLASS (AWeapon)) &&
-				static_cast<AWeapon*>(item)->CheckAmmo(AWeapon::EitherFire, false))
-			{
-				player->ReadyWeapon = player->PendingWeapon = static_cast<AWeapon *> (item);
+				if (item != NULL && item->IsKindOf(RUNTIME_CLASS(AWeapon)) &&
+					static_cast<AWeapon*>(item)->CheckAmmo(AWeapon::EitherFire, false))
+				{
+					player->ReadyWeapon = player->PendingWeapon = static_cast<AWeapon *> (item);
+				}
 			}
 		}
 		di = di->Next;
@@ -1372,6 +1446,11 @@ void APlayerPawn::GiveDefaultInventory ()
 
 void APlayerPawn::MorphPlayerThink ()
 {
+	IFVIRTUAL(APlayerPawn, MorphPlayerThink)
+	{
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
 }
 
 void APlayerPawn::ActivateMorphWeapon ()
@@ -1427,7 +1506,7 @@ void APlayerPawn::Die (AActor *source, AActor *inflictor, int dmgflags)
 
 	if (player != NULL && player->mo != this)
 	{ // Make the real player die, too
-		player->mo->Die (source, inflictor, dmgflags);
+		player->mo->CallDie (source, inflictor, dmgflags);
 	}
 	else
 	{
@@ -1548,7 +1627,7 @@ void APlayerPawn::TweakSpeeds (double &forward, double &side)
 
 DEFINE_ACTION_FUNCTION(AActor, A_PlayerScream)
 {
-	PARAM_ACTION_PROLOGUE;
+	PARAM_SELF_PROLOGUE(AActor);
 
 	int sound = 0;
 	int chan = CHAN_VOICE;
@@ -1622,16 +1701,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_PlayerScream)
 //
 //----------------------------------------------------------------------------
 
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SkullPop)
+DEFINE_ACTION_FUNCTION(AActor, A_SkullPop)
 {
-	PARAM_ACTION_PROLOGUE;
-	PARAM_CLASS_OPT(spawntype, APlayerChunk)	{ spawntype = NULL; }
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_CLASS_DEF(spawntype, APlayerPawn);
 
 	APlayerPawn *mo;
 	player_t *player;
 
 	// [GRB] Parameterized version
-	if (spawntype == NULL || !spawntype->IsDescendantOf(RUNTIME_CLASS(APlayerChunk)))
+	if (spawntype == NULL || !spawntype->IsDescendantOf(PClass::FindActor("PlayerChunk")))
 	{
 		spawntype = dyn_cast<PClassPlayerPawn>(PClass::FindClass("BloodySkull"));
 		if (spawntype == NULL)
@@ -1674,7 +1753,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SkullPop)
 
 DEFINE_ACTION_FUNCTION(AActor, A_CheckPlayerDone)
 {
-	PARAM_ACTION_PROLOGUE;
+	PARAM_SELF_PROLOGUE(AActor);
 
 	if (self->player == NULL)
 	{
@@ -1894,7 +1973,7 @@ void P_CalcHeight (player_t *player)
 	{
 		bob = 0;
 	}
-	player->viewz = player->mo->Z() + player->viewheight + bob;
+	player->viewz = player->mo->Z() + player->viewheight + (bob * player->mo->ViewBob); // [SP] Allow DECORATE changes to view bobbing speed.
 	if (player->mo->Floorclip && player->playerstate != PST_DEAD
 		&& player->mo->Z() <= player->mo->floorz)
 	{
@@ -2000,7 +2079,7 @@ void P_MovePlayer (player_t *player)
 			msecnode_t *n = player->mo->touching_sectorlist;
 			while (n != NULL)
 			{
-				fprintf (debugfile, "%td ", n->m_sector-sectors);
+				fprintf (debugfile, "%d ", n->m_sector->sectornum);
 				n = n->m_tnext;
 			}
 			fprintf (debugfile, "]\n");
@@ -2128,7 +2207,7 @@ void P_DeathThink (player_t *player)
 	player->TickPSprites();
 
 	player->onground = (player->mo->Z() <= player->mo->floorz);
-	if (player->mo->IsKindOf (RUNTIME_CLASS(APlayerChunk)))
+	if (player->mo->IsKindOf (PClass::FindActor("PlayerChunk")))
 	{ // Flying bloody skull or flying ice chunk
 		player->viewheight = 6;
 		player->deltaviewheight = 0;
@@ -2213,7 +2292,9 @@ void P_DeathThink (player_t *player)
 		if (level.time >= player->respawn_time || ((player->cmd.ucmd.buttons & BT_USE) && player->Bot == NULL))
 		{
 			player->cls = NULL;		// Force a new class if the player is using a random class
-			player->playerstate = (multiplayer || (level.flags2 & LEVEL2_ALLOWRESPAWN)) ? PST_REBORN : PST_ENTER;
+			player->playerstate = 
+				(multiplayer || (level.flags2 & LEVEL2_ALLOWRESPAWN) || sv_singleplayerrespawn)
+				? PST_REBORN : PST_ENTER;
 			if (player->mo->special1 > 2)
 			{
 				player->mo->special1 = 0;
@@ -2230,7 +2311,7 @@ void P_DeathThink (player_t *player)
 
 void P_CrouchMove(player_t * player, int direction)
 {
-	double defaultheight = player->mo->GetDefault()->Height;
+	double defaultheight = player->mo->FullHeight;
 	double savedheight = player->mo->Height;
 	double crouchspeed = direction * CROUCHSPEED;
 	double oldheight = player->viewheight;
@@ -2442,7 +2523,7 @@ void P_PlayerThink (player_t *player)
 					S_ChangeMusic("*");
 				}
 			}
-			DPrintf("MUSINFO change for player %d to %d\n", (int)(player - players), player->MUSINFOactor->args[0]);
+			DPrintf(DMSG_NOTIFY, "MUSINFO change for player %d to %d\n", (int)(player - players), player->MUSINFOactor->args[0]);
 		}
 	}
 
@@ -2564,11 +2645,7 @@ void P_PlayerThink (player_t *player)
 		else if (cmd->ucmd.upmove != 0)
 		{
 			// Clamp the speed to some reasonable maximum.
-			int magnitude = abs (cmd->ucmd.upmove);
-			if (magnitude > 0x300)
-			{
-				cmd->ucmd.upmove = ksgn (cmd->ucmd.upmove) * 0x300;
-			}
+			cmd->ucmd.upmove = clamp<short>(cmd->ucmd.upmove, -0x300, 0x300);
 			if (player->mo->waterlevel >= 2 || (player->mo->flags2 & MF2_FLY) || (player->cheats & CF_NOCLIP2))
 			{
 				player->mo->Vel.Z = player->mo->Speed * cmd->ucmd.upmove / 128.;
@@ -2674,10 +2751,11 @@ void P_PlayerThink (player_t *player)
 		// Apply degeneration.
 		if (dmflags2 & DF2_YES_DEGENERATION)
 		{
-			if ((level.time % TICRATE) == 0 && player->health > deh.MaxHealth)
+			int maxhealth = player->mo->GetMaxHealth() + player->mo->stamina;
+			if ((level.time % TICRATE) == 0 && player->health > maxhealth)
 			{
-				if (player->health - 5 < deh.MaxHealth)
-					player->health = deh.MaxHealth;
+				if (player->health - 5 < maxhealth)
+					player->health = maxhealth;
 				else
 					player->health--;
 
@@ -2726,6 +2804,100 @@ bool P_LerpCalculate(AActor *pmo, PredictPos from, PredictPos to, PredictPos &re
 	return (delta.LengthSquared() > cl_predict_lerpthreshold && scale <= 1.00f);
 }
 
+template<class nodetype, class linktype>
+void BackupNodeList(AActor *act, nodetype *head, nodetype *linktype::*otherlist, TArray<nodetype*, nodetype*> &prevbackup, TArray<linktype *, linktype *> &otherbackup)
+{
+	// The ordering of the touching_sectorlist needs to remain unchanged
+	// Also store a copy of all previous sector_thinglist nodes
+	prevbackup.Clear();
+	otherbackup.Clear();
+
+	for (auto mnode = head; mnode != nullptr; mnode = mnode->m_tnext)
+	{
+		otherbackup.Push(mnode->m_sector);
+
+		for (auto snode = mnode->m_sector->*otherlist; snode; snode = snode->m_snext)
+		{
+			if (snode->m_thing == act)
+			{
+				prevbackup.Push(snode->m_sprev);
+				break;
+			}
+		}
+	}
+}
+
+template<class nodetype, class linktype>
+nodetype *RestoreNodeList(AActor *act, nodetype *head, nodetype *linktype::*otherlist, TArray<nodetype*, nodetype*> &prevbackup, TArray<linktype *, linktype *> &otherbackup)
+{
+	// Destroy old refrences
+	nodetype *node = head;
+	while (node)
+	{
+		node->m_thing = NULL;
+		node = node->m_tnext;
+	}
+
+	// Make the sector_list match the player's touching_sectorlist before it got predicted.
+	P_DelSeclist(head, otherlist);
+	head = NULL;
+	for (auto i = otherbackup.Size(); i-- > 0;)
+	{
+		head = P_AddSecnode(otherbackup[i], act, head, otherbackup[i]->*otherlist);
+	}
+	//act->touching_sectorlist = ctx.sector_list;	// Attach to thing
+	//ctx.sector_list = NULL;		// clear for next time
+
+	// In the old code this block never executed because of the commented-out NULL assignment above. Needs to be checked
+	node = head;
+	while (node)
+	{
+		if (node->m_thing == NULL)
+		{
+			if (node == head)
+				head = node->m_tnext;
+			node = P_DelSecnode(node, otherlist);
+		}
+		else
+		{
+			node = node->m_tnext;
+		}
+	}
+
+	nodetype *snode;
+
+	// Restore sector thinglist order
+	for (auto i = otherbackup.Size(); i-- > 0;)
+	{
+		// If we were already the head node, then nothing needs to change
+		if (prevbackup[i] == NULL)
+			continue;
+
+		for (snode = otherbackup[i]->*otherlist; snode; snode = snode->m_snext)
+		{
+			if (snode->m_thing == act)
+			{
+				if (snode->m_sprev)
+					snode->m_sprev->m_snext = snode->m_snext;
+				else
+					snode->m_sector->*otherlist = snode->m_snext;
+				if (snode->m_snext)
+					snode->m_snext->m_sprev = snode->m_sprev;
+
+				snode->m_sprev = prevbackup[i];
+
+				// At the moment, we don't exist in the list anymore, but we do know what our previous node is, so we set its current m_snext->m_sprev to us.
+				if (snode->m_sprev->m_snext)
+					snode->m_sprev->m_snext->m_sprev = snode;
+				snode->m_snext = snode->m_sprev->m_snext;
+				snode->m_sprev->m_snext = snode;
+				break;
+			}
+		}
+	}
+	return head;
+}
+
 void P_PredictPlayer (player_t *player)
 {
 	int maxtic;
@@ -2760,28 +2932,10 @@ void P_PredictPlayer (player_t *player)
 	act->flags2 &= ~MF2_PUSHWALL;
 	player->cheats |= CF_PREDICTING;
 
-	// The ordering of the touching_sectorlist needs to remain unchanged
-	// Also store a copy of all previous sector_thinglist nodes
-	msecnode_t *mnode = act->touching_sectorlist;
-	msecnode_t *snode;
-	PredictionSector_sprev_Backup.Clear();
-	PredictionTouchingSectorsBackup.Clear ();
-
-	while (mnode != NULL)
-	{
-		PredictionTouchingSectorsBackup.Push (mnode->m_sector);
-
-		for (snode = mnode->m_sector->touching_thinglist; snode; snode = snode->m_snext)
-		{
-			if (snode->m_thing == act)
-			{
-				PredictionSector_sprev_Backup.Push(snode->m_sprev);
-				break;
-			}
-		}
-
-		mnode = mnode->m_tnext;
-	}
+	BackupNodeList(act, act->touching_sectorlist, &sector_t::touching_thinglist, PredictionTouchingSectors_sprev_Backup, PredictionTouchingSectorsBackup);
+	BackupNodeList(act, act->touching_rendersectors, &sector_t::touching_renderthings, PredictionRenderSectors_sprev_Backup, PredictionRenderSectorsBackup);
+	BackupNodeList(act, act->touching_sectorportallist, &sector_t::sectorportal_thinglist, PredictionPortalSectors_sprev_Backup, PredictionPortalSectorsBackup);
+	BackupNodeList(act, act->touching_lineportallist, &FLinePortal::lineportal_thinglist, PredictionPortalLines_sprev_Backup, PredictionPortalLinesBackup);
 
 	// Keep an ordered list off all actors in the linked sector.
 	PredictionSectorListBackup.Clear();
@@ -2829,9 +2983,9 @@ void P_PredictPlayer (player_t *player)
 			DoLerp = (int)PredictionLast.pos.X != (int)player->mo->X() || (int)PredictionLast.pos.Y != (int)player->mo->Y();
 
 			// Aditional Debug information
-			if (developer && DoLerp)
+			if (developer >= DMSG_NOTIFY && DoLerp)
 			{
-				DPrintf("Lerp! Ltic (%d) && Ptic (%d) | Lx (%f) && Px (%f) | Ly (%f) && Py (%f)\n",
+				DPrintf(DMSG_NOTIFY, "Lerp! Ltic (%d) && Ptic (%d) | Lx (%f) && Px (%f) | Ly (%f) && Py (%f)\n",
 					PredictionLast.gametic, i,
 					(PredictionLast.pos.X), (player->mo->X()),
 					(PredictionLast.pos.Y), (player->mo->Y()));
@@ -2890,7 +3044,14 @@ void P_UnPredictPlayer ()
 		// could cause it to change during prediction.
 		player->camera = savedcamera;
 
-		act->UnlinkFromWorld();
+		FLinkContext ctx;
+		// Unlink from all list, includeing those which are not being handled by UnlinkFromWorld.
+		auto sectorportal_list = act->touching_sectorportallist;
+		auto lineportal_list = act->touching_lineportallist;
+		act->touching_sectorportallist = nullptr;
+		act->touching_lineportallist = nullptr;
+
+		act->UnlinkFromWorld(&ctx);
 		memcpy(&act->snext, PredictionActorBackup, sizeof(APlayerPawn) - ((BYTE *)&act->snext - (BYTE *)act));
 
 		// The blockmap ordering needs to remain unchanged, too.
@@ -2918,70 +3079,10 @@ void P_UnPredictPlayer ()
 				*link = me;
 			}
 
-			// Destroy old refrences
-			msecnode_t *node = sector_list;
-			while (node)
-			{
-				node->m_thing = NULL;
-				node = node->m_tnext;
-			}
-
-			// Make the sector_list match the player's touching_sectorlist before it got predicted.
-			P_DelSeclist(sector_list);
-			sector_list = NULL;
-			for (i = PredictionTouchingSectorsBackup.Size(); i-- > 0;)
-			{
-				sector_list = P_AddSecnode(PredictionTouchingSectorsBackup[i], act, sector_list, PredictionTouchingSectorsBackup[i]->touching_thinglist);
-			}
-			act->touching_sectorlist = sector_list;	// Attach to thing
-			sector_list = NULL;		// clear for next time
-
-			node = sector_list;
-			while (node)
-			{
-				if (node->m_thing == NULL)
-				{
-					if (node == sector_list)
-						sector_list = node->m_tnext;
-					node = P_DelSecnode(node, &sector_t::touching_thinglist);
-				}
-				else
-				{
-					node = node->m_tnext;
-				}
-			}
-
-			msecnode_t *snode;
-
-			// Restore sector thinglist order
-			for (i = PredictionTouchingSectorsBackup.Size(); i-- > 0;)
-			{
-				// If we were already the head node, then nothing needs to change
-				if (PredictionSector_sprev_Backup[i] == NULL)
-					continue;
-
-				for (snode = PredictionTouchingSectorsBackup[i]->touching_thinglist; snode; snode = snode->m_snext)
-				{
-					if (snode->m_thing == act)
-					{
-						if (snode->m_sprev)
-							snode->m_sprev->m_snext = snode->m_snext;
-						else
-							snode->m_sector->touching_thinglist = snode->m_snext;
-						if (snode->m_snext)
-							snode->m_snext->m_sprev = snode->m_sprev;
-
-						snode->m_sprev = PredictionSector_sprev_Backup[i];
-
-						// At the moment, we don't exist in the list anymore, but we do know what our previous node is, so we set its current m_snext->m_sprev to us.
-						if (snode->m_sprev->m_snext)
-							snode->m_sprev->m_snext->m_sprev = snode;
-						snode->m_snext = snode->m_sprev->m_snext;
-						snode->m_sprev->m_snext = snode;
-						break;
-					}
-				}
-			}
+			act->touching_sectorlist = RestoreNodeList(act, ctx.sector_list, &sector_t::touching_thinglist, PredictionTouchingSectors_sprev_Backup, PredictionTouchingSectorsBackup);
+			act->touching_rendersectors = RestoreNodeList(act, ctx.render_list, &sector_t::touching_renderthings, PredictionRenderSectors_sprev_Backup, PredictionRenderSectorsBackup);
+			act->touching_sectorportallist = RestoreNodeList(act, sectorportal_list, &sector_t::sectorportal_thinglist, PredictionPortalSectors_sprev_Backup, PredictionPortalSectorsBackup);
+			act->touching_lineportallist = RestoreNodeList(act, lineportal_list, &FLinePortal::lineportal_thinglist, PredictionPortalLines_sprev_Backup, PredictionPortalLinesBackup);
 		}
 
 		// Now fix the pointers in the blocknode chain
@@ -3002,17 +3103,17 @@ void P_UnPredictPlayer ()
 	}
 }
 
-void player_t::Serialize (FArchive &arc)
+void player_t::Serialize(FSerializer &arc)
 {
-	int i;
 	FString skinname;
 
-	arc << cls
-		<< mo
-		<< camera
-		<< playerstate
-		<< cmd;
-	if (arc.IsLoading())
+	arc("class", cls)
+		("mo", mo)
+		("camera", camera)
+		("playerstate", playerstate)
+		("cmd", cmd);
+
+	if (arc.isReading())
 	{
 		ReadUserInfo(arc, userinfo, skinname);
 	}
@@ -3020,126 +3121,80 @@ void player_t::Serialize (FArchive &arc)
 	{
 		WriteUserInfo(arc, userinfo);
 	}
-	arc << DesiredFOV << FOV
-		<< viewz
-		<< viewheight
-		<< deltaviewheight
-		<< bob
-		<< Vel
-		<< centering
-		<< health
-		<< inventorytics;
-	arc << fragcount
-		<< spreecount
-		<< multicount
-		<< lastkilltime
-		<< ReadyWeapon << PendingWeapon
-		<< cheats
-		<< refire
-		<< inconsistant
-		<< killcount
-		<< itemcount
-		<< secretcount
-		<< damagecount
-		<< bonuscount
-		<< hazardcount
-		<< poisoncount
-		<< poisoner
-		<< attacker
-		<< extralight
-		<< fixedcolormap << fixedlightlevel
-		<< morphTics
-		<< MorphedPlayerClass
-		<< MorphStyle
-		<< MorphExitFlash
-		<< PremorphWeapon
-		<< chickenPeck
-		<< jumpTics
-		<< respawn_time
-		<< air_finished
-		<< turnticks
-		<< oldbuttons;
-	arc << hazardtype
-		<< hazardinterval;
-	arc << Bot;
-	arc << BlendR
-		<< BlendG
-		<< BlendB
-		<< BlendA;
-	arc << WeaponState;
-	arc << LogText
-		<< ConversationNPC
-		<< ConversationPC
-		<< ConversationNPCAngle.Degrees
-		<< ConversationFaceTalker;
 
-	for (i = 0; i < MAXPLAYERS; i++)
-		arc << frags[i];
+	arc("desiredfov", DesiredFOV)
+		("fov", FOV)
+		("viewz", viewz)
+		("viewheight", viewheight)
+		("deltaviewheight", deltaviewheight)
+		("bob", bob)
+		("vel", Vel)
+		("centering", centering)
+		("health", health)
+		("inventorytics", inventorytics)
+		("fragcount", fragcount)
+		("spreecount", spreecount)
+		("multicount", multicount)
+		("lastkilltime", lastkilltime)
+		("readyweapon", ReadyWeapon)
+		("pendingweapon", PendingWeapon)
+		("cheats", cheats)
+		("refire", refire)
+		("inconsistant", inconsistant)
+		("killcount", killcount)
+		("itemcount", itemcount)
+		("secretcount", secretcount)
+		("damagecount", damagecount)
+		("bonuscount", bonuscount)
+		("hazardcount", hazardcount)
+		("poisoncount", poisoncount)
+		("poisoner", poisoner)
+		("attacker", attacker)
+		("extralight", extralight)
+		("fixedcolormap", fixedcolormap)
+		("fixedlightlevel", fixedlightlevel)
+		("morphTics", morphTics)
+		("morphedplayerclass", MorphedPlayerClass)
+		("morphstyle", MorphStyle)
+		("morphexitflash", MorphExitFlash)
+		("premorphweapon", PremorphWeapon)
+		("chickenpeck", chickenPeck)
+		("jumptics", jumpTics)
+		("respawntime", respawn_time)
+		("airfinished", air_finished)
+		("turnticks", turnticks)
+		("oldbuttons", oldbuttons)
+		("hazardtype", hazardtype)
+		("hazardinterval", hazardinterval)
+		("bot", Bot)
+		("blendr", BlendR)
+		("blendg", BlendG)
+		("blendb", BlendB)
+		("blenda", BlendA)
+		("weaponstate", WeaponState)
+		("logtext", LogText)
+		("conversionnpc", ConversationNPC)
+		("conversionpc", ConversationPC)
+		("conversionnpcangle", ConversationNPCAngle)
+		("conversionfacetalker", ConversationFaceTalker)
+		.Array("frags", frags, MAXPLAYERS)
+		("psprites", psprites)
+		("currentplayerclass", CurrentPlayerClass)
+		("crouchfactor", crouchfactor)
+		("crouching", crouching)
+		("crouchdir", crouchdir)
+		("crouchviewdelta", crouchviewdelta)
+		("original_cmd", original_cmd)
+		("original_oldbuttons", original_oldbuttons)
+		("poisontype", poisontype)
+		("poisonpaintype", poisonpaintype)
+		("timefreezer", timefreezer)
+		("settings_controller", settings_controller)
+		("onground", onground)
+		("musinfoactor", MUSINFOactor)
+		("musinfotics", MUSINFOtics);
 
-	if (SaveVersion < 4547)
-	{
-		int layer = PSP_WEAPON;
-		for (i = 0; i < 5; i++)
-		{
-			FState *state;
-			int tics;
-			double sx, sy;
-			int sprite;
-			int frame;
-
-			arc << state << tics
-				<< sx << sy
-				<< sprite << frame;
-
-			if (state != nullptr &&
-			   ((layer < PSP_TARGETCENTER && ReadyWeapon != nullptr) ||
-			   (layer >= PSP_TARGETCENTER && mo->FindInventory(RUNTIME_CLASS(APowerTargeter), true))))
-			{
-				DPSprite *pspr;
-				pspr = GetPSprite(PSPLayers(layer));
-				pspr->State = state;
-				pspr->Tics = tics;
-				pspr->Sprite = sprite;
-				pspr->Frame = frame;
-				pspr->Owner = this;
-
-				if (layer == PSP_FLASH)
-				{
-					pspr->x = 0;
-					pspr->y = 0;
-				}
-				else
-				{
-					pspr->x = sx;
-					pspr->y = sy;
-				}
-			}
-
-			if (layer == PSP_WEAPON)
-				layer = PSP_FLASH;
-			else if (layer == PSP_FLASH)
-				layer = PSP_TARGETCENTER;
-			else
-				layer++;
-		}
-	}
-	else
-		arc << psprites;
-
-	arc << CurrentPlayerClass;
-
-	arc << crouchfactor
-		<< crouching 
-		<< crouchdir
-		<< crouchviewdelta
-		<< original_cmd
-		<< original_oldbuttons;
-	arc << poisontype << poisonpaintype;
-	arc << timefreezer;
-	arc << settings_controller;
-	arc << onground;
-
-	if (arc.IsLoading ())
+	if (arc.isWriting ())
 	{
 		// If the player reloaded because they pressed +use after dying, we
 		// don't want +use to still be down after the game is loaded.
@@ -3150,7 +3205,6 @@ void player_t::Serialize (FArchive &arc)
 	{
 		userinfo.SkinChanged(skinname, CurrentPlayerClass);
 	}
-	arc << MUSINFOactor << MUSINFOtics;
 }
 
 bool P_IsPlayerTotallyFrozen(const player_t *player)
@@ -3160,3 +3214,136 @@ bool P_IsPlayerTotallyFrozen(const player_t *player)
 		player->cheats & CF_TOTALLYFROZEN ||
 		((level.flags2 & LEVEL2_FROZEN) && player->timefreezer == 0);
 }
+
+
+//==========================================================================
+//
+// native members
+//
+//==========================================================================
+
+DEFINE_FIELD(APlayerPawn, crouchsprite)
+DEFINE_FIELD(APlayerPawn, MaxHealth)
+DEFINE_FIELD(APlayerPawn, MugShotMaxHealth)
+DEFINE_FIELD(APlayerPawn, RunHealth)
+DEFINE_FIELD(APlayerPawn, PlayerFlags)
+DEFINE_FIELD(APlayerPawn, InvFirst)
+DEFINE_FIELD(APlayerPawn, InvSel)
+DEFINE_FIELD(APlayerPawn, JumpZ)
+DEFINE_FIELD(APlayerPawn, GruntSpeed)
+DEFINE_FIELD(APlayerPawn, FallingScreamMinSpeed)
+DEFINE_FIELD(APlayerPawn, FallingScreamMaxSpeed)
+DEFINE_FIELD(APlayerPawn, ViewHeight)
+DEFINE_FIELD(APlayerPawn, ForwardMove1)
+DEFINE_FIELD(APlayerPawn, ForwardMove2)
+DEFINE_FIELD(APlayerPawn, SideMove1)
+DEFINE_FIELD(APlayerPawn, SideMove2)
+DEFINE_FIELD(APlayerPawn, ScoreIcon)
+DEFINE_FIELD(APlayerPawn, SpawnMask)
+DEFINE_FIELD(APlayerPawn, MorphWeapon)
+DEFINE_FIELD(APlayerPawn, AttackZOffset)
+DEFINE_FIELD(APlayerPawn, UseRange)
+DEFINE_FIELD(APlayerPawn, AirCapacity)
+DEFINE_FIELD(APlayerPawn, FlechetteType)
+DEFINE_FIELD(APlayerPawn, DamageFade)
+DEFINE_FIELD(APlayerPawn, ViewBob)
+DEFINE_FIELD(APlayerPawn, FullHeight)
+
+DEFINE_FIELD(PClassPlayerPawn, HealingRadiusType)
+DEFINE_FIELD(PClassPlayerPawn, DisplayName)
+DEFINE_FIELD(PClassPlayerPawn, SoundClass)
+DEFINE_FIELD(PClassPlayerPawn, Face)
+DEFINE_FIELD(PClassPlayerPawn, Portrait)
+DEFINE_FIELD(PClassPlayerPawn, Slot)
+DEFINE_FIELD(PClassPlayerPawn, InvulMode)
+DEFINE_FIELD(PClassPlayerPawn, HexenArmor)
+DEFINE_FIELD(PClassPlayerPawn, ColorRangeStart)
+DEFINE_FIELD(PClassPlayerPawn, ColorRangeEnd)
+DEFINE_FIELD(PClassPlayerPawn, ColorSets)
+DEFINE_FIELD(PClassPlayerPawn, PainFlashes)
+
+DEFINE_FIELD_X(PlayerInfo, player_t, mo)
+DEFINE_FIELD_X(PlayerInfo, player_t, playerstate)
+DEFINE_FIELD_X(PlayerInfo, player_t, original_oldbuttons)
+DEFINE_FIELD_X(PlayerInfo, player_t, cls)
+DEFINE_FIELD_X(PlayerInfo, player_t, DesiredFOV)
+DEFINE_FIELD_X(PlayerInfo, player_t, FOV)
+DEFINE_FIELD_X(PlayerInfo, player_t, viewz)
+DEFINE_FIELD_X(PlayerInfo, player_t, viewheight)
+DEFINE_FIELD_X(PlayerInfo, player_t, deltaviewheight)
+DEFINE_FIELD_X(PlayerInfo, player_t, bob)
+DEFINE_FIELD_X(PlayerInfo, player_t, Vel)
+DEFINE_FIELD_X(PlayerInfo, player_t, centering)
+DEFINE_FIELD_X(PlayerInfo, player_t, turnticks)
+DEFINE_FIELD_X(PlayerInfo, player_t, attackdown)
+DEFINE_FIELD_X(PlayerInfo, player_t, usedown)
+DEFINE_FIELD_X(PlayerInfo, player_t, oldbuttons)
+DEFINE_FIELD_X(PlayerInfo, player_t, health)
+DEFINE_FIELD_X(PlayerInfo, player_t, inventorytics)
+DEFINE_FIELD_X(PlayerInfo, player_t, CurrentPlayerClass)
+DEFINE_FIELD_X(PlayerInfo, player_t, frags)
+DEFINE_FIELD_X(PlayerInfo, player_t, fragcount)
+DEFINE_FIELD_X(PlayerInfo, player_t, lastkilltime)
+DEFINE_FIELD_X(PlayerInfo, player_t, multicount)
+DEFINE_FIELD_X(PlayerInfo, player_t, spreecount)
+DEFINE_FIELD_X(PlayerInfo, player_t, WeaponState)
+DEFINE_FIELD_X(PlayerInfo, player_t, ReadyWeapon)
+DEFINE_FIELD_X(PlayerInfo, player_t, PendingWeapon)
+DEFINE_FIELD_X(PlayerInfo, player_t, psprites)
+DEFINE_FIELD_X(PlayerInfo, player_t, cheats)
+DEFINE_FIELD_X(PlayerInfo, player_t, timefreezer)
+DEFINE_FIELD_X(PlayerInfo, player_t, refire)
+DEFINE_FIELD_NAMED_X(PlayerInfo, player_t, inconsistant, inconsistent)
+DEFINE_FIELD_X(PlayerInfo, player_t, waiting)
+DEFINE_FIELD_X(PlayerInfo, player_t, killcount)
+DEFINE_FIELD_X(PlayerInfo, player_t, itemcount)
+DEFINE_FIELD_X(PlayerInfo, player_t, secretcount)
+DEFINE_FIELD_X(PlayerInfo, player_t, damagecount)
+DEFINE_FIELD_X(PlayerInfo, player_t, bonuscount)
+DEFINE_FIELD_X(PlayerInfo, player_t, hazardcount)
+DEFINE_FIELD_X(PlayerInfo, player_t, hazardinterval)
+DEFINE_FIELD_X(PlayerInfo, player_t, hazardtype)
+DEFINE_FIELD_X(PlayerInfo, player_t, poisoncount)
+DEFINE_FIELD_X(PlayerInfo, player_t, poisontype)
+DEFINE_FIELD_X(PlayerInfo, player_t, poisonpaintype)
+DEFINE_FIELD_X(PlayerInfo, player_t, poisoner)
+DEFINE_FIELD_X(PlayerInfo, player_t, attacker)
+DEFINE_FIELD_X(PlayerInfo, player_t, extralight)
+DEFINE_FIELD_X(PlayerInfo, player_t, fixedcolormap)
+DEFINE_FIELD_X(PlayerInfo, player_t, fixedlightlevel)
+DEFINE_FIELD_X(PlayerInfo, player_t, morphTics)
+DEFINE_FIELD_X(PlayerInfo, player_t, MorphedPlayerClass)
+DEFINE_FIELD_X(PlayerInfo, player_t, MorphStyle)
+DEFINE_FIELD_X(PlayerInfo, player_t, MorphExitFlash)
+DEFINE_FIELD_X(PlayerInfo, player_t, PremorphWeapon)
+DEFINE_FIELD_X(PlayerInfo, player_t, chickenPeck)
+DEFINE_FIELD_X(PlayerInfo, player_t, jumpTics)
+DEFINE_FIELD_X(PlayerInfo, player_t, onground)
+DEFINE_FIELD_X(PlayerInfo, player_t, respawn_time)
+DEFINE_FIELD_X(PlayerInfo, player_t, camera)
+DEFINE_FIELD_X(PlayerInfo, player_t, air_finished)
+DEFINE_FIELD_X(PlayerInfo, player_t, LastDamageType)
+DEFINE_FIELD_X(PlayerInfo, player_t, MUSINFOactor)
+DEFINE_FIELD_X(PlayerInfo, player_t, MUSINFOtics)
+DEFINE_FIELD_X(PlayerInfo, player_t, settings_controller)
+DEFINE_FIELD_X(PlayerInfo, player_t, crouching)
+DEFINE_FIELD_X(PlayerInfo, player_t, crouchdir)
+DEFINE_FIELD_X(PlayerInfo, player_t, Bot)
+DEFINE_FIELD_X(PlayerInfo, player_t, BlendR)
+DEFINE_FIELD_X(PlayerInfo, player_t, BlendG)
+DEFINE_FIELD_X(PlayerInfo, player_t, BlendB)
+DEFINE_FIELD_X(PlayerInfo, player_t, BlendA)
+DEFINE_FIELD_X(PlayerInfo, player_t, LogText)
+DEFINE_FIELD_X(PlayerInfo, player_t, MinPitch)
+DEFINE_FIELD_X(PlayerInfo, player_t, MaxPitch)
+DEFINE_FIELD_X(PlayerInfo, player_t, crouchfactor)
+DEFINE_FIELD_X(PlayerInfo, player_t, crouchoffset)
+DEFINE_FIELD_X(PlayerInfo, player_t, crouchviewdelta)
+DEFINE_FIELD_X(PlayerInfo, player_t, ConversationNPC)
+DEFINE_FIELD_X(PlayerInfo, player_t, ConversationPC)
+DEFINE_FIELD_X(PlayerInfo, player_t, ConversationNPCAngle)
+DEFINE_FIELD_X(PlayerInfo, player_t, ConversationFaceTalker)
+DEFINE_FIELD_X(PlayerInfo, player_t, cmd)
+DEFINE_FIELD_X(PlayerInfo, player_t, original_cmd)
+DEFINE_FIELD_X(PlayerInfo, player_t, userinfo)
+DEFINE_FIELD_X(PlayerInfo, player_t, weapons)

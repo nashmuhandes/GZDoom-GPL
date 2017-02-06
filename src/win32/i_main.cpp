@@ -68,6 +68,7 @@
 #include "doomtype.h"
 #include "m_argv.h"
 #include "d_main.h"
+#include "i_module.h"
 #include "i_system.h"
 #include "c_console.h"
 #include "version.h"
@@ -80,9 +81,12 @@
 #include "g_level.h"
 #include "doomstat.h"
 #include "r_utility.h"
+#include "g_levellocals.h"
 
 #include "stats.h"
 #include "st_start.h"
+
+#include "optwin32.h"
 
 #include <assert.h>
 
@@ -142,6 +146,21 @@ HFONT			GameTitleFont;
 LONG			GameTitleFontHeight;
 LONG			DefaultGUIFontHeight;
 LONG			ErrorIconChar;
+
+FModule Kernel32Module{"Kernel32"};
+FModule Shell32Module{"Shell32"};
+FModule User32Module{"User32"};
+
+namespace OptWin32 {
+#define DYN_WIN32_SYM(x) decltype(x) x{#x}
+
+DYN_WIN32_SYM(SHGetFolderPathA);
+DYN_WIN32_SYM(SHGetKnownFolderPath);
+DYN_WIN32_SYM(GetLongPathNameA);
+DYN_WIN32_SYM(GetMonitorInfoA);
+
+#undef DYN_WIN32_SYM
+} // namespace OptWin32
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
@@ -662,17 +681,23 @@ void I_SetWndProc()
 
 void RestoreConView()
 {
+	HDC screenDC = GetDC(0);
+	int dpi = GetDeviceCaps(screenDC, LOGPIXELSX);
+	ReleaseDC(0, screenDC);
+	int width = (512 * dpi + 96 / 2) / 96;
+	int height = (384 * dpi + 96 / 2) / 96;
+
 	// Make sure the window has a frame in case it was fullscreened.
 	SetWindowLongPtr (Window, GWL_STYLE, WS_VISIBLE|WS_OVERLAPPEDWINDOW);
 	if (GetWindowLong (Window, GWL_EXSTYLE) & WS_EX_TOPMOST)
 	{
-		SetWindowPos (Window, HWND_BOTTOM, 0, 0, 512, 384,
+		SetWindowPos (Window, HWND_BOTTOM, 0, 0, width, height,
 			SWP_DRAWFRAME | SWP_NOCOPYBITS | SWP_NOMOVE);
 		SetWindowPos (Window, HWND_TOP, 0, 0, 0, 0, SWP_NOCOPYBITS | SWP_NOMOVE | SWP_NOSIZE);
 	}
 	else
 	{
-		SetWindowPos (Window, NULL, 0, 0, 512, 384,
+		SetWindowPos (Window, NULL, 0, 0, width, height,
 			SWP_DRAWFRAME | SWP_NOCOPYBITS | SWP_NOMOVE | SWP_NOZORDER);
 	}
 
@@ -818,6 +843,11 @@ void DoMain (HINSTANCE hInstance)
 
 		Args = new DArgs(__argc, __argv);
 
+		// Load Win32 modules
+		Kernel32Module.Load({"kernel32.dll"});
+		Shell32Module.Load({"shell32.dll"});
+		User32Module.Load({"user32.dll"});
+
 		// Under XP, get our session ID so we can know when the user changes/locks sessions.
 		// Since we need to remain binary compatible with older versions of Windows, we
 		// need to extract the ProcessIdToSessionId function from kernel32.dll manually.
@@ -912,8 +942,11 @@ void DoMain (HINSTANCE hInstance)
 		progdir.Truncate((long)strlen(program));
 		progdir.UnlockBuffer();
 
-		width = 512;
-		height = 384;
+		HDC screenDC = GetDC(0);
+		int dpi = GetDeviceCaps(screenDC, LOGPIXELSX);
+		ReleaseDC(0, screenDC);
+		width = (512 * dpi + 96 / 2) / 96;
+		height = (384 * dpi + 96 / 2) / 96;
 
 		// Many Windows structures that specify their size do so with the first
 		// element. DEVMODE is not one of those structures.
@@ -1161,6 +1194,11 @@ void CALLBACK ExitFatally (ULONG_PTR dummy)
 //
 //==========================================================================
 
+namespace
+{
+	CONTEXT MainThreadContext;
+}
+
 LONG WINAPI CatchAllExceptions (LPEXCEPTION_POINTERS info)
 {
 #ifdef _DEBUG
@@ -1185,11 +1223,7 @@ LONG WINAPI CatchAllExceptions (LPEXCEPTION_POINTERS info)
 	// Otherwise, put the crashing thread to sleep and signal the main thread to clean up.
 	if (GetCurrentThreadId() == MainThreadID)
 	{
-#ifndef _M_X64
-		info->ContextRecord->Eip = (DWORD_PTR)ExitFatally;
-#else
-		info->ContextRecord->Rip = (DWORD_PTR)ExitFatally;
-#endif
+		*info->ContextRecord = MainThreadContext;
 	}
 	else
 	{
@@ -1281,6 +1315,15 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE nothing, LPSTR cmdline, int n
 	if (MainThread != INVALID_HANDLE_VALUE)
 	{
 		SetUnhandledExceptionFilter (CatchAllExceptions);
+
+		static bool setJumpResult = false;
+		RtlCaptureContext(&MainThreadContext);
+		if (setJumpResult)
+		{
+			ExitFatally(0);
+			return 0;
+		}
+		setJumpResult = true;
 	}
 #endif
 

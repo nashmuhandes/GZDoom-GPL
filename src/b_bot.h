@@ -58,8 +58,6 @@ struct botskill_t
 	int isp;        //Instincts of Self Preservation. Personality
 };
 
-FArchive &operator<< (FArchive &arc, botskill_t &skill);
-
 enum
 {
 	BOTINUSE_No,
@@ -112,8 +110,8 @@ public:
 	bool IsDangerous (sector_t *sec);
 
 	TArray<FString> getspawned; //Array of bots (their names) which should be spawned when starting a game.
-	BYTE freeze:1;			//Game in freeze mode.
-	BYTE changefreeze:1;	//Game wants to change freeze mode.
+	BYTE freeze;			//Game in freeze mode.
+	BYTE changefreeze;	//Game wants to change freeze mode.
 	int botnum;
 	botinfo_t *botinfo;
 	int spawn_tries;
@@ -142,7 +140,7 @@ public:
 	DBot ();
 
 	void Clear ();
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 	//(b_think.cpp)

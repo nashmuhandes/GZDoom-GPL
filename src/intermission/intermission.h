@@ -176,7 +176,7 @@ public:
 	virtual int Responder (event_t *ev);
 	virtual int Ticker ();
 	virtual void Drawer ();
-	void Destroy();
+	void OnDestroy() override;
 	FTextureID GetBackground(bool *fill)
 	{
 		*fill = mFlatfill;
@@ -234,7 +234,7 @@ class DIntermissionScreenCast : public DIntermissionScreen
 	TArray<FICastSound> mCastSounds;
 
 	int 			casttics;
-	const FRemapTable *casttranslation;	// [RH] Draw "our hero" with their chosen suit color
+	uint32_t		casttranslation;	// [RH] Draw "our hero" with their chosen suit color
 	FState*			caststate;
 	FState*			basestate;
 	FState*			advplayerstate;
@@ -301,7 +301,7 @@ public:
 	bool Responder (event_t *ev);
 	void Ticker ();
 	void Drawer ();
-	void Destroy();
+	void OnDestroy() override;
 
 	friend void F_AdvanceIntermission();
 };

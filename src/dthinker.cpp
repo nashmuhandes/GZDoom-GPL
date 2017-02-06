@@ -38,8 +38,9 @@
 #include "statnums.h"
 #include "i_system.h"
 #include "doomerrors.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "d_player.h"
+#include "virtual.h"
 
 
 static cycle_t ThinkCycles;
@@ -47,13 +48,19 @@ extern cycle_t BotSupportCycles;
 extern cycle_t ActionCycles;
 extern int BotWTG;
 
-IMPLEMENT_CLASS (DThinker)
+IMPLEMENT_CLASS(DThinker, false, false)
 
 DThinker *NextToThink;
 
 FThinkerList DThinker::Thinkers[MAX_STATNUM+2];
 FThinkerList DThinker::FreshThinkers[MAX_STATNUM+1];
 bool DThinker::bSerialOverride = false;
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 void FThinkerList::AddTail(DThinker *thinker)
 {
@@ -79,6 +86,12 @@ void FThinkerList::AddTail(DThinker *thinker)
 	GC::WriteBarrier(Sentinel, thinker);
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 DThinker *FThinkerList::GetHead() const
 {
 	if (Sentinel == NULL || Sentinel->NextThinker == Sentinel)
@@ -89,6 +102,12 @@ DThinker *FThinkerList::GetHead() const
 	return Sentinel->NextThinker;
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 DThinker *FThinkerList::GetTail() const
 {
 	if (Sentinel == NULL || Sentinel->PrevThinker == Sentinel)
@@ -98,106 +117,114 @@ DThinker *FThinkerList::GetTail() const
 	return Sentinel->PrevThinker;
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 bool FThinkerList::IsEmpty() const
 {
 	return Sentinel == NULL || Sentinel->NextThinker == NULL;
 }
 
-void DThinker::SaveList(FArchive &arc, DThinker *node)
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void DThinker::SaveList(FSerializer &arc, DThinker *node)
 {
 	if (node != NULL)
 	{
 		while (!(node->ObjectFlags & OF_Sentinel))
 		{
 			assert(node->NextThinker != NULL && !(node->NextThinker->ObjectFlags & OF_EuthanizeMe));
-			arc << node;
+			::Serialize<DThinker>(arc, nullptr, node, nullptr);
 			node = node->NextThinker;
 		}
 	}
 }
 
-void DThinker::SerializeAll(FArchive &arc, bool hubLoad)
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void DThinker::SerializeThinkers(FSerializer &arc, bool hubLoad)
 {
-	DThinker *thinker;
-	BYTE stat;
-	int statcount;
+	//DThinker *thinker;
+	//BYTE stat;
+	//int statcount;
 	int i;
 
-	// Save lists of thinkers, but not by storing the first one and letting
-	// the archiver catch the rest. (Which leads to buttloads of recursion
-	// and makes the file larger.) Instead, we explicitly save each thinker
-	// in sequence. When restoring an archive, we also have to maintain
-	// the thinker lists here instead of relying on the archiver to do it
-	// for us.
-
-	if (arc.IsStoring())
+	if (arc.isWriting())
 	{
-		for (statcount = i = 0; i <= MAX_STATNUM; i++)
-		{
-			statcount += (!Thinkers[i].IsEmpty() || !FreshThinkers[i].IsEmpty());
-		}
-		arc << statcount;
+		arc.BeginArray("thinkers");
 		for (i = 0; i <= MAX_STATNUM; i++)
 		{
-			if (!Thinkers[i].IsEmpty() || !FreshThinkers[i].IsEmpty())
-			{
-				stat = i;
-				arc << stat;
-				SaveList(arc, Thinkers[i].GetHead());
-				SaveList(arc, FreshThinkers[i].GetHead());
-				thinker = NULL;
-				arc << thinker;		// Save a final NULL for this list
-			}
+			arc.BeginArray(nullptr);
+			SaveList(arc, Thinkers[i].GetHead());
+			SaveList(arc, FreshThinkers[i].GetHead());
+			arc.EndArray();
 		}
+		arc.EndArray();
 	}
 	else
 	{
-		// Prevent the constructor from inserting thinkers into a list.
-		bSerialOverride = true;
-
-		try
+		if (arc.BeginArray("thinkers"))
 		{
-			arc << statcount;
-			while (statcount > 0)
+			for (i = 0; i <= MAX_STATNUM; i++)
 			{
-				arc << stat << thinker;
-				while (thinker != NULL)
+				if (arc.BeginArray(nullptr))
 				{
-					// This may be a player stored in their ancillary list. Remove
-					// them first before inserting them into the new list.
-					if (thinker->NextThinker != NULL)
+					int size = arc.ArraySize();
+					for (int j = 0; j < size; j++)
 					{
-						thinker->Remove();
+						DThinker *thinker;
+						arc(nullptr, thinker);
+						if (thinker != nullptr)
+						{
+							// This may be a player stored in their ancillary list. Remove
+							// them first before inserting them into the new list.
+							if (thinker->NextThinker != nullptr)
+							{
+								thinker->Remove();
+							}
+							// Thinkers with the OF_JustSpawned flag set go in the FreshThinkers
+							// list. Anything else goes in the regular Thinkers list.
+							if (thinker->ObjectFlags & OF_EuthanizeMe)
+							{
+								// This thinker was destroyed during the loading process. Do
+								// not link it into any list.
+							}
+							else if (thinker->ObjectFlags & OF_JustSpawned)
+							{
+								FreshThinkers[i].AddTail(thinker);
+								thinker->PostSerialize();
+							}
+							else
+							{
+								Thinkers[i].AddTail(thinker);
+								thinker->PostSerialize();
+							}
+						}
 					}
-					// Thinkers with the OF_JustSpawned flag set go in the FreshThinkers
-					// list. Anything else goes in the regular Thinkers list.
-					if (thinker->ObjectFlags & OF_EuthanizeMe)
-					{
-						// This thinker was destroyed during the loading process. Do
-						// not link it in to any list.
-					}
-					else if (thinker->ObjectFlags & OF_JustSpawned)
-					{
-						FreshThinkers[stat].AddTail(thinker);
-					}
-					else
-					{
-						Thinkers[stat].AddTail(thinker);
-					}
-					arc << thinker;
+					arc.EndArray();
 				}
-				statcount--;
 			}
+			arc.EndArray();
 		}
-		catch (class CDoomError &)
-		{
-			bSerialOverride = false;
-			DestroyAllThinkers();
-			throw;
-		}
-		bSerialOverride = false;
 	}
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 DThinker::DThinker (int statnum) throw()
 {
@@ -226,7 +253,7 @@ DThinker::~DThinker ()
 	assert(NextThinker == NULL && PrevThinker == NULL);
 }
 
-void DThinker::Destroy ()
+void DThinker::OnDestroy ()
 {
 	assert((NextThinker != NULL && PrevThinker != NULL) ||
 		   (NextThinker == NULL && PrevThinker == NULL));
@@ -234,8 +261,14 @@ void DThinker::Destroy ()
 	{
 		Remove();
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 void DThinker::Remove()
 {
@@ -257,9 +290,52 @@ void DThinker::Remove()
 	PrevThinker = NULL;
 }
 
+//==========================================================================
+//
+// 
+//
+//==========================================================================
+
 void DThinker::PostBeginPlay ()
 {
 }
+
+DEFINE_ACTION_FUNCTION(DThinker, PostBeginPlay)
+{
+	PARAM_SELF_PROLOGUE(DThinker);
+	self->PostBeginPlay();
+	return 0;
+}
+
+void DThinker::CallPostBeginPlay()
+{
+	IFVIRTUAL(DThinker, PostBeginPlay)
+	{
+		// Without the type cast this picks the 'void *' assignment...
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
+	else
+	{
+		PostBeginPlay();
+	}
+}
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void DThinker::PostSerialize()
+{
+}
+
+//==========================================================================
+//
+// 
+//
+//==========================================================================
 
 DThinker *DThinker::FirstThinker (int statnum)
 {
@@ -280,6 +356,12 @@ DThinker *DThinker::FirstThinker (int statnum)
 	}
 	return node;
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 void DThinker::ChangeStatNum (int statnum)
 {
@@ -304,7 +386,19 @@ void DThinker::ChangeStatNum (int statnum)
 	list->AddTail(this);
 }
 
+DEFINE_ACTION_FUNCTION(DThinker, ChangeStatNum)
+{
+	PARAM_SELF_PROLOGUE(DThinker);
+	PARAM_INT(stat);
+	self->ChangeStatNum(stat);
+	return 0;
+}
+//==========================================================================
+//
 // Mark the first thinker of each list
+//
+//==========================================================================
+
 void DThinker::MarkRoots()
 {
 	for (int i = 0; i <= MAX_STATNUM; ++i)
@@ -315,7 +409,12 @@ void DThinker::MarkRoots()
 	GC::Mark(Thinkers[MAX_STATNUM+1].Sentinel);
 }
 
+//==========================================================================
+//
 // Destroy every thinker
+//
+//==========================================================================
+
 void DThinker::DestroyAllThinkers ()
 {
 	int i;
@@ -332,23 +431,11 @@ void DThinker::DestroyAllThinkers ()
 	GC::FullGC();
 }
 
-// Destroy all thinkers except for player-controlled actors
-// Players are simply removed from the list of thinkers and
-// will be added back after serialization is complete.
-void DThinker::DestroyMostThinkers ()
-{
-	int i;
-
-	for (i = 0; i <= MAX_STATNUM; i++)
-	{
-		if (i != STAT_TRAVELLING)
-		{
-			DestroyMostThinkersInList (Thinkers[i], i);
-			DestroyMostThinkersInList (FreshThinkers[i], i);
-		}
-	}
-	GC::FullGC();
-}
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 void DThinker::DestroyThinkersInList (FThinkerList &list)
 {
@@ -364,38 +451,11 @@ void DThinker::DestroyThinkersInList (FThinkerList &list)
 	}
 }
 
-void DThinker::DestroyMostThinkersInList (FThinkerList &list, int stat)
-{
-	if (stat != STAT_PLAYER)
-	{
-		DestroyThinkersInList (list);
-	}
-	else if (list.Sentinel != NULL)
-	{ // If it's a voodoo doll, destroy it. Otherwise, simply remove
-	  // it from the list. G_FinishTravel() will find it later from
-	  // a players[].mo link and destroy it then, after copying various
-	  // information to a new player.
-		for (DThinker *probe = list.Sentinel->NextThinker; probe != list.Sentinel; probe = list.Sentinel->NextThinker)
-		{
-			if (!probe->IsKindOf(RUNTIME_CLASS(APlayerPawn)) ||		// <- should not happen
-				static_cast<AActor *>(probe)->player == NULL ||
-				static_cast<AActor *>(probe)->player->mo != probe)
-			{
-				probe->Destroy();
-			}
-			else
-			{
-				probe->Remove();
-				// Technically, this doesn't need to be in any list now, since
-				// it's only going to be found later and destroyed before ever
-				// needing to tick again, but by moving it to a separate list,
-				// I can keep my debug assertions that all thinkers are either
-				// euthanizing or in a list.
-				Thinkers[MAX_STATNUM+1].AddTail(probe);
-			}
-		}
-	}
-}
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 void DThinker::RunThinkers ()
 {
@@ -427,6 +487,12 @@ void DThinker::RunThinkers ()
 	ThinkCycles.Unclock();
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 {
 	int count = 0;
@@ -449,7 +515,7 @@ int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 				node->Remove();
 				dest->AddTail(node);
 			}
-			node->PostBeginPlay();
+			node->CallPostBeginPlay();
 		}
 		else if (dest != NULL)
 		{
@@ -458,7 +524,7 @@ int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 
 		if (!(node->ObjectFlags & OF_EuthanizeMe))
 		{ // Only tick thinkers not scheduled for destruction
-			node->Tick();
+			node->CallTick();
 			node->ObjectFlags &= ~OF_JustSpawned;
 			GC::CheckGC();
 		}
@@ -467,18 +533,58 @@ int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 	return count;
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 void DThinker::Tick ()
 {
 }
 
+DEFINE_ACTION_FUNCTION(DThinker, Tick)
+{
+	PARAM_SELF_PROLOGUE(DThinker);
+	self->Tick();
+	return 0;
+}
+
+void DThinker::CallTick()
+{
+	IFVIRTUAL(DThinker, Tick)
+	{
+		// Without the type cast this picks the 'void *' assignment...
+		VMValue params[1] = { (DObject*)this };
+		GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+	}
+	else Tick();
+}
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 size_t DThinker::PropagateMark()
 {
-	assert(NextThinker != NULL && !(NextThinker->ObjectFlags & OF_EuthanizeMe));
-	assert(PrevThinker != NULL && !(PrevThinker->ObjectFlags & OF_EuthanizeMe));
+	// Do not choke on partially initialized objects (as happens when loading a savegame fails)
+	if (NextThinker != nullptr || PrevThinker != nullptr)
+	{
+		assert(NextThinker != nullptr && !(NextThinker->ObjectFlags & OF_EuthanizeMe));
+		assert(PrevThinker != nullptr && !(PrevThinker->ObjectFlags & OF_EuthanizeMe));
+	}
 	GC::Mark(NextThinker);
 	GC::Mark(PrevThinker);
 	return Super::PropagateMark();
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 FThinkerIterator::FThinkerIterator (const PClass *type, int statnum)
 {
@@ -496,6 +602,12 @@ FThinkerIterator::FThinkerIterator (const PClass *type, int statnum)
 	m_CurrThinker = DThinker::Thinkers[m_Stat].GetHead();
 	m_SearchingFresh = false;
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 FThinkerIterator::FThinkerIterator (const PClass *type, int statnum, DThinker *prev)
 {
@@ -521,13 +633,25 @@ FThinkerIterator::FThinkerIterator (const PClass *type, int statnum, DThinker *p
 	}
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 void FThinkerIterator::Reinit ()
 {
 	m_CurrThinker = DThinker::Thinkers[m_Stat].GetHead();
 	m_SearchingFresh = false;
 }
 
-DThinker *FThinkerIterator::Next ()
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+DThinker *FThinkerIterator::Next (bool exact)
 {
 	if (m_ParentType == NULL)
 	{
@@ -543,10 +667,17 @@ DThinker *FThinkerIterator::Next ()
 				{
 					DThinker *thinker = m_CurrThinker;
 					m_CurrThinker = thinker->NextThinker;
-					if (thinker->IsKindOf(m_ParentType))
+					if (exact)
+					{
+						if (thinker->IsA(m_ParentType)) return thinker;
+					}
+					else if (thinker->IsKindOf(m_ParentType))
 					{
 						return thinker;
 					}
+					// This can actually happen when a Destroy call on 'thinker' happens to destroy 'm_CurrThinker'.
+					// In that case there is no chance to recover, we have to terminate the iteration of this list.
+					if (m_CurrThinker == nullptr) break;
 				}
 			}
 			if ((m_SearchingFresh = !m_SearchingFresh))
@@ -567,6 +698,56 @@ DThinker *FThinkerIterator::Next ()
 	} while (m_SearchStats && m_Stat != STAT_FIRST_THINKING);
 	return NULL;
 }
+
+//==========================================================================
+//
+// This is for scripting, which needs the iterator wrapped into an object with the needed functions exported.
+// Unfortunately we cannot have templated type conversions in scripts.
+//
+//==========================================================================
+
+class DThinkerIterator : public DObject, public FThinkerIterator
+{
+	DECLARE_CLASS(DThinkerIterator, DObject)
+
+	DThinkerIterator()
+	{
+	}
+
+public:
+	DThinkerIterator(PClass *cls, int statnum = MAX_STATNUM + 1)
+		: FThinkerIterator(cls, statnum)
+	{
+	}
+};
+
+IMPLEMENT_CLASS(DThinkerIterator, false, false);
+DEFINE_ACTION_FUNCTION(DThinkerIterator, Create)
+{
+	PARAM_PROLOGUE;
+	PARAM_CLASS_DEF(type, DThinker);
+	PARAM_INT_DEF(statnum);
+	ACTION_RETURN_OBJECT(new DThinkerIterator(type, statnum));
+}
+
+DEFINE_ACTION_FUNCTION(DThinkerIterator, Next)
+{
+	PARAM_SELF_PROLOGUE(DThinkerIterator);
+	ACTION_RETURN_OBJECT(self->Next());
+}
+
+DEFINE_ACTION_FUNCTION(DThinkerIterator, Reinit)
+{
+	PARAM_SELF_PROLOGUE(DThinkerIterator);
+	self->Reinit();
+	return 0;
+}
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 ADD_STAT (think)
 {

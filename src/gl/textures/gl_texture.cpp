@@ -1,37 +1,26 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** Global texture data
-**
-**---------------------------------------------------------------------------
-** Copyright 2004-2009 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -166,7 +155,7 @@ void gl_GenerateGlobalBrightmapFromColormap()
 	for(int i=0;i<256;i++)
 	{
 		HasGlobalBrightmap |= GlobalBrightmap.Remap[i] == white;
-		if (GlobalBrightmap.Remap[i] == white) DPrintf("Marked color %d as fullbright\n",i);
+		if (GlobalBrightmap.Remap[i] == white) DPrintf(DMSG_NOTIFY, "Marked color %d as fullbright\n",i);
 	}
 }
 
@@ -178,7 +167,7 @@ void gl_GenerateGlobalBrightmapFromColormap()
 //	component becomes one.
 //
 //===========================================================================
-PalEntry averageColor(const DWORD *data, int size, int maxout)
+static PalEntry averageColor(const DWORD *data, int size, int maxout)
 {
 	int				i;
 	unsigned int	r, g, b;
@@ -227,10 +216,7 @@ FTexture::MiscGLInfo::MiscGLInfo() throw()
 	GlowColor = 0;
 	GlowHeight = 128;
 	bSkybox = false;
-	FloorSkyColor = 0;
-	CeilingSkyColor = 0;
 	bFullbright = false;
-	bSkyColorDone = false;
 	bBrightmapChecked = false;
 	bDisableFullbright = false;
 	bNoFilter = false;
@@ -290,7 +276,7 @@ void FTexture::CreateDefaultBrightmap()
 				if (GlobalBrightmap.Remap[texbuf[i]] == white)
 				{
 					// Create a brightmap
-					DPrintf("brightmap created for texture '%s'\n", Name.GetChars());
+					DPrintf(DMSG_NOTIFY, "brightmap created for texture '%s'\n", Name.GetChars());
 					gl_info.Brightmap = new FBrightmapTexture(this);
 					gl_info.bBrightmapChecked = 1;
 					TexMan.AddTexture(gl_info.Brightmap);
@@ -298,7 +284,7 @@ void FTexture::CreateDefaultBrightmap()
 				}
 			}
 			// No bright pixels found
-			DPrintf("No bright pixels found in texture '%s'\n", Name.GetChars());
+			DPrintf(DMSG_SPAMMY, "No bright pixels found in texture '%s'\n", Name.GetChars());
 			gl_info.bBrightmapChecked = 1;
 		}
 		else
@@ -335,38 +321,6 @@ void FTexture::GetGlowColor(float *data)
 	data[0]=gl_info.GlowColor.r/255.0f;
 	data[1]=gl_info.GlowColor.g/255.0f;
 	data[2]=gl_info.GlowColor.b/255.0f;
-}
-
-//===========================================================================
-// 
-//	Gets the average color of a texture for use as a sky cap color
-//
-//===========================================================================
-
-PalEntry FTexture::GetSkyCapColor(bool bottom)
-{
-	PalEntry col;
-	int w;
-	int h;
-
-	if (!gl_info.bSkyColorDone)
-	{
-		gl_info.bSkyColorDone = true;
-
-		unsigned char *buffer = GLRenderer->GetTextureBuffer(this, w, h);
-
-		if (buffer)
-		{
-			gl_info.CeilingSkyColor = averageColor((DWORD *) buffer, w * MIN(30, h), 0);
-			if (h>30)
-			{
-				gl_info.FloorSkyColor = averageColor(((DWORD *) buffer)+(h-30)*w, w * 30, 0);
-			}
-			else gl_info.FloorSkyColor = gl_info.CeilingSkyColor;
-			delete[] buffer;
-		}
-	}
-	return bottom? gl_info.FloorSkyColor : gl_info.CeilingSkyColor;
 }
 
 //===========================================================================
@@ -440,16 +394,20 @@ bool FTexture::FindHoles(const unsigned char * buffer, int w, int h)
 	}
 	if (startdraw==0 && lendraw==h) return false;	// nothing saved so don't create a split list
 
-	FloatRect * rcs = new FloatRect[gapc];
-
-	for(x=0;x<gapc;x++)
+	if (gapc > 0)
 	{
-		// gaps are stored as texture (u/v) coordinates
-		rcs[x].width=rcs[x].left=-1.0f;
-		rcs[x].top=(float)gaps[x][0]/(float)h;
-		rcs[x].height=(float)gaps[x][1]/(float)h;
+		FloatRect * rcs = new FloatRect[gapc];
+
+		for (x = 0; x < gapc; x++)
+		{
+			// gaps are stored as texture (u/v) coordinates
+			rcs[x].width = rcs[x].left = -1.0f;
+			rcs[x].top = (float)gaps[x][0] / (float)h;
+			rcs[x].height = (float)gaps[x][1] / (float)h;
+		}
+		gl_info.areas = rcs;
 	}
-	gl_info.areas=rcs;
+	else gl_info.areas = nullptr;
 	gl_info.areacount=gapc;
 
 	return true;

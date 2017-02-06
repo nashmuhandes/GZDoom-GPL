@@ -30,7 +30,6 @@ struct FRemapTable;
 struct FCopyInfo;
 class FScanner;
 class PClassInventory;
-class FArchive;
 
 // Texture IDs
 class FTextureManager;
@@ -43,8 +42,6 @@ class FNullTextureID : public FTextureID
 public:
 	FNullTextureID() : FTextureID(0) {}
 };
-
-FArchive &operator<< (FArchive &arc, FTextureID &tex);
 
 //
 // Animating textures and planes
@@ -235,6 +232,7 @@ public:
 	int GetScaledTopOffset () { int foo = int((TopOffset * 2) / Scale.Y); return (foo >> 1) + (foo & 1); }
 	double GetScaledLeftOffsetDouble() { return LeftOffset / Scale.X; }
 	double GetScaledTopOffsetDouble() { return TopOffset / Scale.Y; }
+	virtual void ResolvePatches() {}
 
 	virtual void SetFrontSkyLayer();
 
@@ -265,6 +263,7 @@ public:
 	}
 
 	void SetScaledSize(int fitwidth, int fitheight);
+	PalEntry GetSkyCapColor(bool bottom);
 
 	virtual void HackHack (int newheight);	// called by FMultipatchTexture to discover corrupt patches.
 
@@ -288,6 +287,11 @@ protected:
 		gl_info.areas = NULL;
 	}
 
+private:
+	bool bSWSkyColorDone = false;
+	PalEntry FloorSkyColor;
+	PalEntry CeilingSkyColor;
+
 public:
 	static void FlipSquareBlock (BYTE *block, int x, int y);
 	static void FlipSquareBlockRemap (BYTE *block, int x, int y, const BYTE *remap);
@@ -304,8 +308,6 @@ public:
 		FGLTexture *SystemTexture[2];
 		FTexture *Brightmap;
 		PalEntry GlowColor;
-		PalEntry FloorSkyColor;
-		PalEntry CeilingSkyColor;
 		int GlowHeight;
 		FloatRect *areas;
 		int areacount;
@@ -313,9 +315,9 @@ public:
 		float shaderspeed;
 		int mIsTransparent:2;
 		bool bGlowing:1;						// Texture glows
+		bool bAutoGlowing : 1;					// Glow info is determined from texture image.
 		bool bFullbright:1;						// always draw fullbright
 		bool bSkybox:1;							// This is a skybox
-		bool bSkyColorDone:1;					// Fill color for sky
 		char bBrightmapChecked:1;				// Set to 1 if brightmap has been checked
 		bool bDisableFullbright:1;				// This texture will not be displayed as fullbright sprite
 		bool bNoFilter:1;
@@ -328,7 +330,6 @@ public:
 	MiscGLInfo gl_info;
 
 	void GetGlowColor(float *data);
-	PalEntry GetSkyCapColor(bool bottom);
 	bool isGlowing() { return gl_info.bGlowing; }
 	bool isFullbright() { return gl_info.bFullbright; }
 	void CreateDefaultBrightmap();
@@ -338,9 +339,11 @@ public:
 	bool ProcessData(unsigned char * buffer, int w, int h, bool ispatch);
 };
 
+class FxAddSub;
 // Texture manager
 class FTextureManager
 {
+	friend class FxAddSub;	// needs access to do a bounds check on the texture ID.
 public:
 	FTextureManager ();
 	~FTextureManager ();
@@ -412,7 +415,7 @@ public:
 
 	FTextureID CheckForTexture (const char *name, int usetype, BITFIELD flags=TEXMAN_TryAny);
 	FTextureID GetTexture (const char *name, int usetype, BITFIELD flags=0);
-	int ListTextures (const char *name, TArray<FTextureID> &list);
+	int ListTextures (const char *name, TArray<FTextureID> &list, bool listall = false);
 
 	void AddTexturesLump (const void *lumpdata, int lumpsize, int deflumpnum, int patcheslump, int firstdup=0, bool texture1=false);
 	void AddTexturesLumps (int lump1, int lump2, int patcheslump);
@@ -445,9 +448,6 @@ public:
 	void UnloadAll ();
 
 	int NumTextures () const { return (int)Textures.Size(); }
-
-	void WriteTexture (FArchive &arc, int picnum);
-	int ReadTexture (FArchive &arc);
 
 	void UpdateAnimations (DWORD mstime);
 	int GuesstimateNumTextures ();
@@ -564,7 +564,6 @@ protected:
 // A texture that can be drawn to.
 class DSimpleCanvas;
 class AActor;
-class FArchive;
 
 class FCanvasTexture : public FTexture
 {

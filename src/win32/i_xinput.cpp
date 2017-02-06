@@ -27,6 +27,23 @@
 
 // MACROS ------------------------------------------------------------------
 
+// This macro is defined by newer versions of xinput.h. In case we are
+// compiling with an older version, define it here.
+#ifndef XUSER_MAX_COUNT
+#define XUSER_MAX_COUNT                 4
+#endif
+
+// MinGW
+#ifndef XINPUT_DLL
+#define XINPUT_DLL_A  "xinput1_3.dll"
+#define XINPUT_DLL_W L"xinput1_3.dll"
+#ifdef UNICODE
+    #define XINPUT_DLL XINPUT_DLL_W
+#else
+    #define XINPUT_DLL XINPUT_DLL_A
+#endif
+#endif
+
 // TYPES -------------------------------------------------------------------
 
 typedef DWORD (WINAPI *XInputGetStateType)(DWORD index, XINPUT_STATE *state);

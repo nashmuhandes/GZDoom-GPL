@@ -340,7 +340,6 @@ struct mapthinghexen_t
 	BYTE		args[5];
 };
 
-class FArchive;
 struct FDoomEdEntry;
 
 // Internal representation of a mapthing

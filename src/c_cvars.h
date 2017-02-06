@@ -63,6 +63,7 @@ enum
 	CVAR_NOSAVE			= 4096, // when used with CVAR_SERVERINFO, do not save var to savegame
 	CVAR_MOD			= 8192,	// cvar was defined by a mod
 	CVAR_IGNORE			= 16384,// do not send cvar across the network/inaccesible from ACS (dummy mod cvar)
+	CVAR_CHEAT			= 32768,// can be set only when sv_cheats is enabled
 };
 
 union UCVarValue
@@ -81,12 +82,16 @@ enum ECVarType
 	CVAR_Float,
 	CVAR_String,
 	CVAR_Color,		// stored as CVAR_Int
-	CVAR_Dummy,		// just redirects to another cvar
+	CVAR_DummyBool,		// just redirects to another cvar
+	CVAR_DummyInt,		// just redirects to another cvar
+	CVAR_Dummy,			// Unknown
 	CVAR_GUID
 };
 
 class FConfigFile;
 class AActor;
+
+class FxCVar;
 
 class FBaseCVar
 {
@@ -211,6 +216,7 @@ void C_DeinitConsole();
 
 class FBoolCVar : public FBaseCVar
 {
+	friend class FxCVar;
 public:
 	FBoolCVar (const char *name, bool def, uint32 flags, void (*callback)(FBoolCVar &)=NULL);
 
@@ -236,6 +242,7 @@ protected:
 
 class FIntCVar : public FBaseCVar
 {
+	friend class FxCVar;
 public:
 	FIntCVar (const char *name, int def, uint32 flags, void (*callback)(FIntCVar &)=NULL);
 
@@ -263,6 +270,7 @@ protected:
 
 class FFloatCVar : public FBaseCVar
 {
+	friend class FxCVar;
 public:
 	FFloatCVar (const char *name, float def, uint32 flags, void (*callback)(FFloatCVar &)=NULL);
 
@@ -289,6 +297,7 @@ protected:
 
 class FStringCVar : public FBaseCVar
 {
+	friend class FxCVar;
 public:
 	FStringCVar (const char *name, const char *def, uint32 flags, void (*callback)(FStringCVar &)=NULL);
 	~FStringCVar ();
@@ -315,6 +324,7 @@ protected:
 
 class FColorCVar : public FIntCVar
 {
+	friend class FxCVar;
 public:
 	FColorCVar (const char *name, int def, uint32 flags, void (*callback)(FColorCVar &)=NULL);
 
@@ -339,6 +349,7 @@ protected:
 
 class FFlagCVar : public FBaseCVar
 {
+	friend class FxCVar;
 public:
 	FFlagCVar (const char *name, FIntCVar &realvar, uint32 bitval);
 
@@ -367,6 +378,7 @@ protected:
 
 class FMaskCVar : public FBaseCVar
 {
+	friend class FxCVar;
 public:
 	FMaskCVar (const char *name, FIntCVar &realvar, uint32 bitval);
 

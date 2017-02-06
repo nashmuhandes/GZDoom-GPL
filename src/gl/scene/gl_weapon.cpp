@@ -1,42 +1,30 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2000-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_weapon.cpp
 ** Weapon sprite drawing
 **
-**---------------------------------------------------------------------------
-** Copyright 2002-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
 */
+
 #include "gl/system/gl_system.h"
 #include "sbar.h"
 #include "r_utility.h"
@@ -44,6 +32,7 @@
 #include "doomstat.h"
 #include "d_player.h"
 #include "g_level.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_cvars.h"
@@ -57,6 +46,8 @@
 #include "gl/models/gl_models.h"
 #include "gl/shaders/gl_shader.h"
 #include "gl/textures/gl_material.h"
+#include "gl/renderer/gl_quaddrawer.h"
+#include "gl/stereo3d/gl_stereo3d.h"
 
 EXTERN_CVAR (Bool, r_drawplayersprites)
 EXTERN_CVAR(Float, transsouls)
@@ -80,8 +71,6 @@ void FGLRenderer::DrawPSprite (player_t * player,DPSprite *psp, float sx, float 
 	float			scale;
 	float			scalex;
 	float			ftexturemid;
-	                      // 4:3  16:9   16:10  17:10    5:4  17:10    21:9
-	static float xratio[] = {1.f, 3.f/4, 5.f/6, 40.f/51, 1.f, 40.f/51, 4.f/7};
 	
 	// [BB] In the HUD model step we just render the model and break out. 
 	if ( hudModelStep )
@@ -107,7 +96,7 @@ void FGLRenderer::DrawPSprite (player_t * player,DPSprite *psp, float sx, float 
 	tex->GetSpriteRect(&r);
 
 	// calculate edges of the shape
-	scalex = xratio[WidescreenRatio] * vw / 320;
+	scalex = (320.0f / (240.0f * WidescreenRatio)) * vw / 320;
 
 	tx = sx - (160 - r.left);
 	x1 = tx * scalex + vw/2;
@@ -141,19 +130,20 @@ void FGLRenderer::DrawPSprite (player_t * player,DPSprite *psp, float sx, float 
 	y1 = viewwindowy + vh / 2 - (ftexturemid * scale);
 	y2 = y1 + (r.height * scale) + 1;
 
-	if (!mirror)
+	if (!(mirror) != !(psp->Flags & PSPF_FLIP))
 	{
-		fU1=tex->GetSpriteUL();
-		fV1=tex->GetSpriteVT();
-		fU2=tex->GetSpriteUR();
-		fV2=tex->GetSpriteVB();
+		fU2 = tex->GetSpriteUL();
+		fV1 = tex->GetSpriteVT();
+		fU1 = tex->GetSpriteUR();
+		fV2 = tex->GetSpriteVB();
 	}
 	else
 	{
-		fU2=tex->GetSpriteUL();
-		fV1=tex->GetSpriteVT();
-		fU1=tex->GetSpriteUR();
-		fV2=tex->GetSpriteVB();
+		fU1 = tex->GetSpriteUL();
+		fV1 = tex->GetSpriteVT();
+		fU2 = tex->GetSpriteUR();
+		fV2 = tex->GetSpriteVB();
+		
 	}
 
 	if (tex->GetTransparent() || OverrideShader != -1)
@@ -161,16 +151,12 @@ void FGLRenderer::DrawPSprite (player_t * player,DPSprite *psp, float sx, float 
 		gl_RenderState.AlphaFunc(GL_GEQUAL, 0.f);
 	}
 	gl_RenderState.Apply();
-	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-	ptr->Set(x1, y1, 0, fU1, fV1);
-	ptr++;
-	ptr->Set(x1, y2, 0, fU1, fV2);
-	ptr++;
-	ptr->Set(x2, y1, 0, fU2, fV1);
-	ptr++;
-	ptr->Set(x2, y2, 0, fU2, fV2);
-	ptr++;
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+	FQuadDrawer qd;
+	qd.Set(0, x1, y1, 0, fU1, fV1);
+	qd.Set(1, x1, y2, 0, fU1, fV2);
+	qd.Set(2, x2, y1, 0, fU2, fV1);
+	qd.Set(3, x2, y2, 0, fU2, fV2);
+	qd.Render(GL_TRIANGLE_STRIP);
 	gl_RenderState.AlphaFunc(GL_GEQUAL, 0.5f);
 }
 
@@ -203,8 +189,6 @@ static bool isBright(DPSprite *psp)
 //
 //==========================================================================
 
-EXTERN_CVAR(Bool, gl_brightfog)
-
 void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 {
 	bool brightflash = false;
@@ -215,6 +199,8 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 	AActor * playermo=players[consoleplayer].camera;
 	player_t * player=playermo->player;
 	
+	s3d::Stereo3DMode::getCurrentMode().AdjustPlayerSprites();
+
 	// this is the same as the software renderer
 	if (!player ||
 		!r_drawplayersprites ||
@@ -324,21 +310,21 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 
 	visstyle_t vis;
 
-	vis.RenderStyle=playermo->RenderStyle;
-	vis.Alpha=playermo->Alpha;
-	vis.colormap = NULL;
-	if (playermo->Inventory) 
+	vis.RenderStyle = STYLE_Count;
+	vis.Alpha = playermo->Alpha;
+	vis.Invert = false;
+	playermo->AlterWeaponSprite(&vis);
+	
+	FRenderStyle RenderStyle;
+	if (vis.RenderStyle == STYLE_Count) RenderStyle = playermo->RenderStyle;
+	else RenderStyle = vis.RenderStyle;
+
+	if (vis.Invert)
 	{
-		playermo->Inventory->AlterWeaponSprite(&vis);
-		if (vis.colormap >= SpecialColormaps[0].Colormap && 
-			vis.colormap < SpecialColormaps[SpecialColormaps.Size()].Colormap && 
-			gl_fixedcolormap == CM_DEFAULT)
-		{
-			// this only happens for Strife's inverted weapon sprite
-			vis.RenderStyle.Flags |= STYLEF_InvertSource;
-		}
+		// this only happens for Strife's inverted weapon sprite
+		RenderStyle.Flags |= STYLEF_InvertSource;
 	}
-	if (vis.RenderStyle.AsDWORD == 0)
+	if (RenderStyle.AsDWORD == 0)
 	{
 		// This is RenderStyle None.
 		return;
@@ -348,32 +334,32 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 
 	int OverrideShader = -1;
 	float trans = 0.f;
-	if (vis.RenderStyle.BlendOp >= STYLEOP_Fuzz && vis.RenderStyle.BlendOp <= STYLEOP_FuzzOrRevSub)
+	if (RenderStyle.BlendOp >= STYLEOP_Fuzz && RenderStyle.BlendOp <= STYLEOP_FuzzOrRevSub)
 	{
-		vis.RenderStyle.CheckFuzz();
-		if (vis.RenderStyle.BlendOp == STYLEOP_Fuzz)
+		RenderStyle.CheckFuzz();
+		if (RenderStyle.BlendOp == STYLEOP_Fuzz)
 		{
 			if (gl_fuzztype != 0)
 			{
 				// Todo: implement shader selection here
-				vis.RenderStyle = LegacyRenderStyles[STYLE_Translucent];
+				RenderStyle = LegacyRenderStyles[STYLE_Translucent];
 				OverrideShader = gl_fuzztype + 4;
 				trans = 0.99f;	// trans may not be 1 here
 			}
 			else
 			{
-				vis.RenderStyle.BlendOp = STYLEOP_Shadow;
+				RenderStyle.BlendOp = STYLEOP_Shadow;
 			}
 		}
 	}
 
-	gl_SetRenderStyle(vis.RenderStyle, false, false);
+	gl_SetRenderStyle(RenderStyle, false, false);
 
-	if (vis.RenderStyle.Flags & STYLEF_TransSoulsAlpha)
+	if (RenderStyle.Flags & STYLEF_TransSoulsAlpha)
 	{
 		trans = transsouls;
 	}
-	else if (vis.RenderStyle.Flags & STYLEF_Alpha1)
+	else if (RenderStyle.Flags & STYLEF_Alpha1)
 	{
 		trans = 1.f;
 	}
@@ -384,7 +370,12 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 
 	// now draw the different layers of the weapon
 	gl_RenderState.EnableBrightmap(true);
-	gl_RenderState.SetObjectColor(ThingColor);
+	PalEntry finalcol(ThingColor.a,
+		ThingColor.r * viewsector->SpecialColors[sector_t::sprites].r / 255,
+		ThingColor.g * viewsector->SpecialColors[sector_t::sprites].g / 255,
+		ThingColor.b * viewsector->SpecialColors[sector_t::sprites].b / 255);
+
+	gl_RenderState.SetObjectColor(finalcol);
 	gl_RenderState.AlphaFunc(GL_GEQUAL, gl_mask_sprite_threshold);
 
 	// hack alert! Rather than changing everything in the underlying lighting code let's just temporarily change
@@ -416,7 +407,7 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 				ll = 255;
 			}
 			// set the lighting parameters
-			if (vis.RenderStyle.BlendOp == STYLEOP_Shadow)
+			if (RenderStyle.BlendOp == STYLEOP_Shadow)
 			{
 				gl_RenderState.SetColor(0.2f, 0.2f, 0.2f, 0.33f, cmc.desaturation);
 			}
@@ -452,7 +443,7 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 			}
 
 
-			DrawPSprite(player, psp, sx, sy, hudModelStep, OverrideShader, !!(vis.RenderStyle.Flags & STYLEF_RedIsAlpha));
+			DrawPSprite(player, psp, sx, sy, hudModelStep, OverrideShader, !!(RenderStyle.Flags & STYLEF_RedIsAlpha));
 		}
 	}
 	gl_RenderState.SetObjectColor(0xffffffff);

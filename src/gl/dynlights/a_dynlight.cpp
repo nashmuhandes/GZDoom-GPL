@@ -1,10 +1,32 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** a_dynlight.cpp
 ** Implements actors representing dynamic lights (hardware independent)
 **
+**
+** all functions marked with [TS] are licensed under
 **---------------------------------------------------------------------------
 ** Copyright 2003 Timothy Stump
-** Copyright 2005-2016 Christoph Oelckers
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -18,8 +40,6 @@
 **    documentation and/or other materials provided with the distribution.
 ** 3. The name of the author may not be used to endorse or promote products
 **    derived from this software without specific prior written permission.
-** 4. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
 **
 ** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 ** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -42,13 +62,16 @@
 #include "p_local.h"
 #include "c_dispatch.h"
 #include "g_level.h"
-#include "thingdef/thingdef.h"
+#include "scripting/thingdef.h"
 #include "i_system.h"
 #include "templates.h"
 #include "doomdata.h"
 #include "r_utility.h"
+#include "p_local.h"
 #include "portal.h"
 #include "doomstat.h"
+#include "serializer.h"
+#include "g_levellocals.h"
 
 
 #include "gl/renderer/gl_renderer.h"
@@ -56,9 +79,8 @@
 #include "gl/dynlights/gl_dynlight.h"
 #include "gl/utility/gl_convert.h"
 #include "gl/utility/gl_templates.h"
+#include "gl/system//gl_interface.h"
 
-EXTERN_CVAR (Float, gl_lights_size);
-EXTERN_CVAR (Bool, gl_lights_additive);
 EXTERN_CVAR(Int, vid_renderer)
 
 
@@ -87,41 +109,7 @@ DEFINE_CLASS_PROPERTY(type, S, DynamicLight)
 // which is controlled by flags
 //
 //==========================================================================
-IMPLEMENT_CLASS (ADynamicLight)
-IMPLEMENT_CLASS (AVavoomLight)
-IMPLEMENT_CLASS (AVavoomLightWhite)
-IMPLEMENT_CLASS (AVavoomLightColor)
-
-void AVavoomLight::BeginPlay ()
-{
-	// This must not call Super::BeginPlay!
-	ChangeStatNum(STAT_DLIGHT);
-	if (Sector) AddZ(-Sector->floorplane.ZatPoint(this), false);
-	lighttype = PointLight;
-}
-
-void AVavoomLightWhite::BeginPlay ()
-{
-	m_Radius[0] = args[0] * 4;
-	args[LIGHT_RED] = 128;
-	args[LIGHT_GREEN] = 128;
-	args[LIGHT_BLUE] = 128;
-
-	Super::BeginPlay();
-}
-
-void AVavoomLightColor::BeginPlay ()
-{
-	int l_args[5];
-	memcpy(l_args, args, sizeof(l_args));
-	memset(args, 0, sizeof(args));
-	m_Radius[0] = l_args[0] * 4;
-	args[LIGHT_RED] = l_args[1] >> 1;
-	args[LIGHT_GREEN] = l_args[2] >> 1;
-	args[LIGHT_BLUE] = l_args[3] >> 1;
-
-	Super::BeginPlay();
-}
+IMPLEMENT_CLASS(ADynamicLight, false, false)
 
 static FRandom randLight;
 
@@ -136,27 +124,33 @@ static FRandom randLight;
 //
 //
 //==========================================================================
-void ADynamicLight::Serialize(FArchive &arc)
+void ADynamicLight::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << lightflags << lighttype;
-	arc << m_tickCount << m_currentRadius;
-	arc << m_Radius[0] << m_Radius[1];
+	auto def = static_cast<ADynamicLight*>(GetDefault());
+	arc("lightflags", lightflags, def->lightflags)
+		("lighttype", lighttype, def->lighttype)
+		("tickcount", m_tickCount, def->m_tickCount)
+		("currentradius", m_currentRadius, def->m_currentRadius);
 
-	if (lighttype == PulseLight) arc << m_lastUpdate << m_cycler;
-	if (arc.IsLoading())
-	{
-		// The default constructor which is used for creating objects before deserialization will not set this variable.
-		// It needs to be true for all placed lights.
-		visibletoplayer = true;
-		LinkLight();
-	}
+	if (lighttype == PulseLight)
+		arc("lastupdate", m_lastUpdate, def->m_lastUpdate)
+			("cycler", m_cycler, def->m_cycler);
 }
 
 
+void ADynamicLight::PostSerialize()
+{
+	Super::PostSerialize();
+	// The default constructor which is used for creating objects before deserialization will not set this variable.
+	// It needs to be true for all placed lights.
+	visibletoplayer = true;
+	LinkLight();
+}
+
 //==========================================================================
 //
-//
+// [TS]
 //
 //==========================================================================
 void ADynamicLight::BeginPlay()
@@ -164,14 +158,19 @@ void ADynamicLight::BeginPlay()
 	//Super::BeginPlay();
 	ChangeStatNum(STAT_DLIGHT);
 
-	m_Radius[0] = args[LIGHT_INTENSITY];
-	m_Radius[1] = args[LIGHT_SECONDARY_INTENSITY];
+	specialf1 = DAngle(double(SpawnAngle)).Normalized360().Degrees;
 	visibletoplayer = true;
+
+	if (gl.legacyMode && (flags4 & MF4_ATTENUATE))
+	{
+		args[LIGHT_INTENSITY] = args[LIGHT_INTENSITY] * 2 / 3;
+		args[LIGHT_SECONDARY_INTENSITY] = args[LIGHT_SECONDARY_INTENSITY] * 2 / 3;
+	}
 }
 
 //==========================================================================
 //
-//
+// [TS]
 //
 //==========================================================================
 void ADynamicLight::PostBeginPlay()
@@ -189,7 +188,7 @@ void ADynamicLight::PostBeginPlay()
 
 //==========================================================================
 //
-//
+// [TS]
 //
 //==========================================================================
 void ADynamicLight::Activate(AActor *activator)
@@ -197,25 +196,26 @@ void ADynamicLight::Activate(AActor *activator)
 	//Super::Activate(activator);
 	flags2&=~MF2_DORMANT;	
 
-	m_currentRadius = float(m_Radius[0]);
+	m_currentRadius = float(args[LIGHT_INTENSITY]);
 	m_tickCount = 0;
 
 	if (lighttype == PulseLight)
 	{
-		float pulseTime = Angles.Yaw.Degrees / TICRATE;
+		float pulseTime = specialf1 / TICRATE;
 		
 		m_lastUpdate = level.maptime;
-		m_cycler.SetParams(float(m_Radius[1]), float(m_Radius[0]), pulseTime);
+		m_cycler.SetParams(float(args[LIGHT_SECONDARY_INTENSITY]), float(args[LIGHT_INTENSITY]), pulseTime);
 		m_cycler.ShouldCycle(true);
 		m_cycler.SetCycleType(CYCLE_Sin);
-		m_currentRadius = (BYTE)m_cycler.GetVal();
+		m_currentRadius = m_cycler.GetVal();
 	}
+	if (m_currentRadius <= 0) m_currentRadius = 1;
 }
 
 
 //==========================================================================
 //
-//
+// [TS]
 //
 //==========================================================================
 void ADynamicLight::Deactivate(AActor *activator)
@@ -227,7 +227,7 @@ void ADynamicLight::Deactivate(AActor *activator)
 
 //==========================================================================
 //
-//
+// [TS]
 //
 //==========================================================================
 void ADynamicLight::Tick()
@@ -266,24 +266,25 @@ void ADynamicLight::Tick()
 
 	case FlickerLight:
 	{
-		BYTE rnd = randLight();
-		float pct = Angles.Yaw.Degrees / 360.f;
+		int rnd = randLight();
+		float pct = specialf1 / 360.f;
 		
-		m_currentRadius = float(m_Radius[rnd >= pct * 255]);
+		m_currentRadius = float(args[LIGHT_INTENSITY + (rnd >= pct * 255)]);
 		break;
 	}
 
 	case RandomFlickerLight:
 	{
-		int flickerRange = m_Radius[1] - m_Radius[0];
+		int flickerRange = args[LIGHT_SECONDARY_INTENSITY] - args[LIGHT_INTENSITY];
 		float amt = randLight() / 255.f;
 		
-		m_tickCount++;
-		
-		if (m_tickCount > Angles.Yaw.Degrees)
+		if (m_tickCount > specialf1)
 		{
-			m_currentRadius = float(m_Radius[0] + (amt * flickerRange));
 			m_tickCount = 0;
+		}
+		if (m_tickCount++ == 0 || m_currentRadius > args[LIGHT_SECONDARY_INTENSITY])
+		{
+			m_currentRadius = float(args[LIGHT_INTENSITY] + (amt * flickerRange));
 		}
 		break;
 	}
@@ -292,8 +293,8 @@ void ADynamicLight::Tick()
 	// These need some more work elsewhere
 	case ColorFlickerLight:
 	{
-		BYTE rnd = randLight();
-		float pct = Angles.Yaw.Degrees/360.f;
+		int rnd = randLight();
+		float pct = specialf1/360.f;
 		
 		m_currentRadius = m_Radius[rnd >= pct * 255];
 		break;
@@ -301,14 +302,14 @@ void ADynamicLight::Tick()
 
 	case RandomColorFlickerLight:
 	{
-		int flickerRange = m_Radius[1] - m_Radius[0];
+		int flickerRange = args[LIGHT_SECONDARY_INTENSITY] - args[LIGHT_INTENSITY];
 		float amt = randLight() / 255.f;
 		
 		m_tickCount++;
 		
-		if (m_tickCount > Angles.Yaw.Degrees)
+		if (m_tickCount > specialf1)
 		{
-			m_currentRadius = m_Radius[0] + (amt * flickerRange);
+			m_currentRadius = args[LIGHT_INTENSITY] + (amt * flickerRange);
 			m_tickCount = 0;
 		}
 		break;
@@ -330,10 +331,10 @@ void ADynamicLight::Tick()
 	}
 
 	case PointLight:
-		m_currentRadius = float(m_Radius[0]);
+		m_currentRadius = float(args[LIGHT_INTENSITY]);
 		break;
 	}
-
+	if (m_currentRadius <= 0) m_currentRadius = 1;
 	UpdateLocation();
 }
 
@@ -365,6 +366,16 @@ void ADynamicLight::UpdateLocation()
 			Prev = target->Pos();
 			subsector = R_PointInSubsector(Prev);
 			Sector = subsector->sector;
+
+			// Some z-coordinate fudging to prevent the light from getting too close to the floor or ceiling planes. With proper attenuation this would render them invisible.
+			// A distance of 5 is needed so that the light's effect doesn't become too small.
+			if (Z() < target->floorz + 5.) 	SetZ(target->floorz + 5.);
+			else if (Z() > target->ceilingz - 5.) 	SetZ(target->ceilingz - 5.);
+		}
+		else
+		{
+			if (Z() < floorz + 5.) 	SetZ(floorz + 5.);
+			else if (Z() > ceilingz - 5.) 	SetZ(ceilingz - 5.);
 		}
 
 
@@ -373,13 +384,14 @@ void ADynamicLight::UpdateLocation()
 
 		if (lighttype == FlickerLight || lighttype == RandomFlickerLight || lighttype == PulseLight)
 		{
-			intensity = float(MAX(m_Radius[0], m_Radius[1]));
+			intensity = float(MAX(args[LIGHT_INTENSITY], args[LIGHT_SECONDARY_INTENSITY]));
 		}
 		else
 		{
 			intensity = m_currentRadius;
 		}
-		radius = intensity * 2.0f * gl_lights_size;
+		radius = intensity * 2.0f;
+		if (radius < m_currentRadius * 2) radius = m_currentRadius * 2;
 
 		if (X() != oldx || Y() != oldy || radius != oldradius)
 		{
@@ -543,81 +555,107 @@ double ADynamicLight::DistToSeg(const DVector3 &pos, seg_t *seg)
 // to sidedefs and sector parts.
 //
 //==========================================================================
+struct LightLinkEntry
+{
+	subsector_t *sub;
+	DVector3 pos;
+};
+static TArray<LightLinkEntry> collected_ss;
 
-void ADynamicLight::CollectWithinRadius(const DVector3 &pos, subsector_t *subSec, float radius)
+void ADynamicLight::CollectWithinRadius(const DVector3 &opos, subsector_t *subSec, float radius)
 {
 	if (!subSec) return;
-
+	collected_ss.Clear();
+	collected_ss.Push({ subSec, opos });
 	subSec->validcount = ::validcount;
 
-	touching_subsectors = AddLightNode(&subSec->lighthead, subSec, this, touching_subsectors);
-	if (subSec->sector->validcount != ::validcount)
+	for (unsigned i = 0; i < collected_ss.Size(); i++)
 	{
-		touching_sector = AddLightNode(&subSec->render_sector->lighthead, subSec->sector, this, touching_sector);
-		subSec->sector->validcount = ::validcount;
-	}
+		subSec = collected_ss[i].sub;
 
-	for (unsigned int i = 0; i < subSec->numlines; i++)
-	{
-		seg_t * seg = subSec->firstline + i;
-
-		// check distance from x/y to seg and if within radius add this seg and, if present the opposing subsector (lather/rinse/repeat)
-		// If out of range we do not need to bother with this seg.
-		if (DistToSeg(pos, seg) <= radius)
+		touching_subsectors = AddLightNode(&subSec->lighthead, subSec, this, touching_subsectors);
+		if (subSec->sector->validcount != ::validcount)
 		{
-			if (seg->sidedef && seg->linedef && seg->linedef->validcount != ::validcount)
+			touching_sector = AddLightNode(&subSec->render_sector->lighthead, subSec->sector, this, touching_sector);
+			subSec->sector->validcount = ::validcount;
+		}
+
+		for (unsigned int j = 0; j < subSec->numlines; ++j)
+		{
+			auto &pos = collected_ss[i].pos;
+			seg_t *seg = subSec->firstline + j;
+
+			// check distance from x/y to seg and if within radius add this seg and, if present the opposing subsector (lather/rinse/repeat)
+			// If out of range we do not need to bother with this seg.
+			if (DistToSeg(pos, seg) <= radius)
 			{
-				// light is in front of the seg
-				if ((pos.Y - seg->v1->fY()) * (seg->v2->fX() - seg->v1->fX()) + (seg->v1->fX() - pos.X) * (seg->v2->fY() - seg->v1->fY()) <= 0)
+				if (seg->sidedef && seg->linedef && seg->linedef->validcount != ::validcount)
 				{
-					seg->linedef->validcount = validcount;
-					touching_sides = AddLightNode(&seg->sidedef->lighthead, seg->sidedef, this, touching_sides);
-				}
-			}
-			if (seg->linedef)
-			{
-				FLinePortal *port = seg->linedef->getPortal();
-				if (port && port->mType == PORTT_LINKED)
-				{
-					line_t *other = port->mDestination;
-					if (other->validcount != ::validcount)
+					// light is in front of the seg
+					if ((pos.Y - seg->v1->fY()) * (seg->v2->fX() - seg->v1->fX()) + (seg->v1->fX() - pos.X) * (seg->v2->fY() - seg->v1->fY()) <= 0)
 					{
-						subsector_t *othersub = R_PointInSubsector(other->v1->fPos() + other->Delta() / 2);
-						if (othersub->validcount != ::validcount) CollectWithinRadius(PosRelative(other), othersub, radius);
+						seg->linedef->validcount = validcount;
+						touching_sides = AddLightNode(&seg->sidedef->lighthead, seg->sidedef, this, touching_sides);
+					}
+				}
+				if (seg->linedef)
+				{
+					FLinePortal *port = seg->linedef->getPortal();
+					if (port && port->mType == PORTT_LINKED)
+					{
+						line_t *other = port->mDestination;
+						if (other->validcount != ::validcount)
+						{
+							subsector_t *othersub = R_PointInSubsector(other->v1->fPos() + other->Delta() / 2);
+							if (othersub->validcount != ::validcount)
+							{
+								othersub->validcount = ::validcount;
+								collected_ss.Push({ othersub, PosRelative(other) });
+							}
+						}
+					}
+				}
+
+				seg_t *partner = seg->PartnerSeg;
+				if (partner)
+				{
+					subsector_t *sub = partner->Subsector;
+					if (sub != NULL && sub->validcount != ::validcount)
+					{
+						sub->validcount = ::validcount;
+						collected_ss.Push({ sub, pos });
 					}
 				}
 			}
-
-			seg_t *partner = seg->PartnerSeg;
-			if (partner)
+		}
+		sector_t *sec = subSec->sector;
+		if (!sec->PortalBlocksSight(sector_t::ceiling))
+		{
+			line_t *other = subSec->firstline->linedef;
+			if (sec->GetPortalPlaneZ(sector_t::ceiling) < Z() + radius)
 			{
-				subsector_t *sub = partner->Subsector;
-				if (sub != NULL && sub->validcount != ::validcount)
+				DVector2 refpos = other->v1->fPos() + other->Delta() / 2 + sec->GetPortalDisplacement(sector_t::ceiling);
+				subsector_t *othersub = R_PointInSubsector(refpos);
+				if (othersub->validcount != ::validcount)
 				{
-					CollectWithinRadius(pos, sub, radius);
+					othersub->validcount = ::validcount;
+					collected_ss.Push({ othersub, PosRelative(othersub->sector) });
 				}
 			}
 		}
-	}
-	sector_t *sec = subSec->sector;
-	if (!sec->PortalBlocksSight(sector_t::ceiling))
-	{
-		line_t *other = subSec->firstline->linedef;
-		if (sec->GetPortalPlaneZ(sector_t::ceiling) < Z() + radius)
+		if (!sec->PortalBlocksSight(sector_t::floor))
 		{
-			DVector2 refpos = other->v1->fPos() + other->Delta() / 2 + sec->GetPortalDisplacement(sector_t::ceiling);
-			subsector_t *othersub = R_PointInSubsector(refpos);
-			if (othersub->validcount != ::validcount) CollectWithinRadius(PosRelative(othersub->sector), othersub, radius);
-		}
-	}
-	if (!sec->PortalBlocksSight(sector_t::floor))
-	{
-		line_t *other = subSec->firstline->linedef;
-		if (sec->GetPortalPlaneZ(sector_t::floor) > Z() - radius)
-		{
-			DVector2 refpos = other->v1->fPos() + other->Delta() / 2 + sec->GetPortalDisplacement(sector_t::floor);
-			subsector_t *othersub = R_PointInSubsector(refpos);
-			if (othersub->validcount != ::validcount) CollectWithinRadius(PosRelative(othersub->sector), othersub, radius);
+			line_t *other = subSec->firstline->linedef;
+			if (sec->GetPortalPlaneZ(sector_t::floor) > Z() - radius)
+			{
+				DVector2 refpos = other->v1->fPos() + other->Delta() / 2 + sec->GetPortalDisplacement(sector_t::floor);
+				subsector_t *othersub = R_PointInSubsector(refpos);
+				if (othersub->validcount != ::validcount)
+				{
+					othersub->validcount = ::validcount;
+					collected_ss.Push({ othersub, PosRelative(othersub->sector) });
+				}
+			}
 		}
 	}
 }
@@ -723,10 +761,10 @@ void ADynamicLight::UnlinkLight ()
 	while (touching_sector) touching_sector = DeleteLightNode(touching_sector);
 }
 
-void ADynamicLight::Destroy()
+void ADynamicLight::OnDestroy()
 {
 	UnlinkLight();
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 

@@ -6,7 +6,11 @@
 #include "win32gliface.h"
 #endif
 
+#include <memory>
+
 class FHardwareTexture;
+class FSimpleVertexBuffer;
+class FGLDebug;
 
 extern long gl_frameMS;
 extern long gl_frameCount;
@@ -67,7 +71,7 @@ public:
 
 	void FillSimplePoly(FTexture *tex, FVector2 *points, int npoints,
 		double originx, double originy, double scalex, double scaley,
-		DAngle rotation, FDynamicColormap *colormap, int lightlevel);
+		DAngle rotation, FDynamicColormap *colormap, PalEntry flatcolor, int lightlevel, int bottomclip);
 
 	FNativePalette *CreatePalette(FRemapTable *remap);
 
@@ -94,7 +98,14 @@ private:
 
 	class Wiper
 	{
+
+	protected:
+		FSimpleVertexBuffer *mVertexBuf;
+
+		void MakeVBO(OpenGLFrameBuffer *fb);
+
 	public:
+		Wiper();
 		virtual ~Wiper();
 		virtual bool Run(int ticks, OpenGLFrameBuffer *fb) = 0;
 	};
@@ -108,6 +119,8 @@ private:
 	FHardwareTexture *wipeendscreen;
 
 	bool HWGammaActive = false;
+
+	std::shared_ptr<FGLDebug> mDebug;
 
 public:
 	AActor * LastCamera;

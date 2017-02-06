@@ -1,41 +1,27 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_portal.cpp
 **   Generalized portal maintenance classes for skyboxes, horizons etc.
-**   Requires a stencil buffer!
-**
-**---------------------------------------------------------------------------
-** Copyright 2004-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -56,6 +42,7 @@
 #include "gl/renderer/gl_lightdata.h"
 #include "gl/renderer/gl_renderer.h"
 #include "gl/renderer/gl_renderstate.h"
+#include "gl/renderer/gl_quaddrawer.h"
 #include "gl/dynlights/gl_glow.h"
 #include "gl/data/gl_data.h"
 #include "gl/data/gl_vertexbuffer.h"
@@ -128,16 +115,22 @@ void GLPortal::ClearScreen()
 	bool multi = !!glIsEnabled(GL_MULTISAMPLE);
 	gl_MatrixStack.Push(gl_RenderState.mViewMatrix);
 	gl_MatrixStack.Push(gl_RenderState.mProjectionMatrix);
-	screen->Begin2D(false);
-	screen->Dim(0, 1.f, 0, 0, SCREENWIDTH, SCREENHEIGHT);
+
+	gl_RenderState.mViewMatrix.loadIdentity();
+	gl_RenderState.mProjectionMatrix.ortho(0, SCREENWIDTH, SCREENHEIGHT, 0, -1.0f, 1.0f);
+	gl_RenderState.ApplyMatrices();
+
+	glDisable(GL_MULTISAMPLE);
+	glDisable(GL_DEPTH_TEST);
+
+	glDrawArrays(GL_TRIANGLE_STRIP, FFlatVertexBuffer::FULLSCREEN_INDEX, 4);
+
 	glEnable(GL_DEPTH_TEST);
 	gl_MatrixStack.Pop(gl_RenderState.mProjectionMatrix);
 	gl_MatrixStack.Pop(gl_RenderState.mViewMatrix);
 	gl_RenderState.ApplyMatrices();
 	if (multi) glEnable(GL_MULTISAMPLE);
-	gl_RenderState.Set2DMode(false);
 }
-
 
 //-----------------------------------------------------------------------------
 //
@@ -148,37 +141,24 @@ void GLPortal::DrawPortalStencil()
 {
 	if (mPrimIndices.Size() == 0)
 	{
-		bool cap = NeedCap() && lines.Size() > 1;
-		mPrimIndices.Resize(2 * lines.Size() + 4 * cap);
+		mPrimIndices.Resize(2 * lines.Size());
 
-		for (unsigned int i = 0; i<lines.Size(); i++)
+		for (unsigned int i = 0; i < lines.Size(); i++)
 		{
-			lines[i].RenderWall(GLWall::RWF_NORENDER, &mPrimIndices[i * 2]);
-		}
-
-		if (cap)
-		{
-			// Cap the stencil at the top and bottom
-			int n = lines.Size() * 2;
-			FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-			ptr[0].Set(-32767.0f, 32767.0f, -32767.0f, 0, 0);
-			ptr[1].Set(-32767.0f, 32767.0f, 32767.0f, 0, 0);
-			ptr[2].Set(32767.0f, 32767.0f, 32767.0f, 0, 0);
-			ptr[3].Set(32767.0f, 32767.0f, -32767.0f, 0, 0);
-			ptr += 4;
-			mPrimIndices[n + 1] = GLRenderer->mVBO->GetCount(ptr, &mPrimIndices[n]);
-			ptr[0].Set(-32767.0f, -32767.0f, -32767.0f, 0, 0);
-			ptr[1].Set(-32767.0f, -32767.0f, 32767.0f, 0, 0);
-			ptr[2].Set(32767.0f, -32767.0f, 32767.0f, 0, 0);
-			ptr[3].Set(32767.0f, -32767.0f, -32767.0f, 0, 0);
-			ptr += 4;
-			mPrimIndices[n + 3] = GLRenderer->mVBO->GetCount(ptr, &mPrimIndices[n + 2]);
+			if (gl.buffermethod != BM_DEFERRED) lines[i].MakeVertices(false);
+			mPrimIndices[i * 2] = lines[i].vertindex;
+			mPrimIndices[i * 2 + 1] = lines[i].vertcount;
 		}
 	}
 	gl_RenderState.Apply();
 	for (unsigned int i = 0; i < mPrimIndices.Size(); i += 2)
 	{
 		GLRenderer->mVBO->RenderArray(GL_TRIANGLE_FAN, mPrimIndices[i], mPrimIndices[i + 1]);
+	}
+	if (NeedCap() && lines.Size() > 1)
+	{
+		GLRenderer->mVBO->RenderArray(GL_TRIANGLE_FAN, FFlatVertexBuffer::STENCILTOP_INDEX, 4);
+		GLRenderer->mVBO->RenderArray(GL_TRIANGLE_FAN, FFlatVertexBuffer::STENCILBOTTOM_INDEX, 4);
 	}
 }
 
@@ -196,12 +176,12 @@ void GLPortal::DrawPortalStencil()
 bool GLPortal::Start(bool usestencil, bool doquery)
 {
 	rendered_portals++;
-	PortalAll.Clock();
+//	PortalAll.Clock();
 	if (usestencil)
 	{
 		if (!gl_portals) 
 		{
-			PortalAll.Unclock();
+//			PortalAll.Unclock();
 			return false;
 		}
 	
@@ -303,12 +283,14 @@ bool GLPortal::Start(bool usestencil, bool doquery)
 
 	// save viewpoint
 	savedViewPos = ViewPos;
+	savedViewActorPos = ViewActorPos;
+	savedshowviewer = r_showviewer;
 	savedAngle = ViewAngle;
 	savedviewactor=GLRenderer->mViewActor;
 	savedviewarea=in_area;
 	savedviewpath[0] = ViewPath[0];
 	savedviewpath[1] = ViewPath[1];
-	savedvisibility = camera ? camera->renderflags & RF_INVISIBLE : ActorRenderFlags::FromInt(0);
+	savedvisibility = camera ? camera->renderflags & RF_MAYBEINVISIBLE : ActorRenderFlags::FromInt(0);
 
 
 	PrevPortal = GLRenderer->mCurrentPortal;
@@ -317,7 +299,7 @@ bool GLPortal::Start(bool usestencil, bool doquery)
 	GLRenderer->mCurrentPortal = this;
 
 	if (PrevPortal != NULL) PrevPortal->PushState();
-	PortalAll.Unclock();
+//	PortalAll.Unclock();
 	return true;
 }
 
@@ -373,10 +355,12 @@ void GLPortal::End(bool usestencil)
 		ViewPath[0] = savedviewpath[0];
 		ViewPath[1] = savedviewpath[1];
 		ViewPos = savedViewPos;
+		r_showviewer = savedshowviewer;
+		ViewActorPos = savedViewActorPos;
 		ViewAngle = savedAngle;
 		GLRenderer->mViewActor=savedviewactor;
 		in_area=savedviewarea;
-		if (camera != nullptr) camera->renderflags = (camera->renderflags & ~RF_INVISIBLE) | savedvisibility;
+		if (camera != nullptr) camera->renderflags = (camera->renderflags & ~RF_MAYBEINVISIBLE) | savedvisibility;
 		GLRenderer->SetupView(ViewPos.X, ViewPos.Y, ViewPos.Z, ViewAngle, !!(MirrorFlag & 1), !!(PlaneMirrorFlag & 1));
 
 		{
@@ -429,6 +413,8 @@ void GLPortal::End(bool usestencil)
 			glDepthMask(true);
 		}
 		// Restore the old view
+		r_showviewer = savedshowviewer;
+		ViewActorPos = savedViewActorPos;
 		ViewPos = savedViewPos;
 		ViewAngle = savedAngle;
 		GLRenderer->mViewActor=savedviewactor;
@@ -443,14 +429,16 @@ void GLPortal::End(bool usestencil)
 		glDepthFunc(GL_LEQUAL);
 		glDepthRange(0, 1);
 		{
-			ScopedColorMask colorMask(0, 0, 0, 0); 
-			// glColorMask(0,0,0,0);						// no graphics
+			ScopedColorMask colorMask(0, 0, 0, 1); // mark portal in alpha channel but don't touch color
 			gl_RenderState.SetEffect(EFF_STENCIL);
 			gl_RenderState.EnableTexture(false);
+			gl_RenderState.BlendFunc(GL_ONE, GL_ZERO);
+			gl_RenderState.BlendEquation(GL_FUNC_ADD);
+			gl_RenderState.Apply();
 			DrawPortalStencil();
 			gl_RenderState.SetEffect(EFF_NONE);
 			gl_RenderState.EnableTexture(true);
-		} // glColorMask(1, 1, 1, 1);
+		}
 		glDepthFunc(GL_LESS);
 	}
 	PortalAll.Unclock();
@@ -646,6 +634,7 @@ void GLSkyboxPortal::DrawContents()
 
 	bool oldclamp = gl_RenderState.SetDepthClamp(false);
 	ViewPos = origin->InterpolatedPosition(r_TicFracF);
+	ViewActorPos = origin->Pos();
 	ViewAngle += (origin->PrevAngles.Yaw + deltaangle(origin->PrevAngles.Yaw, origin->Angles.Yaw) * r_TicFracF);
 
 	// Don't let the viewpoint be too close to a floor or ceiling
@@ -747,6 +736,7 @@ void GLSectorStackPortal::DrawContents()
 	FPortal *portal = origin;
 
 	ViewPos += origin->mDisplacement;
+	ViewActorPos += origin->mDisplacement;
 	GLRenderer->mViewActor = NULL;
 
 	// avoid recursions!
@@ -790,28 +780,34 @@ void GLSectorStackPortal::DrawContents()
 
 void GLPlaneMirrorPortal::DrawContents()
 {
-	if (renderdepth>r_mirror_recursions) 
+	if (renderdepth > r_mirror_recursions)
 	{
 		ClearScreen();
 		return;
 	}
+	// A plane mirror needs to flip the portal exclusion logic because inside the mirror, up is down and down is up.
+	std::swap(instack[sector_t::floor], instack[sector_t::ceiling]);
 
-	int old_pm=PlaneMirrorMode;
+	int old_pm = PlaneMirrorMode;
+
+	// the player is always visible in a mirror.
+	r_showviewer = true;
 
 	double planez = origin->ZatPoint(ViewPos);
 	ViewPos.Z = 2 * planez - ViewPos.Z;
 	GLRenderer->mViewActor = NULL;
 	PlaneMirrorMode = origin->fC() < 0 ? -1 : 1;
-	
+
 	PlaneMirrorFlag++;
-	GLRenderer->SetupView(ViewPos.X, ViewPos.Y, ViewPos.Z, ViewAngle, !!(MirrorFlag&1), !!(PlaneMirrorFlag&1));
+	GLRenderer->SetupView(ViewPos.X, ViewPos.Y, ViewPos.Z, ViewAngle, !!(MirrorFlag & 1), !!(PlaneMirrorFlag & 1));
 	ClearClipper();
 
-	gl_RenderState.SetClipHeight(planez, PlaneMirrorMode < 0? -1.f : 1.f);
+	gl_RenderState.SetClipHeight(planez, PlaneMirrorMode < 0 ? -1.f : 1.f);
 	GLRenderer->DrawScene(DM_PORTAL);
 	gl_RenderState.SetClipHeight(0.f, 0.f);
 	PlaneMirrorFlag--;
-	PlaneMirrorMode=old_pm;
+	PlaneMirrorMode = old_pm;
+	std::swap(instack[sector_t::floor], instack[sector_t::ceiling]);
 }
 
 void GLPlaneMirrorPortal::PushState()
@@ -918,6 +914,8 @@ void GLMirrorPortal::DrawContents()
 	vertex_t *v1 = linedef->v1;
 	vertex_t *v2 = linedef->v2;
 
+	// the player is always visible in a mirror.
+	r_showviewer = true;
 	// Reflect the current view behind the mirror.
 	if (linedef->Delta().X == 0)
 	{
@@ -1014,6 +1012,7 @@ void GLLineToLinePortal::DrawContents()
 
 	line_t *origin = glport->lines[0]->mOrigin;
 	P_TranslatePortalXY(origin, ViewPos.X, ViewPos.Y);
+	P_TranslatePortalXY(origin, ViewActorPos.X, ViewActorPos.Y);
 	P_TranslatePortalAngle(origin, ViewAngle);
 	P_TranslatePortalZ(origin, ViewPos.Z);
 	P_TranslatePortalXY(origin, ViewPath[0].X, ViewPath[0].Y);
@@ -1028,7 +1027,7 @@ void GLLineToLinePortal::DrawContents()
 
 			if (dist1 + dist2 < distp + 1)
 			{
-				camera->renderflags |= RF_INVISIBLE;
+				camera->renderflags |= RF_MAYBEINVISIBLE;
 			}
 		}
 	}
@@ -1084,6 +1083,66 @@ void GLLineToLinePortal::RenderAttached()
 //
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+
+GLHorizonPortal::GLHorizonPortal(GLHorizonInfo * pt, bool local)
+	: GLPortal(local)
+{
+	origin = pt;
+
+	// create the vertex data for this horizon portal.
+	GLSectorPlane * sp = &origin->plane;
+	const float vx = ViewPos.X;
+	const float vy = ViewPos.Y;
+	const float vz = ViewPos.Z;
+	const float z = sp->Texheight;
+	const float tz = (z - vz);
+
+	// Draw to some far away boundary
+	// This is not drawn as larger strips because it causes visual glitches.
+	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
+	for (float x = -32768 + vx; x<32768 + vx; x += 4096)
+	{
+		for (float y = -32768 + vy; y<32768 + vy; y += 4096)
+		{
+			ptr->Set(x, z, y, x / 64, -y / 64);
+			ptr++;
+			ptr->Set(x + 4096, z, y, x / 64 + 64, -y / 64);
+			ptr++;
+			ptr->Set(x, z, y + 4096, x / 64, -y / 64 - 64);
+			ptr++;
+			ptr->Set(x + 4096, z, y + 4096, x / 64 + 64, -y / 64 - 64);
+			ptr++;
+		}
+	}
+
+	// fill the gap between the polygon and the true horizon
+	// Since I can't draw into infinity there can always be a
+	// small gap
+	ptr->Set(-32768 + vx, z, -32768 + vy, 512.f, 0);
+	ptr++;
+	ptr->Set(-32768 + vx, vz, -32768 + vy, 512.f, tz);
+	ptr++;
+	ptr->Set(-32768 + vx, z, 32768 + vy, -512.f, 0);
+	ptr++;
+	ptr->Set(-32768 + vx, vz, 32768 + vy, -512.f, tz);
+	ptr++;
+	ptr->Set(32768 + vx, z, 32768 + vy, 512.f, 0);
+	ptr++;
+	ptr->Set(32768 + vx, vz, 32768 + vy, 512.f, tz);
+	ptr++;
+	ptr->Set(32768 + vx, z, -32768 + vy, -512.f, 0);
+	ptr++;
+	ptr->Set(32768 + vx, vz, -32768 + vy, -512.f, tz);
+	ptr++;
+	ptr->Set(-32768 + vx, z, -32768 + vy, 512.f, 0);
+	ptr++;
+	ptr->Set(-32768 + vx, vz, -32768 + vy, 512.f, tz);
+	ptr++;
+
+	vcount = GLRenderer->mVBO->GetCount(ptr, &voffset) - 10;
+
+}
+
 //-----------------------------------------------------------------------------
 //
 // GLHorizonPortal::DrawContents
@@ -1093,11 +1152,10 @@ void GLHorizonPortal::DrawContents()
 {
 	PortalAll.Clock();
 
-	GLSectorPlane * sp=&origin->plane;
 	FMaterial * gltexture;
 	PalEntry color;
-	float z;
 	player_t * player=&players[consoleplayer];
+	GLSectorPlane * sp = &origin->plane;
 
 	gltexture=FMaterial::ValidateTexture(sp->texture, false, true);
 	if (!gltexture) 
@@ -1107,9 +1165,6 @@ void GLHorizonPortal::DrawContents()
 		return;
 	}
 	gl_RenderState.SetCameraPos(ViewPos.X, ViewPos.Y, ViewPos.Z);
-
-
-	z=sp->Texheight;
 
 
 	if (gltexture && gltexture->tex->isFullbright())
@@ -1134,58 +1189,11 @@ void GLHorizonPortal::DrawContents()
 	gl_RenderState.Apply();
 
 
-
-	float vx= ViewPos.X;
-	float vy= ViewPos.Y;
-
-	// Draw to some far away boundary
-	// This is not drawn as larher strips because it causes visual glitches.
-	for(float x=-32768+vx; x<32768+vx; x+=4096)
+	for (unsigned i = 0; i < vcount; i += 4)
 	{
-		for(float y=-32768+vy; y<32768+vy;y+=4096)
-		{
-			FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-			ptr->Set(x, z, y, x / 64, -y / 64);
-			ptr++;
-			ptr->Set(x + 4096, z, y, x / 64 + 64, -y / 64);
-			ptr++;
-			ptr->Set(x, z, y + 4096, x / 64, -y / 64 - 64);
-			ptr++;
-			ptr->Set(x + 4096, z, y + 4096, x / 64 + 64, -y / 64 - 64);
-			ptr++;
-			GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
-		}
+		GLRenderer->mVBO->RenderArray(GL_TRIANGLE_STRIP, voffset + i, 4);
 	}
-
-	float vz= ViewPos.Z;
-	float tz=(z-vz);///64.0f;
-
-	// fill the gap between the polygon and the true horizon
-	// Since I can't draw into infinity there can always be a
-	// small gap
-
-	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-	ptr->Set(-32768 + vx, z, -32768 + vy, 512.f, 0);
-	ptr++;
-	ptr->Set(-32768 + vx, vz, -32768 + vy, 512.f, tz);
-	ptr++;
-	ptr->Set(-32768 + vx, z, 32768 + vy, -512.f, 0);
-	ptr++;
-	ptr->Set(-32768 + vx, vz, 32768 + vy, -512.f, tz);
-	ptr++;
-	ptr->Set(32768 + vx, z, 32768 + vy, 512.f, 0);
-	ptr++;
-	ptr->Set(32768 + vx, vz, 32768 + vy, 512.f, tz);
-	ptr++;
-	ptr->Set(32768 + vx, z, -32768 + vy, -512.f, 0);
-	ptr++;
-	ptr->Set(32768 + vx, vz, -32768 + vy, -512.f, tz);
-	ptr++;
-	ptr->Set(-32768 + vx, z, -32768 + vy, 512.f, 0);
-	ptr++;
-	ptr->Set(-32768 + vx, vz, -32768 + vy, 512.f, tz);
-	ptr++;
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+	GLRenderer->mVBO->RenderArray(GL_TRIANGLE_STRIP, voffset + vcount, 10);
 
 	gl_RenderState.EnableTextureMatrix(false);
 	PortalAll.Unclock();
@@ -1228,7 +1236,7 @@ void GLEEHorizonPortal::DrawContents()
 	if (sector->GetTexture(sector_t::ceiling) != skyflatnum)
 	{
 		GLHorizonInfo horz;
-		horz.plane.GetFromSector(sector, true);
+		horz.plane.GetFromSector(sector, sector_t::ceiling);
 		horz.lightlevel = gl_ClampLight(sector->GetCeilingLight());
 		horz.colormap = sector->ColorMap;
 		if (portal->mType == PORTS_PLANE)
@@ -1241,7 +1249,7 @@ void GLEEHorizonPortal::DrawContents()
 	if (sector->GetTexture(sector_t::floor) != skyflatnum)
 	{
 		GLHorizonInfo horz;
-		horz.plane.GetFromSector(sector, false);
+		horz.plane.GetFromSector(sector, sector_t::floor);
 		horz.lightlevel = gl_ClampLight(sector->GetFloorLight());
 		horz.colormap = sector->ColorMap;
 		if (portal->mType == PORTS_PLANE)

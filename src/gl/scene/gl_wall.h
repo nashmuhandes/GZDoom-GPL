@@ -60,6 +60,15 @@ struct GLSeg
 	float x1,x2;
 	float y1,y2;
 	float fracleft, fracright;	// fractional offset of the 2 vertices on the linedef
+
+	FVector3 Normal() const 
+	{
+		// we do not use the vector math inlines here because they are not optimized for speed but accuracy in the playsim
+		float x = y2 - y1;
+		float y = x1 - x2;
+		float length = sqrtf(x*x + y*y);
+		return FVector3(x / length, 0, y / length);
+	}
 };
 
 struct texcoord
@@ -165,12 +174,14 @@ public:
 	};
 
 
-	FTextureID topflat,bottomflat;
 	secplane_t topplane, bottomplane;	// we need to save these to pass them to the shader for calculating glows.
 
 	// these are not the same as ytop and ybottom!!!
 	float zceil[2];
 	float zfloor[2];
+
+	unsigned int vertindex;
+	unsigned int vertcount;
 
 public:
 	seg_t * seg;			// this gives the easiest access to all other structs involved
@@ -187,12 +198,13 @@ private:
 	void RenderLightsCompat(int pass);
 
 	void Put3DWall(lightlist_t * lightlist, bool translucent);
-	void SplitWallComplex(sector_t * frontsector, bool translucent, float maplightbottomleft, float maplightbottomright);
+	bool SplitWallComplex(sector_t * frontsector, bool translucent, float& maplightbottomleft, float& maplightbottomright);
 	void SplitWall(sector_t * frontsector, bool translucent);
 
 	void SetupLights();
 	bool PrepareLight(ADynamicLight * light, int pass);
-	void RenderWall(int textured, unsigned int *store = NULL);
+	void MakeVertices(bool nosplit);
+	void RenderWall(int textured);
 	void RenderTextured(int rflags);
 
 	void FloodPlane(int pass);
@@ -284,12 +296,12 @@ public:
 	friend struct GLDrawList;
 
 	sector_t * sector;
-	subsector_t * sub;	// only used for translucent planes
 	float dz; // z offset for rendering hacks
 	float z; // the z position of the flat (only valid for non-sloped planes)
 	FMaterial *gltexture;
 
 	FColormap Colormap;	// light and fog
+	PalEntry FlatColor;
 	ERenderStyle renderstyle;
 
 	float alpha;
@@ -364,10 +376,12 @@ public:
 	AActor * actor;
 	particle_t * particle;
 	TArray<lightlist_t> *lightlist;
+	DRotator Angles;
 
 	void SplitSprite(sector_t * frontsector, bool translucent);
 	void SetLowerParam();
 	void PerformSpriteClipAdjustment(AActor *thing, const DVector2 &thingpos, float spriteheight);
+	void CalculateVertices(FVector3 *v);
 
 public:
 

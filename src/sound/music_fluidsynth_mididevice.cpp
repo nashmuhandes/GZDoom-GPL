@@ -59,7 +59,11 @@
 #else
 #include <dlfcn.h>
 
-#define FLUIDSYNTHLIB	"libfluidsynth.so.1"
+#ifdef __APPLE__
+#define FLUIDSYNTHLIB1	"libfluidsynth.1.dylib"
+#else // !__APPLE__
+#define FLUIDSYNTHLIB1	"libfluidsynth.so.1"
+#endif // __APPLE__
 #endif
 
 #define FLUID_REVERB_DEFAULT_ROOMSIZE 0.2f
@@ -91,6 +95,8 @@
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
+
+CVAR(String, fluid_lib, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 CVAR(String, fluid_patchset, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
@@ -498,12 +504,12 @@ int FluidSynthMIDIDevice::LoadPatchSets(const char *patches)
 		}
 		if (FLUID_FAILED != fluid_synth_sfload(FluidSynth, path, count == 0))
 		{
-			DPrintf("Loaded patch set %s.\n", tok);
+			DPrintf(DMSG_NOTIFY, "Loaded patch set %s.\n", tok);
 			count++;
 		}
 		else
 		{
-			DPrintf("Failed to load patch set %s.\n", tok);
+			DPrintf(DMSG_ERROR, "Failed to load patch set %s.\n", tok);
 		}
 		tok = strtok(NULL, delim);
 	}
@@ -638,12 +644,6 @@ FString FluidSynthMIDIDevice::GetStats()
 
 #ifdef DYN_FLUIDSYNTH
 
-struct LibFunc
-{
-	void **FuncPointer;
-	const char *FuncName;
-};
-
 //==========================================================================
 //
 // FluidSynthMIDIDevice :: LoadFluidSynth
@@ -652,92 +652,65 @@ struct LibFunc
 //
 //==========================================================================
 
+FModuleMaybe<DYN_FLUIDSYNTH> FluidSynthModule{"FluidSynth"};
+
+#define DYN_FLUID_SYM(x) decltype(FluidSynthMIDIDevice::x) FluidSynthMIDIDevice::x{#x}
+DYN_FLUID_SYM(new_fluid_settings);
+DYN_FLUID_SYM(new_fluid_synth);
+DYN_FLUID_SYM(delete_fluid_synth);
+DYN_FLUID_SYM(delete_fluid_settings);
+DYN_FLUID_SYM(fluid_settings_setnum);
+DYN_FLUID_SYM(fluid_settings_setstr);
+DYN_FLUID_SYM(fluid_settings_setint);
+DYN_FLUID_SYM(fluid_settings_getstr);
+DYN_FLUID_SYM(fluid_settings_getint);
+DYN_FLUID_SYM(fluid_synth_set_reverb_on);
+DYN_FLUID_SYM(fluid_synth_set_chorus_on);
+DYN_FLUID_SYM(fluid_synth_set_interp_method);
+DYN_FLUID_SYM(fluid_synth_set_polyphony);
+DYN_FLUID_SYM(fluid_synth_get_polyphony);
+DYN_FLUID_SYM(fluid_synth_get_active_voice_count);
+DYN_FLUID_SYM(fluid_synth_get_cpu_load);
+DYN_FLUID_SYM(fluid_synth_system_reset);
+DYN_FLUID_SYM(fluid_synth_noteon);
+DYN_FLUID_SYM(fluid_synth_noteoff);
+DYN_FLUID_SYM(fluid_synth_cc);
+DYN_FLUID_SYM(fluid_synth_program_change);
+DYN_FLUID_SYM(fluid_synth_channel_pressure);
+DYN_FLUID_SYM(fluid_synth_pitch_bend);
+DYN_FLUID_SYM(fluid_synth_write_float);
+DYN_FLUID_SYM(fluid_synth_sfload);
+DYN_FLUID_SYM(fluid_synth_set_reverb);
+DYN_FLUID_SYM(fluid_synth_set_chorus);
+DYN_FLUID_SYM(fluid_synth_sysex);
+
 bool FluidSynthMIDIDevice::LoadFluidSynth()
 {
-	LibFunc imports[] =
+	if (strlen(fluid_lib) > 0)
 	{
-		{ (void **)&new_fluid_settings,					"new_fluid_settings" },
-		{ (void **)&new_fluid_synth,					"new_fluid_synth" },
-		{ (void **)&delete_fluid_synth,					"delete_fluid_synth" },
-		{ (void **)&delete_fluid_settings,				"delete_fluid_settings" },
-		{ (void **)&fluid_settings_setnum,				"fluid_settings_setnum" },
-		{ (void **)&fluid_settings_setstr,				"fluid_settings_setstr" },
-		{ (void **)&fluid_settings_setint,				"fluid_settings_setint" },
-		{ (void **)&fluid_settings_getstr,				"fluid_settings_getstr" },
-		{ (void **)&fluid_settings_getint,				"fluid_settings_getint" },
-		{ (void **)&fluid_synth_set_reverb_on,			"fluid_synth_set_reverb_on" },
-		{ (void **)&fluid_synth_set_chorus_on,			"fluid_synth_set_chorus_on" },
-		{ (void **)&fluid_synth_set_interp_method,		"fluid_synth_set_interp_method" },
-		{ (void **)&fluid_synth_set_polyphony,			"fluid_synth_set_polyphony" },
-		{ (void **)&fluid_synth_get_polyphony,			"fluid_synth_get_polyphony" },
-		{ (void **)&fluid_synth_get_active_voice_count,	"fluid_synth_get_active_voice_count" },
-		{ (void **)&fluid_synth_get_cpu_load,			"fluid_synth_get_cpu_load" },
-		{ (void **)&fluid_synth_system_reset,			"fluid_synth_system_reset" },
-		{ (void **)&fluid_synth_noteon,					"fluid_synth_noteon" },
-		{ (void **)&fluid_synth_noteoff,				"fluid_synth_noteoff" },
-		{ (void **)&fluid_synth_cc,						"fluid_synth_cc" },
-		{ (void **)&fluid_synth_program_change,			"fluid_synth_program_change" },
-		{ (void **)&fluid_synth_channel_pressure,		"fluid_synth_channel_pressure" },
-		{ (void **)&fluid_synth_pitch_bend,				"fluid_synth_pitch_bend" },
-		{ (void **)&fluid_synth_write_float,			"fluid_synth_write_float" },
-		{ (void **)&fluid_synth_sfload,					"fluid_synth_sfload" },
-		{ (void **)&fluid_synth_set_reverb,				"fluid_synth_set_reverb" },
-		{ (void **)&fluid_synth_set_chorus,				"fluid_synth_set_chorus" },
-		{ (void **)&fluid_synth_sysex,					"fluid_synth_sysex" },
-	};
-	int fail = 0;
-	const char *libname;
-
-#ifdef _WIN32
-	FluidSynthDLL = LoadLibrary((libname = FLUIDSYNTHLIB1));
-	if (FluidSynthDLL == NULL)
-	{
-		FluidSynthDLL = LoadLibrary((libname = FLUIDSYNTHLIB2));
-		if (FluidSynthDLL == NULL)
+		if(!FluidSynthModule.Load({fluid_lib}))
 		{
-			Printf(TEXTCOLOR_RED"Could not load " FLUIDSYNTHLIB1 " or " FLUIDSYNTHLIB2 "\n");
-			return false;
+			const char* libname = fluid_lib;
+			Printf(TEXTCOLOR_RED "Could not load %s\n", libname);
 		}
+		else
+			return true;
+	}
+
+#ifdef FLUIDSYNTHLIB2
+	if(!FluidSynthModule.Load({FLUIDSYNTHLIB1, FLUIDSYNTHLIB2}))
+	{
+		Printf(TEXTCOLOR_RED "Could not load " FLUIDSYNTHLIB1 " or " FLUIDSYNTHLIB2 "\n");
+		return false;
 	}
 #else
-	FluidSynthSO = dlopen((libname = FLUIDSYNTHLIB), RTLD_LAZY);
-	if (FluidSynthSO == NULL)
+	if(!FluidSynthModule.Load({fluid_lib, FLUIDSYNTHLIB1}))
 	{
-		Printf(TEXTCOLOR_RED"Could not load " FLUIDSYNTHLIB ": %s\n", dlerror());
+		Printf(TEXTCOLOR_RED "Could not load " FLUIDSYNTHLIB1 ": %s\n", dlerror());
 		return false;
 	}
 #endif
-
-	for (size_t i = 0; i < countof(imports); ++i)
-	{
-#ifdef _WIN32
-		FARPROC proc = GetProcAddress(FluidSynthDLL, imports[i].FuncName);
-#else
-		void *proc = dlsym(FluidSynthSO, imports[i].FuncName);
-#endif
-		if (proc == NULL)
-		{
-			Printf(TEXTCOLOR_RED"Failed to find %s in %s\n", imports[i].FuncName, libname);
-			fail++;
-		}
-		*imports[i].FuncPointer = (void *)proc;
-	}
-	if (fail == 0)
-	{
-		return true;
-	}
-	else
-	{
-#ifdef _WIN32
-		FreeLibrary(FluidSynthDLL);
-		FluidSynthDLL = NULL;
-#else
-		dlclose(FluidSynthSO);
-		FluidSynthSO = NULL;
-#endif
-		return false;
-	}
-
+	return true;
 }
 
 //==========================================================================
@@ -748,19 +721,7 @@ bool FluidSynthMIDIDevice::LoadFluidSynth()
 
 void FluidSynthMIDIDevice::UnloadFluidSynth()
 {
-#ifdef _WIN32
-	if (FluidSynthDLL != NULL)
-	{
-		FreeLibrary(FluidSynthDLL);
-		FluidSynthDLL = NULL;
-	}
-#else
-	if (FluidSynthSO != NULL)
-	{
-		dlclose(FluidSynthSO);
-		FluidSynthSO = NULL;
-	}
-#endif
+	FluidSynthModule.Unload();
 }
 
 #endif

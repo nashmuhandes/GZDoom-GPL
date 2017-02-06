@@ -1,41 +1,28 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gltexture.cpp
 ** Low level OpenGL texture handling. These classes are also
 ** containers for the various translations a texture can have.
-**
-**---------------------------------------------------------------------------
-** Copyright 2004-2014 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -48,6 +35,7 @@
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_cvars.h"
+#include "gl/system/gl_debug.h"
 #include "gl/renderer/gl_renderer.h"
 #include "gl/textures/gl_material.h"
 
@@ -62,18 +50,6 @@ extern int TexFormat[];
 //
 //===========================================================================
 unsigned int FHardwareTexture::lastbound[FHardwareTexture::MAX_TEXTURES];
-
-//===========================================================================
-// 
-// STATIC - Gets the maximum size of hardware textures
-//
-//===========================================================================
-int FHardwareTexture::GetTexDimension(int value)
-{
-	if (value > gl.max_texturesize) return gl.max_texturesize;
-	return value;
-}
-
 
 //===========================================================================
 // 
@@ -184,7 +160,7 @@ void FHardwareTexture::Resize(int width, int height, unsigned char *src_data, un
 //
 //===========================================================================
 
-unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int h, int texunit, bool mipmap, int translation)
+unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int h, int texunit, bool mipmap, int translation, const FString &name)
 {
 	int rh,rw;
 	int texformat=TexFormat[gl_texture_format];
@@ -198,6 +174,7 @@ unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int 
 	if (glTex->glTexID==0) glGenTextures(1,&glTex->glTexID);
 	if (texunit != 0) glActiveTexture(GL_TEXTURE0+texunit);
 	glBindTexture(GL_TEXTURE_2D, glTex->glTexID);
+	FGLDebug::LabelObject(GL_TEXTURE, glTex->glTexID, name);
 	lastbound[texunit] = glTex->glTexID;
 
 	if (!buffer)
@@ -397,6 +374,11 @@ unsigned int FHardwareTexture::Bind(int texunit, int translation, bool needmipma
 	return 0;
 }
 
+unsigned int FHardwareTexture::GetTextureHandle(int translation)
+{
+	TranslatedTexture *pTex = GetTexID(translation);
+	return pTex->glTexID;
+}
 
 void FHardwareTexture::Unbind(int texunit)
 {

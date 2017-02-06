@@ -89,14 +89,15 @@ struct FMenuDescriptor
 	const PClass *mClass;
 
 	virtual ~FMenuDescriptor() {}
+	virtual size_t PropagateMark() { return 0;  }
 };
 
-class FListMenuItem;
-class FOptionMenuItem;
+class DMenuItemBase;
+class DOptionMenuItem;
 
 struct FListMenuDescriptor : public FMenuDescriptor
 {
-	TDeletingArray<FListMenuItem *> mItems;
+	TArray<DMenuItemBase *> mItems;
 	int mSelectedItem;
 	int mSelectOfsX;
 	int mSelectOfsY;
@@ -127,6 +128,8 @@ struct FListMenuDescriptor : public FMenuDescriptor
 		mFontColor = CR_UNTRANSLATED;
 		mFontColor2 = CR_UNTRANSLATED;
 	}
+	
+	size_t PropagateMark() override;
 };
 
 struct FOptionMenuSettings
@@ -143,7 +146,7 @@ struct FOptionMenuSettings
 
 struct FOptionMenuDescriptor : public FMenuDescriptor
 {
-	TDeletingArray<FOptionMenuItem *> mItems;
+	TArray<DOptionMenuItem *> mItems;
 	FString mTitle;
 	int mSelectedItem;
 	int mDrawTop;
@@ -154,7 +157,7 @@ struct FOptionMenuDescriptor : public FMenuDescriptor
 	bool mDontDim;
 
 	void CalcIndent();
-	FOptionMenuItem *GetItem(FName name);
+	DOptionMenuItem *GetItem(FName name);
 	void Reset()
 	{
 		// Reset the default settings (ignore all other values in the struct)
@@ -163,7 +166,7 @@ struct FOptionMenuDescriptor : public FMenuDescriptor
 		mIndent = 0;
 		mDontDim = 0;
 	}
-
+	size_t PropagateMark() override;
 };
 						
 
@@ -252,8 +255,9 @@ public:
 //
 //=============================================================================
 
-class FListMenuItem
+class DMenuItemBase : public DObject
 {
+	DECLARE_CLASS(DMenuItemBase, DObject)
 protected:
 	int mXpos, mYpos;
 	FName mAction;
@@ -261,15 +265,13 @@ protected:
 public:
 	bool mEnabled;
 
-	FListMenuItem(int xpos = 0, int ypos = 0, FName action = NAME_None)
+	DMenuItemBase(int xpos = 0, int ypos = 0, FName action = NAME_None)
 	{
 		mXpos = xpos;
 		mYpos = ypos;
 		mAction = action;
 		mEnabled = true;
 	}
-
-	virtual ~FListMenuItem();
 
 	virtual bool CheckCoordinate(int x, int y);
 	virtual void Ticker();
@@ -293,28 +295,31 @@ public:
 	void SetX(int x) { mXpos = x; }
 };	
 
-class FListMenuItemStaticPatch : public FListMenuItem
+class DListMenuItemStaticPatch : public DMenuItemBase
 {
+	DECLARE_CLASS(DListMenuItemStaticPatch, DMenuItemBase)
 protected:
 	FTextureID mTexture;
 	bool mCentered;
 
+	DListMenuItemStaticPatch() {}
 public:
-	FListMenuItemStaticPatch(int x, int y, FTextureID patch, bool centered);
+	DListMenuItemStaticPatch(int x, int y, FTextureID patch, bool centered);
 	void Drawer(bool selected);
 };
 
-class FListMenuItemStaticText : public FListMenuItem
+class DListMenuItemStaticText : public DMenuItemBase
 {
+	DECLARE_CLASS(DListMenuItemStaticText, DMenuItemBase)
 protected:
-	const char *mText;
+	FString mText;
 	FFont *mFont;
 	EColorRange mColor;
 	bool mCentered;
 
+	DListMenuItemStaticText() {}
 public:
-	FListMenuItemStaticText(int x, int y, const char *text, FFont *font, EColorRange color, bool centered);
-	~FListMenuItemStaticText();
+	DListMenuItemStaticText(int x, int y, const char *text, FFont *font, EColorRange color, bool centered);
 	void Drawer(bool selected);
 };
 
@@ -324,8 +329,10 @@ public:
 //
 //=============================================================================
 
-class FListMenuItemPlayerDisplay : public FListMenuItem
+class DListMenuItemPlayerDisplay : public DMenuItemBase
 {
+	DECLARE_CLASS(DListMenuItemPlayerDisplay, DMenuItemBase)
+
 	FListMenuDescriptor *mOwner;
 	FTexture *mBackdrop;
 	FRemapTable mRemap;
@@ -346,6 +353,7 @@ class FListMenuItemPlayerDisplay : public FListMenuItem
 	void UpdateRandomClass();
 	void UpdateTranslation();
 
+	DListMenuItemPlayerDisplay() {}
 public:
 
 	enum
@@ -357,8 +365,8 @@ public:
 		PDF_TRANSLATE = 0x10005,
 	};
 
-	FListMenuItemPlayerDisplay(FListMenuDescriptor *menu, int x, int y, PalEntry c1, PalEntry c2, bool np, FName action);
-	~FListMenuItemPlayerDisplay();
+	DListMenuItemPlayerDisplay(FListMenuDescriptor *menu, int x, int y, PalEntry c1, PalEntry c2, bool np, FName action);
+	void OnDestroy() override;
 	virtual void Ticker();
 	virtual void Drawer(bool selected);
 	bool SetValue(int i, int value);
@@ -371,15 +379,17 @@ public:
 //
 //=============================================================================
 
-class FListMenuItemSelectable : public FListMenuItem
+class DListMenuItemSelectable : public DMenuItemBase
 {
+	DECLARE_CLASS(DListMenuItemSelectable, DMenuItemBase)
 protected:
 	int mHotkey;
 	int mHeight;
 	int mParam;
 
+	DListMenuItemSelectable() {}
 public:
-	FListMenuItemSelectable(int x, int y, int height, FName childmenu, int mParam = -1);
+	DListMenuItemSelectable(int x, int y, int height, FName childmenu, int mParam = -1);
 	bool CheckCoordinate(int x, int y);
 	bool Selectable();
 	bool CheckHotkey(int c);
@@ -388,24 +398,30 @@ public:
 	FName GetAction(int *pparam);
 };
 
-class FListMenuItemText : public FListMenuItemSelectable
+class DListMenuItemText : public DListMenuItemSelectable
 {
+	DECLARE_CLASS(DListMenuItemText, DListMenuItemSelectable)
 	const char *mText;
 	FFont *mFont;
 	EColorRange mColor;
 	EColorRange mColorSelected;
+
+	DListMenuItemText() {}
 public:
-	FListMenuItemText(int x, int y, int height, int hotkey, const char *text, FFont *font, EColorRange color, EColorRange color2, FName child, int param = 0);
-	~FListMenuItemText();
+	DListMenuItemText(int x, int y, int height, int hotkey, const char *text, FFont *font, EColorRange color, EColorRange color2, FName child, int param = 0);
+	void OnDestroy() override;
 	void Drawer(bool selected);
 	int GetWidth();
 };
 
-class FListMenuItemPatch : public FListMenuItemSelectable
+class DListMenuItemPatch : public DListMenuItemSelectable
 {
+	DECLARE_CLASS(DListMenuItemPatch, DListMenuItemSelectable)
 	FTextureID mTexture;
+
+	DListMenuItemPatch() {}
 public:
-	FListMenuItemPatch(int x, int y, int height, int hotkey, FTextureID patch, FName child, int param = 0);
+	DListMenuItemPatch(int x, int y, int height, int hotkey, FTextureID patch, FName child, int param = 0);
 	void Drawer(bool selected);
 	int GetWidth();
 };
@@ -416,9 +432,10 @@ public:
 //
 //=============================================================================
 
-class FPlayerNameBox : public FListMenuItemSelectable
+class DPlayerNameBox : public DListMenuItemSelectable
 {
-	const char *mText;
+	DECLARE_CLASS(DPlayerNameBox, DListMenuItemSelectable)
+	FString mText;
 	FFont *mFont;
 	EColorRange mFontColor;
 	int mFrameSize;
@@ -428,10 +445,10 @@ class FPlayerNameBox : public FListMenuItemSelectable
 
 	void DrawBorder (int x, int y, int len);
 
+	DPlayerNameBox() {}
 public:
 
-	FPlayerNameBox(int x, int y, int height, int frameofs, const char *text, FFont *font, EColorRange color, FName action);
-	~FPlayerNameBox();
+	DPlayerNameBox(int x, int y, int height, int frameofs, const char *text, FFont *font, EColorRange color, FName action);
 	bool SetString(int i, const char *s);
 	bool GetString(int i, char *s, int len);
 	void Drawer(bool selected);
@@ -444,19 +461,20 @@ public:
 //
 //=============================================================================
 
-class FValueTextItem : public FListMenuItemSelectable
+class DValueTextItem : public DListMenuItemSelectable
 {
+	DECLARE_CLASS(DValueTextItem, DListMenuItemSelectable)
 	TArray<FString> mSelections;
-	const char *mText;
+	FString mText;
 	int mSelection;
 	FFont *mFont;
 	EColorRange mFontColor;
 	EColorRange mFontColor2;
 
+	DValueTextItem() {}
 public:
 
-	FValueTextItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, EColorRange valuecolor, FName action, FName values);
-	~FValueTextItem();
+	DValueTextItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, EColorRange valuecolor, FName action, FName values);
 	bool SetString(int i, const char *s);
 	bool SetValue(int i, int value);
 	bool GetValue(int i, int *pvalue);
@@ -470,9 +488,10 @@ public:
 //
 //=============================================================================
 
-class FSliderItem : public FListMenuItemSelectable
+class DSliderItem : public DListMenuItemSelectable
 {
-	const char *mText;
+	DECLARE_CLASS(DSliderItem, DListMenuItemSelectable)
+	FString mText;
 	FFont *mFont;
 	EColorRange mFontColor;
 	int mMinrange, mMaxrange;
@@ -481,10 +500,10 @@ class FSliderItem : public FListMenuItemSelectable
 
 	void DrawSlider (int x, int y);
 
+	DSliderItem() {}
 public:
 
-	FSliderItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, FName action, int min, int max, int step);
-	~FSliderItem();
+	DSliderItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, FName action, int min, int max, int step);
 	bool SetValue(int i, int value);
 	bool GetValue(int i, int *pvalue);
 	bool MenuEvent (int mkey, bool fromcontroller);
@@ -501,25 +520,26 @@ public:
 class DListMenu : public DMenu
 {
 	DECLARE_CLASS(DListMenu, DMenu)
+	HAS_OBJECT_POINTERS;
 
 protected:
 	FListMenuDescriptor *mDesc;
-	FListMenuItem *mFocusControl;
+	DMenuItemBase *mFocusControl;
 
 public:
 	DListMenu(DMenu *parent = NULL, FListMenuDescriptor *desc = NULL);
 	virtual void Init(DMenu *parent = NULL, FListMenuDescriptor *desc = NULL);
-	FListMenuItem *GetItem(FName name);
+	DMenuItemBase *GetItem(FName name);
 	bool Responder (event_t *ev);
 	bool MenuEvent (int mkey, bool fromcontroller);
 	bool MouseEvent(int type, int x, int y);
 	void Ticker ();
 	void Drawer ();
-	void SetFocus(FListMenuItem *fc)
+	void SetFocus(DMenuItemBase *fc)
 	{
 		mFocusControl = fc;
 	}
-	bool CheckFocus(FListMenuItem *fc)
+	bool CheckFocus(DMenuItemBase *fc)
 	{
 		return mFocusControl == fc;
 	}
@@ -536,23 +556,23 @@ public:
 //
 //=============================================================================
 
-class FOptionMenuItem : public FListMenuItem
+class DOptionMenuItem : public DMenuItemBase
 {
+	DECLARE_ABSTRACT_CLASS(DOptionMenuItem, DMenuItemBase)
 protected:
-	char *mLabel;
+	FString mLabel;
 	bool mCentered;
 
 	void drawLabel(int indent, int y, EColorRange color, bool grayed = false);
 public:
 
-	FOptionMenuItem(const char *text, FName action = NAME_None, bool center = false)
-		: FListMenuItem(0, 0, action)
+	DOptionMenuItem(const char *text = nullptr, FName action = NAME_None, bool center = false)
+		: DMenuItemBase(0, 0, action)
 	{
-		mLabel = copystring(text);
+		mLabel = text;
 		mCentered = center;
 	}
 
-	~FOptionMenuItem();
 	virtual int Draw(FOptionMenuDescriptor *desc, int y, int indent, bool selected);
 	virtual bool Selectable();
 	virtual int GetIndent();
@@ -590,17 +610,18 @@ extern FOptionMap OptionValues;
 class DOptionMenu : public DMenu
 {
 	DECLARE_CLASS(DOptionMenu, DMenu)
+	HAS_OBJECT_POINTERS;
 
 	bool CanScrollUp;
 	bool CanScrollDown;
 	int VisBottom;
-	FOptionMenuItem *mFocusControl;
+	DOptionMenuItem *mFocusControl;
 
 protected:
 	FOptionMenuDescriptor *mDesc;
 
 public:
-	FOptionMenuItem *GetItem(FName name);
+	DOptionMenuItem *GetItem(FName name);
 	DOptionMenu(DMenu *parent = NULL, FOptionMenuDescriptor *desc = NULL);
 	virtual void Init(DMenu *parent = NULL, FOptionMenuDescriptor *desc = NULL);
 	int FirstSelectable();
@@ -610,11 +631,11 @@ public:
 	void Ticker ();
 	void Drawer ();
 	const FOptionMenuDescriptor *GetDescriptor() const { return mDesc; }
-	void SetFocus(FOptionMenuItem *fc)
+	void SetFocus(DOptionMenuItem *fc)
 	{
 		mFocusControl = fc;
 	}
-	bool CheckFocus(FOptionMenuItem *fc)
+	bool CheckFocus(DOptionMenuItem *fc)
 	{
 		return mFocusControl == fc;
 	}
@@ -682,6 +703,7 @@ void M_StartMessage(const char *message, int messagemode, FName action = NAME_No
 DMenu *StartPickerMenu(DMenu *parent, const char *name, FColorCVar *cvar);
 void M_RefreshModesList ();
 void M_InitVideoModesMenu ();
+void M_MarkMenus();
 
 
 #endif

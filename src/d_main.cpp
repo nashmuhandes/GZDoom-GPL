@@ -110,6 +110,7 @@
 #include "p_local.h"
 #include "autosegs.h"
 #include "fragglescript/t_fs.h"
+#include "g_levellocals.h"
 
 EXTERN_CVAR(Bool, hud_althud)
 void DrawHUD();
@@ -205,6 +206,11 @@ CUSTOM_CVAR (String, vid_cursor, "None", CVAR_ARCHIVE | CVAR_NOINITCALL)
 		I_SetCursor(TexMan["cursor"]);
 	}
 }
+
+// Controlled by startup dialog
+CVAR (Bool, disableautoload, false, CVAR_ARCHIVE | CVAR_NOINITCALL | CVAR_GLOBALCONFIG)
+CVAR (Bool, autoloadbrightmaps, false, CVAR_ARCHIVE | CVAR_NOINITCALL | CVAR_GLOBALCONFIG)
+CVAR (Bool, autoloadlights, false, CVAR_ARCHIVE | CVAR_NOINITCALL | CVAR_GLOBALCONFIG)
 
 bool wantToRestart;
 bool DrawFSHUD;				// [RH] Draw fullscreen HUD?
@@ -575,7 +581,7 @@ CUSTOM_CVAR(Int, compatmode, 0, CVAR_ARCHIVE|CVAR_NOINITCALL)
 
 	case 4: // Old ZDoom compat mode
 		v = COMPATF_SOUNDTARGET | COMPATF_LIGHT;
-		w = COMPATF2_MULTIEXIT;
+		w = COMPATF2_MULTIEXIT | COMPATF2_TELEPORT | COMPATF2_PUSHWINDOW;
 		break;
 
 	case 5: // MBF compat mode
@@ -631,6 +637,8 @@ CVAR (Flag, compat_floormove,			compatflags2, COMPATF2_FLOORMOVE);
 CVAR (Flag, compat_soundcutoff,			compatflags2, COMPATF2_SOUNDCUTOFF);
 CVAR (Flag, compat_pointonline,			compatflags2, COMPATF2_POINTONLINE);
 CVAR (Flag, compat_multiexit,			compatflags2, COMPATF2_MULTIEXIT);
+CVAR (Flag, compat_teleport,			compatflags2, COMPATF2_TELEPORT);
+CVAR (Flag, compat_pushwindow,			compatflags2, COMPATF2_PUSHWINDOW);
 
 //==========================================================================
 //
@@ -780,13 +788,13 @@ void D_Display ()
 			screen->DrawBlendingRect();
 			if (automapactive)
 			{
-				int saved_ST_Y = ST_Y;
+				int saved_ST_Y = gST_Y;
 				if (hud_althud && viewheight == SCREENHEIGHT)
 				{
-					ST_Y = viewheight;
+					gST_Y = viewheight;
 				}
 				AM_Drawer ();
-				ST_Y = saved_ST_Y;
+				gST_Y = saved_ST_Y;
 			}
 			if (!automapactive || viewactive)
 			{
@@ -1026,6 +1034,12 @@ void D_DoomLoop ()
 			}
 			D_ErrorCleanup ();
 		}
+		catch (CVMAbortException &error)
+		{
+			error.MaybePrintMessage();
+			Printf("%s", error.stacktrace.GetChars());
+			D_ErrorCleanup();
+		}
 	}
 }
 
@@ -1049,6 +1063,7 @@ void D_PageTicker (void)
 
 void D_PageDrawer (void)
 {
+	screen->Clear(0, 0, SCREENWIDTH, SCREENHEIGHT, 0, 0);
 	if (Page != NULL)
 	{
 		screen->DrawTexture (Page, 0, 0,
@@ -1056,11 +1071,9 @@ void D_PageDrawer (void)
 			DTA_Masked, false,
 			DTA_BilinearFilter, true,
 			TAG_DONE);
-		screen->FillBorder (NULL);
 	}
 	else
 	{
-		screen->Clear (0, 0, SCREENWIDTH, SCREENHEIGHT, 0, 0);
 		if (!PageBlank)
 		{
 			screen->DrawText (SmallFont, CR_WHITE, 0, 0, "Page graphic goes here", TAG_DONE);
@@ -1384,6 +1397,10 @@ void ParseCVarInfo()
 				else if (stricmp(sc.String, "noarchive") == 0)
 				{
 					cvarflags &= ~CVAR_ARCHIVE;
+				}
+				else if (stricmp(sc.String, "cheat") == 0)
+				{
+					cvarflags |= CVAR_CHEAT;
 				}
 				else
 				{
@@ -1837,10 +1854,10 @@ static FString ParseGameInfo(TArray<FString> &pwads, const char *fn, const char 
 		else if (!nextKey.CompareNoCase("STARTUPCOLORS"))
 		{
 			sc.MustGetString();
-			DoomStartupInfo.FgColor = V_GetColor(NULL, sc.String);
+			DoomStartupInfo.FgColor = V_GetColor(NULL, sc);
 			sc.MustGetStringName(",");
 			sc.MustGetString();
-			DoomStartupInfo.BkColor = V_GetColor(NULL, sc.String);
+			DoomStartupInfo.BkColor = V_GetColor(NULL, sc);
 		}
 		else if (!nextKey.CompareNoCase("STARTUPTYPE"))
 		{
@@ -2031,7 +2048,24 @@ static void AddAutoloadFiles(const char *autoname)
 {
 	LumpFilterIWAD.Format("%s.", autoname);	// The '.' is appened to simplify parsing the string 
 
-	if (!(gameinfo.flags & GI_SHAREWARE) && !Args->CheckParm("-noautoload"))
+	// [SP] Dialog reaction - load lights.pk3 and brightmaps.pk3 based on user choices
+	if (!(gameinfo.flags & GI_SHAREWARE))
+	{
+		if (autoloadlights)
+		{
+			const char *lightswad = BaseFileSearch ("lights.pk3", NULL);
+			if (lightswad)
+				D_AddFile (allwads, lightswad);
+		}
+		if (autoloadbrightmaps)
+		{
+			const char *bmwad = BaseFileSearch ("brightmaps.pk3", NULL);
+			if (bmwad)
+				D_AddFile (allwads, bmwad);
+		}
+	}
+
+	if (!(gameinfo.flags & GI_SHAREWARE) && !Args->CheckParm("-noautoload") && !disableautoload)
 	{
 		FString file;
 
@@ -2438,6 +2472,7 @@ void D_DoomMain (void)
 		if (!batchrun) Printf ("ParseTeamInfo: Load team definitions.\n");
 		TeamLibrary.ParseTeamInfo ();
 
+		R_ParseTrnslate();
 		PClassActor::StaticInit ();
 
 		// [GRB] Initialize player class list
@@ -2486,6 +2521,9 @@ void D_DoomMain (void)
 
 		// Create replacements for dehacked pickups
 		FinishDehPatch();
+		
+		// clean up the compiler symbols which are not needed any longer.
+		RemoveUnusedSymbols();
 
 		InitActorNumsFromMapinfo();
 		InitSpawnablesFromMapinfo();
@@ -2579,7 +2617,7 @@ void D_DoomMain (void)
 			{
 				FString file(v);
 				FixPathSeperator (file);
-				DefaultExtension (file, ".zds");
+				DefaultExtension (file, "." SAVEGAME_EXT);
 				G_LoadGame (file);
 			}
 
@@ -2590,44 +2628,48 @@ void D_DoomMain (void)
 				G_DeferedPlayDemo (v);
 				D_DoomLoop ();	// never returns
 			}
-
-			v = Args->CheckValue ("-timedemo");
-			if (v)
+			else
 			{
-				G_TimeDemo (v);
-				D_DoomLoop ();	// never returns
-			}
-
-			if (gameaction != ga_loadgame && gameaction != ga_loadgamehidecon)
-			{
-				if (autostart || netgame)
+				v = Args->CheckValue("-timedemo");
+				if (v)
 				{
-					// Do not do any screenwipes when autostarting a game.
-					if (!Args->CheckParm("-warpwipe"))
-					{
-						NoWipe = TICRATE;
-					}
-					CheckWarpTransMap (startmap, true);
-					if (demorecording)
-						G_BeginRecording (startmap);
-					G_InitNew (startmap, false);
-					if (StoredWarp.IsNotEmpty())
-					{
-						AddCommandString(StoredWarp.LockBuffer());
-						StoredWarp = NULL;
-					}
+					G_TimeDemo(v);
+					D_DoomLoop();	// never returns
 				}
 				else
 				{
-					D_StartTitle ();				// start up intro loop
+					if (gameaction != ga_loadgame && gameaction != ga_loadgamehidecon)
+					{
+						if (autostart || netgame)
+						{
+							// Do not do any screenwipes when autostarting a game.
+							if (!Args->CheckParm("-warpwipe"))
+							{
+								NoWipe = TICRATE;
+							}
+							CheckWarpTransMap(startmap, true);
+							if (demorecording)
+								G_BeginRecording(startmap);
+							G_InitNew(startmap, false);
+							if (StoredWarp.IsNotEmpty())
+							{
+								AddCommandString(StoredWarp.LockBuffer());
+								StoredWarp = NULL;
+							}
+						}
+						else
+						{
+							D_StartTitle();				// start up intro loop
+						}
+					}
+					else if (demorecording)
+					{
+						G_BeginRecording(NULL);
+					}
+
+					atterm(D_QuitNetGame);		// killough
 				}
 			}
-			else if (demorecording)
-			{
-				G_BeginRecording (NULL);
-			}
-						
-			atterm (D_QuitNetGame);		// killough
 		}
 		else
 		{
@@ -2641,7 +2683,6 @@ void D_DoomMain (void)
 		}
 
 		D_DoomLoop ();		// this only returns if a 'restart' CCMD is given.
-
 		// 
 		// Clean up after a restart
 		//
@@ -2652,6 +2693,7 @@ void D_DoomMain (void)
 
 		M_ClearMenus();					// close menu if open
 		F_EndFinale();					// If an intermission is active, end it now
+		AM_ClearColorsets();
 
 		// clean up game state
 		ST_Clear();
@@ -2669,6 +2711,7 @@ void D_DoomMain (void)
 		S_Shutdown();					// free all channels and delete playlist
 		C_ClearAliases();				// CCMDs won't be reinitialized so these need to be deleted here
 		DestroyCVarsFlagged(CVAR_MOD);	// Delete any cvar left by mods
+		FS_Close();						// destroy the global FraggleScript.
 
 		GC::FullGC();					// clean up before taking down the object list.
 
@@ -2680,7 +2723,6 @@ void D_DoomMain (void)
 			*(afunc->VMPointer) = NULL;
 		}
 
-		ReleaseGlobalSymbols();
 		PClass::StaticShutdown();
 
 		GC::FullGC();					// perform one final garbage collection after shutdown
@@ -2692,6 +2734,7 @@ void D_DoomMain (void)
 
 		restart++;
 		PClass::bShutdown = false;
+		PClass::bVMOperational = false;
 	}
 	while (1);
 }

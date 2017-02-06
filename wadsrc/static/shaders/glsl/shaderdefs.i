@@ -15,6 +15,7 @@ uniform float uAlphaThreshold;
 
 // colors
 uniform vec4 uObjectColor;
+uniform vec4 uObjectColor2;
 uniform vec4 uDynLightColor;
 uniform vec4 uFogColor;
 uniform float uDesaturationFactor;
@@ -41,13 +42,23 @@ uniform vec4 uLightAttr;
 #define uLightFactor uLightAttr.g
 #define uLightDist uLightAttr.r
 uniform int uFogEnabled;
+uniform int uPalLightLevels;
 
 // dynamic lights
 uniform int uLightIndex;
+
+// quad drawer stuff
+#ifdef USE_QUAD_DRAWER
+uniform mat4 uQuadVertices;
+uniform mat4 uQuadTexCoords;
+uniform int uQuadMode;
+#endif
 
 // matrices
 uniform mat4 ProjectionMatrix;
 uniform mat4 ViewMatrix;
 uniform mat4 ModelMatrix;
+uniform mat4 NormalViewMatrix;
+uniform mat4 NormalModelMatrix;
 uniform mat4 TextureMatrix;
 

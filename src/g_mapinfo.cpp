@@ -45,13 +45,13 @@
 #include "i_system.h"
 #include "gi.h"
 #include "gstrings.h"
-#include "farchive.h"
 #include "p_acs.h"
 #include "doomstat.h"
 #include "d_player.h"
 #include "autosegs.h"
 #include "version.h"
 #include "v_text.h"
+#include "g_levellocals.h"
 
 TArray<cluster_info_t> wadclusterinfos;
 TArray<level_info_t> wadlevelinfos;
@@ -196,7 +196,7 @@ void G_ClearSnapshots (void)
 {
 	for (unsigned int i = 0; i < wadlevelinfos.Size(); i++)
 	{
-		wadlevelinfos[i].ClearSnapshot();
+		wadlevelinfos[i].Snapshot.Clean();
 	}
 	// Since strings are only locked when snapshotting a level, unlock them
 	// all now, since we got rid of all the snapshots that cared about them.
@@ -248,9 +248,8 @@ void level_info_t::Reset()
 	WallVertLight = +8;
 	F1Pic = "";
 	musicorder = 0;
-	snapshot = NULL;
-	snapshotVer = 0;
-	defered = 0;
+	Snapshot = { 0,0,0,0,0,nullptr };
+	deferred.Clear();
 	skyspeed1 = skyspeed2 = 0.f;
 	fadeto = 0;
 	outsidefog = 0xff000000;
@@ -333,34 +332,6 @@ FString level_info_t::LookupLevelName()
 	else return LevelName;
 }
 
-
-//==========================================================================
-//
-//
-//==========================================================================
-
-void level_info_t::ClearSnapshot()
-{
-	if (snapshot != NULL) delete snapshot;
-	snapshot = NULL;
-}
-
-//==========================================================================
-//
-//
-//==========================================================================
-
-void level_info_t::ClearDefered()
-{
-	acsdefered_t *def = defered;
-	while (def)
-	{
-		acsdefered_t *next = def->next;
-		delete def;
-		def = next;
-	}
-	defered = NULL;
-}
 
 //==========================================================================
 //
@@ -729,6 +700,10 @@ void FMapInfoParser::ParseCluster()
 		{
 			clusterinfo->flags |= CLUSTER_HUB;
 		}
+		else if (sc.Compare("allowintermission"))
+		{
+			clusterinfo->flags |= CLUSTER_ALLOWINTERMISSION;
+		}
 		else if (sc.Compare("cdtrack"))
 		{
 			ParseAssign();
@@ -890,14 +865,14 @@ DEFINE_MAP_OPTION(fade, true)
 {
 	parse.ParseAssign();
 	parse.sc.MustGetString();
-	info->fadeto = V_GetColor(NULL, parse.sc.String);
+	info->fadeto = V_GetColor(NULL, parse.sc);
 }
 
 DEFINE_MAP_OPTION(outsidefog, true)
 {
 	parse.ParseAssign();
 	parse.sc.MustGetString();
-	info->outsidefog = V_GetColor(NULL, parse.sc.String);
+	info->outsidefog = V_GetColor(NULL, parse.sc);
 }
 
 DEFINE_MAP_OPTION(titlepatch, true)
@@ -1253,8 +1228,8 @@ MapFlagHandlers[] =
 	{ "smoothlighting",					MITYPE_SETFLAG2,	LEVEL2_SMOOTHLIGHTING, 0 },
 	{ "noautosequences",				MITYPE_SETFLAG,	LEVEL_SNDSEQTOTALCTRL, 0 },
 	{ "autosequences",					MITYPE_CLRFLAG,	LEVEL_SNDSEQTOTALCTRL, 0 },
-	{ "forcenoskystretch",				MITYPE_SETFLAG,	LEVEL_FORCENOSKYSTRETCH, 0 },
-	{ "skystretch",						MITYPE_CLRFLAG,	LEVEL_FORCENOSKYSTRETCH, 0 },
+	{ "forcenoskystretch",				MITYPE_SETFLAG,	LEVEL_FORCETILEDSKY, 0 },
+	{ "skystretch",						MITYPE_CLRFLAG,	LEVEL_FORCETILEDSKY, 0 },
 	{ "allowfreelook",					MITYPE_SCFLAGS,	LEVEL_FREELOOK_YES, ~LEVEL_FREELOOK_NO },
 	{ "nofreelook",						MITYPE_SCFLAGS,	LEVEL_FREELOOK_NO, ~LEVEL_FREELOOK_YES },
 	{ "allowjump",						MITYPE_CLRFLAG,	LEVEL_JUMP_NO, 0 },
@@ -1341,6 +1316,8 @@ MapFlagHandlers[] =
 	{ "compat_soundcutoff",				MITYPE_COMPATFLAG, 0, COMPATF2_SOUNDCUTOFF },
 	{ "compat_pointonline",				MITYPE_COMPATFLAG, 0, COMPATF2_POINTONLINE },
 	{ "compat_multiexit",				MITYPE_COMPATFLAG, 0, COMPATF2_MULTIEXIT },
+	{ "compat_teleport",				MITYPE_COMPATFLAG, 0, COMPATF2_TELEPORT },
+	{ "compat_pushwindow",				MITYPE_COMPATFLAG, 0, COMPATF2_PUSHWINDOW },
 	{ "cd_start_track",					MITYPE_EATNEXT,	0, 0 },
 	{ "cd_end1_track",					MITYPE_EATNEXT,	0, 0 },
 	{ "cd_end2_track",					MITYPE_EATNEXT,	0, 0 },
@@ -1536,10 +1513,18 @@ level_info_t *FMapInfoParser::ParseMapHeader(level_info_t &defaultinfo)
 
 	if (sc.CheckNumber())
 	{	// MAPNAME is a number; assume a Hexen wad
-		char maptemp[8];
-		mysnprintf (maptemp, countof(maptemp), "MAP%02d", sc.Number);
-		mapname = maptemp;
-		HexenHack = true;
+		if (format_type == FMT_New)
+		{
+			mapname = sc.String;
+		}
+		else
+		{
+			char maptemp[8];
+			mysnprintf(maptemp, countof(maptemp), "MAP%02d", sc.Number);
+			mapname = maptemp;
+			HexenHack = true;
+			format_type = FMT_Old;
+		}
 	}
 	else 
 	{
@@ -1899,6 +1884,18 @@ void FMapInfoParser::ParseMapInfo (int lump, level_info_t &gamedefaults, level_i
 			else
 			{
 				sc.ScriptError("doomednums definitions not supported with old MAPINFO syntax");
+			}
+		}
+		else if (sc.Compare("damagetype"))
+		{
+			if (format_type != FMT_Old)
+			{
+				format_type = FMT_New;
+				ParseDamageDefinition();
+			}
+			else
+			{
+				sc.ScriptError("damagetype definitions not supported with old MAPINFO syntax");
 			}
 		}
 		else if (sc.Compare("spawnnums"))

@@ -1,3 +1,25 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2005-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
+
 #ifndef __GLC_DYNLIGHT_H
 #define __GLC_DYNLIGHT_H
 
@@ -10,8 +32,8 @@ EXTERN_CVAR(Bool, gl_lights)
 EXTERN_CVAR(Bool, gl_attachedlights)
 
 class ADynamicLight;
-class FArchive;
-
+class FSerializer;
+class FLightDefaults;
 
 
 enum
@@ -28,6 +50,7 @@ enum
 #define MF4_SUBTRACTIVE MF4_MISSILEEVENMORE
 #define MF4_ADDITIVE MF4_MISSILEMORE
 #define MF4_DONTLIGHTSELF MF4_SEESDAGGERS
+#define MF4_ATTENUATE MF4_INCOMBAT
 
 enum ELightType
 {
@@ -68,10 +91,12 @@ struct FLightNode
 
 class ADynamicLight : public AActor
 {
+	friend class FLightDefaults;
 	DECLARE_CLASS (ADynamicLight, AActor)
 public:
 	virtual void Tick();
-	void Serialize(FArchive &arc);
+	void Serialize(FSerializer &arc);
+	void PostSerialize();
 	BYTE GetRed() const { return args[LIGHT_RED]; }
 	BYTE GetGreen() const { return args[LIGHT_GREEN]; }
 	BYTE GetBlue() const { return args[LIGHT_BLUE]; }
@@ -83,7 +108,7 @@ public:
 	void BeginPlay();
 	void SetOrigin (double x, double y, double z, bool moving = false);
 	void PostBeginPlay();
-	void Destroy();
+	void OnDestroy() override;
 	void Activate(AActor *activator);
 	void Deactivate(AActor *activator);
 	void SetOffset(const DVector3 &pos);
@@ -104,13 +129,12 @@ private:
 protected:
 	DVector3 m_off;
 	float m_currentRadius;
-	int m_tickCount;
 	unsigned int m_lastUpdate;
 	FCycler m_cycler;
 	subsector_t * subsector;
 
 public:
-	int m_Radius[2];
+	int m_tickCount;
 	BYTE lightflags;
 	BYTE lighttype;
 	bool owned;
@@ -119,35 +143,8 @@ public:
 	bool visibletoplayer;
 	int bufferindex;
 
-	// intermediate texture coordinate data
-	// this is stored in the light object to avoid recalculating it
-	// several times during rendering of a flat
-	Vector nearPt, up, right;
-	float scale;
 
 };
-
-class AVavoomLight : public ADynamicLight
-{
-   DECLARE_CLASS (AVavoomLight, ADynamicLight)
-public:
-   virtual void BeginPlay();
-};
-
-class AVavoomLightWhite : public AVavoomLight
-{
-   DECLARE_CLASS (AVavoomLightWhite, AVavoomLight)
-public:
-   virtual void BeginPlay();
-};
-
-class AVavoomLightColor : public AVavoomLight
-{
-   DECLARE_CLASS (AVavoomLightColor, AVavoomLight)
-public:
-	void BeginPlay();
-};
-
 
 enum
 {
@@ -184,7 +181,7 @@ struct FDynLightData
 
 
 
-bool gl_GetLight(int group, Plane & p, ADynamicLight * light, bool checkside, bool forceadditive, FDynLightData &data);
+bool gl_GetLight(int group, Plane & p, ADynamicLight * light, bool checkside, FDynLightData &data);
 void gl_UploadLights(FDynLightData &data);
 
 

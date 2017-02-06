@@ -76,11 +76,11 @@ class USDFParser : public UDMFParserBase
 
 	//===========================================================================
 	//
-	// Parse a cost block
+	// Parse a cost/require/exclude block
 	//
 	//===========================================================================
 
-	bool ParseCost(FStrifeDialogueReply *response)
+	bool ParseCostRequireExclude(FStrifeDialogueReply *response, FName type)
 	{
 		FStrifeDialogueItemCheck check;
 		check.Item = NULL;
@@ -101,7 +101,12 @@ class USDFParser : public UDMFParserBase
 			}
 		}
 
-		response->ItemCheck.Push(check);
+		switch (type)
+		{
+		case NAME_Cost:		response->ItemCheck.Push(check);	break;
+		case NAME_Require:	response->ItemCheckRequire.Push(check); break;
+		case NAME_Exclude:	response->ItemCheckExclude.Push(check); break;
+		}
 		return true;
 	}
 
@@ -206,8 +211,15 @@ class USDFParser : public UDMFParserBase
 				switch(key)
 				{
 				case NAME_Cost:
-					ParseCost(reply);
-					break;
+				case NAME_Require:
+				case NAME_Exclude:
+					// Require and Exclude are exclusive to namespace ZDoom. [FishyClockwork]
+					if (key == NAME_Cost || namespace_bits == Zd)
+					{
+						ParseCostRequireExclude(reply, key);
+						break;
+					}
+					// Intentional fall-through
 
 				default:
 					sc.UnGet();
@@ -286,6 +298,7 @@ class USDFParser : public UDMFParserBase
 
 		FString SpeakerName;
 		FString Dialogue;
+		FString Goodbye;
 
 		while (!sc.CheckToken('}'))
 		{
@@ -331,7 +344,13 @@ class USDFParser : public UDMFParserBase
 					node->ItemCheckNode = CheckInt(key);
 					break;
 
-
+				case NAME_Goodbye:
+					// Custom goodbyes are exclusive to namespace ZDoom. [FishyClockwork]
+					if (namespace_bits == Zd)
+					{
+						Goodbye = CheckString(key);
+					}
+					break;
 				}
 			}
 			else
@@ -354,6 +373,7 @@ class USDFParser : public UDMFParserBase
 		}
 		node->SpeakerName = ncopystring(SpeakerName);
 		node->Dialogue = ncopystring(Dialogue);
+		node->Goodbye = ncopystring(Goodbye);
 		return true;
 	}
 

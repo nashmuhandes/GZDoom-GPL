@@ -1,6 +1,5 @@
 #include "info.h"
 #include "a_pickups.h"
-#include "a_artifacts.h"
 #include "gstrings.h"
 #include "p_local.h"
 #include "gi.h"
@@ -11,9 +10,12 @@
 #include "a_morph.h"
 #include "doomstat.h"
 #include "g_level.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "p_enemy.h"
 #include "d_player.h"
+#include "r_data/sprites.h"
+#include "g_levellocals.h"
+#include "virtual.h"
 
 static FRandom pr_morphmonst ("MorphMonster");
 
@@ -38,7 +40,7 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 	APlayerPawn *actor;
 
 	actor = p->mo;
-	if (actor == NULL)
+	if (actor == nullptr)
 	{
 		return false;
 	}
@@ -55,9 +57,9 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 		if ((p->mo->GetClass() == spawntype)
 			&& (p->mo->PlayerFlags & PPF_CANSUPERMORPH)
 			&& (p->morphTics < (((duration) ? duration : MORPHTICS) - TICRATE))
-			&& (p->mo->FindInventory (RUNTIME_CLASS(APowerWeaponLevel2), true) == NULL))
+			&& (p->mo->FindInventory (PClass::FindActor(NAME_PowerWeaponLevel2), true) == nullptr))
 		{ // Make a super chicken
-			p->mo->GiveInventoryType (RUNTIME_CLASS(APowerWeaponLevel2));
+			p->mo->GiveInventoryType (PClass::FindActor(NAME_PowerWeaponLevel2));
 		}
 		return false;
 	}
@@ -65,7 +67,7 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 	{ // Dead players cannot morph
 		return false;
 	}
-	if (spawntype == NULL)
+	if (spawntype == nullptr)
 	{
 		return false;
 	}
@@ -94,7 +96,8 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 	}
 	morphed->Angles.Yaw = actor->Angles.Yaw;
 	morphed->target = actor->target;
-	morphed->tracer = actor;
+	morphed->tracer = actor->tracer;
+	morphed->alternative = actor;
 	morphed->FriendPlayer = actor->FriendPlayer;
 	morphed->DesignatedTeam = actor->DesignatedTeam;
 	morphed->Score = actor->Score;
@@ -112,8 +115,9 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 	morphed->flags  |= actor->flags & (MF_SHADOW|MF_NOGRAVITY);
 	morphed->flags2 |= actor->flags2 & MF2_FLY;
 	morphed->flags3 |= actor->flags3 & MF3_GHOST;
-	AActor *eflash = Spawn(((enter_flash) ? enter_flash : RUNTIME_CLASS(ATeleportFog)), actor->PosPlusZ(TELEFOGHEIGHT), ALLOW_REPLACE);
-	actor->player = NULL;
+	AActor *eflash = Spawn(((enter_flash) ? enter_flash : PClass::FindActor("TeleportFog")), actor->PosPlusZ(TELEFOGHEIGHT), ALLOW_REPLACE);
+	actor->player = nullptr;
+	actor->alternative = morphed;
 	actor->flags &= ~(MF_SOLID|MF_SHOOTABLE);
 	actor->flags |= MF_UNMORPHED;
 	actor->renderflags |= RF_INVISIBLE;
@@ -123,31 +127,18 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 	p->MorphedPlayerClass = spawntype;
 
 	p->MorphStyle = style;
-	p->MorphExitFlash = (exit_flash) ? exit_flash : RUNTIME_CLASS(ATeleportFog);
+	p->MorphExitFlash = (exit_flash) ? exit_flash : PClass::FindActor("TeleportFog");
 	p->health = morphed->health;
 	p->mo = morphed;
 	p->Vel.X = p->Vel.Y = 0;
 	morphed->ObtainInventory (actor);
 	// Remove all armor
-	for (item = morphed->Inventory; item != NULL; )
+	for (item = morphed->Inventory; item != nullptr; )
 	{
 		AInventory *next = item->Inventory;
-		if (item->IsKindOf (RUNTIME_CLASS(AArmor)))
+		if (item->IsKindOf (PClass::FindActor(NAME_Armor)))
 		{
-			if (item->IsKindOf (RUNTIME_CLASS(AHexenArmor)))
-			{
-				// Set the HexenArmor slots to 0, except the class slot.
-				AHexenArmor *hxarmor = static_cast<AHexenArmor *>(item);
-				hxarmor->Slots[0] = 0;
-				hxarmor->Slots[1] = 0;
-				hxarmor->Slots[2] = 0;
-				hxarmor->Slots[3] = 0;
-				hxarmor->Slots[4] = spawntype->HexenArmor[0];
-			}
-			else
-			{
-				item->DepleteOrDestroy();
-			}
+			item->DepleteOrDestroy();
 		}
 		item = next;
 	}
@@ -161,6 +152,18 @@ bool P_MorphPlayer (player_t *activator, player_t *p, PClassPlayerPawn *spawntyp
 	if (eflash)	
 		eflash->target = p->mo;
 	return true;
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, MorphPlayer)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_POINTER(activator, player_t);
+	PARAM_CLASS(spawntype, APlayerPawn);
+	PARAM_INT(duration);
+	PARAM_INT(style);
+	PARAM_CLASS_DEF(enter_flash, AActor);
+	PARAM_CLASS_DEF(exit_flash, AActor);
+	ACTION_RETURN_BOOL(P_MorphPlayer(activator, self, spawntype, duration, style, enter_flash, exit_flash));
 }
 
 //----------------------------------------------------------------------------
@@ -182,7 +185,7 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 	// because the level or game is ended while morphed,
 	// by the time it gets executed the morphed player
 	// pawn instance may have already been destroyed.
-	if (pmo == NULL || pmo->tracer == NULL)
+	if (pmo == nullptr || pmo->alternative == nullptr)
 	{
 		return false;
 	}
@@ -197,7 +200,7 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 		return false;
 	}
 
-	mo = barrier_cast<APlayerPawn *>(pmo->tracer);
+	mo = barrier_cast<APlayerPawn *>(pmo->alternative);
 	mo->SetOrigin (pmo->Pos(), false);
 	mo->flags |= MF_SOLID;
 	pmo->flags &= ~MF_SOLID;
@@ -208,15 +211,20 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 		player->morphTics = 2*TICRATE;
 		return false;
 	}
-	pmo->player = NULL;
+	// No longer using tracer as morph storage. That is what 'alternative' is for. 
+	// If the tracer has changed on the morph, change the original too.
+	mo->target = pmo->target;
+	mo->tracer = pmo->tracer;
+	pmo->player = nullptr;
+	mo->alternative = pmo->alternative = nullptr;
 
 	// Remove the morph power if the morph is being undone prematurely.
-	for (AInventory *item = pmo->Inventory, *next = NULL; item != NULL; item = next)
+	auto pmtype = PClass::FindActor("PowerMorph");
+	for (AInventory *item = pmo->Inventory, *next = nullptr; item != nullptr; item = next)
 	{
 		next = item->Inventory;
-		if (item->IsKindOf(RUNTIME_CLASS(APowerMorph)))
+		if (item->IsKindOf(pmtype))
 		{
-			static_cast<APowerMorph *>(item)->SetNoCallUndoMorph();
 			item->Destroy();
 		}
 	}
@@ -252,10 +260,10 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 	player->morphTics = 0;
 	player->MorphedPlayerClass = 0;
 	player->MorphStyle = 0;
-	player->MorphExitFlash = NULL;
+	player->MorphExitFlash = nullptr;
 	player->viewheight = mo->ViewHeight;
-	AInventory *level2 = mo->FindInventory (RUNTIME_CLASS(APowerWeaponLevel2), true);
-	if (level2 != NULL)
+	AInventory *level2 = mo->FindInventory (PClass::FindActor(NAME_PowerWeaponLevel2), true);
+	if (level2 != nullptr)
 	{
 		level2->Destroy ();
 	}
@@ -310,31 +318,31 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 		}
 	}
 
-	AActor *eflash = NULL;
-	if (exit_flash != NULL)
+	AActor *eflash = nullptr;
+	if (exit_flash != nullptr)
 	{
 		eflash = Spawn(exit_flash, pmo->Vec3Angle(20., mo->Angles.Yaw, TELEFOGHEIGHT), ALLOW_REPLACE);
 		if (eflash)	eflash->target = mo;
 	}
 	mo->SetupWeaponSlots();		// Use original class's weapon slots.
 	beastweap = player->ReadyWeapon;
-	if (player->PremorphWeapon != NULL)
+	if (player->PremorphWeapon != nullptr)
 	{
 		player->PremorphWeapon->PostMorphWeapon ();
 	}
 	else
 	{
-		player->ReadyWeapon = player->PendingWeapon = NULL;
+		player->ReadyWeapon = player->PendingWeapon = nullptr;
 	}
 	if (correctweapon)
 	{ // Better "lose morphed weapon" semantics
 		PClassActor *morphweapon = PClass::FindActor(pmo->MorphWeapon);
-		if (morphweapon != NULL && morphweapon->IsDescendantOf(RUNTIME_CLASS(AWeapon)))
+		if (morphweapon != nullptr && morphweapon->IsDescendantOf(RUNTIME_CLASS(AWeapon)))
 		{
 			AWeapon *OriginalMorphWeapon = static_cast<AWeapon *>(mo->FindInventory (morphweapon));
-			if ((OriginalMorphWeapon != NULL) && (OriginalMorphWeapon->GivenAsMorphWeapon))
+			if ((OriginalMorphWeapon != nullptr) && (OriginalMorphWeapon->GivenAsMorphWeapon))
 			{ // You don't get to keep your morphed weapon.
-				if (OriginalMorphWeapon->SisterWeapon != NULL)
+				if (OriginalMorphWeapon->SisterWeapon != nullptr)
 				{
 					OriginalMorphWeapon->SisterWeapon->Destroy ();
 				}
@@ -344,24 +352,33 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
  	}
 	else // old behaviour (not really useful now)
 	{ // Assumptions made here are no longer valid
-		if (beastweap != NULL)
+		if (beastweap != nullptr)
 		{ // You don't get to keep your morphed weapon.
-			if (beastweap->SisterWeapon != NULL)
+			if (beastweap->SisterWeapon != nullptr)
 			{
 				beastweap->SisterWeapon->Destroy ();
 			}
 			beastweap->Destroy ();
 		}
 	}
-	pmo->tracer = NULL;
 	pmo->Destroy ();
 	// Restore playerclass armor to its normal amount.
-	AHexenArmor *hxarmor = mo->FindInventory<AHexenArmor>();
-	if (hxarmor != NULL)
+	auto hxarmor = mo->FindInventory(NAME_HexenArmor);
+	if (hxarmor != nullptr)
 	{
-		hxarmor->Slots[4] = mo->GetClass()->HexenArmor[0];
+		double *Slots = (double*)hxarmor->ScriptVar(NAME_Slots, nullptr);
+		Slots[4] = mo->GetClass()->HexenArmor[0];
 	}
 	return true;
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, UndoPlayerMorph)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_POINTER_NOT_NULL(player, player_t);
+	PARAM_INT_DEF(unmorphflag);
+	PARAM_BOOL_DEF(force);
+	ACTION_RETURN_BOOL(P_UndoPlayerMorph(self, player, unmorphflag, force));
 }
 
 //---------------------------------------------------------------------------
@@ -379,7 +396,7 @@ bool P_MorphMonster (AActor *actor, PClassActor *spawntype, int duration, int st
 	if (actor == NULL || actor->player || spawntype == NULL ||
 		actor->flags3 & MF3_DONTMORPH ||
 		!(actor->flags3 & MF3_ISMONSTER) ||
-		!spawntype->IsDescendantOf (RUNTIME_CLASS(AMorphedMonster)))
+		!spawntype->IsDescendantOf (PClass::FindActor(NAME_MorphedMonster)))
 	{
 		return false;
 	}
@@ -399,7 +416,7 @@ bool P_MorphMonster (AActor *actor, PClassActor *spawntype, int duration, int st
 
 	morphed->UnmorphTime = level.time + ((duration) ? duration : MORPHTICS) + pr_morphmonst();
 	morphed->MorphStyle = style;
-	morphed->MorphExitFlash = (exit_flash) ? exit_flash : RUNTIME_CLASS(ATeleportFog);
+	morphed->MorphExitFlash = (exit_flash) ? exit_flash : PClass::FindActor("TeleportFog");
 	morphed->FlagsSave = actor->flags & ~MF_JUSTHIT;
 	morphed->special = actor->special;
 	memcpy (morphed->args, actor->args, sizeof(actor->args));
@@ -417,10 +434,21 @@ bool P_MorphMonster (AActor *actor, PClassActor *spawntype, int duration, int st
 	actor->flags &= ~(MF_SOLID|MF_SHOOTABLE);
 	actor->flags |= MF_UNMORPHED;
 	actor->renderflags |= RF_INVISIBLE;
-	AActor *eflash = Spawn(((enter_flash) ? enter_flash : RUNTIME_CLASS(ATeleportFog)), actor->PosPlusZ(TELEFOGHEIGHT), ALLOW_REPLACE);
+	AActor *eflash = Spawn(((enter_flash) ? enter_flash : PClass::FindActor("TeleportFog")), actor->PosPlusZ(TELEFOGHEIGHT), ALLOW_REPLACE);
 	if (eflash)
 		eflash->target = morphed;
 	return true;
+}
+
+DEFINE_ACTION_FUNCTION(AActor, MorphMonster)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_CLASS(spawntype, AActor);
+	PARAM_INT(duration);
+	PARAM_INT(style);
+	PARAM_CLASS_DEF(enter_flash, AActor);
+	PARAM_CLASS_DEF(exit_flash, AActor);
+	ACTION_RETURN_BOOL(P_MorphMonster(self, spawntype, duration, style, enter_flash, exit_flash));
 }
 
 //----------------------------------------------------------------------------
@@ -517,9 +545,9 @@ bool P_MorphedDeath(AActor *actor, AActor **morphed, int *morphedstyle, int *mor
 		(actor->player->morphTics) &&
 		(actor->player->MorphStyle & MORPH_UNDOBYDEATH) &&
 		(actor->player->mo) &&
-		(actor->player->mo->tracer))
+		(actor->player->mo->alternative))
 	{
-		AActor *realme = actor->player->mo->tracer;
+		AActor *realme = actor->player->mo->alternative;
 		int realstyle = actor->player->MorphStyle;
 		int realhealth = actor->health;
 		if (P_UndoPlayerMorph(actor->player, actor->player, 0, !!(actor->player->MorphStyle & MORPH_UNDOBYDEATHFORCED)))
@@ -576,11 +604,17 @@ bool P_MorphedDeath(AActor *actor, AActor **morphed, int *morphedstyle, int *mor
 
 void EndAllPowerupEffects(AInventory *item)
 {
+	auto ptype = PClass::FindActor(NAME_Powerup);
 	while (item != NULL)
 	{
-		if (item->IsKindOf(RUNTIME_CLASS(APowerup)))
+		if (item->IsKindOf(ptype))
 		{
-			static_cast<APowerup *>(item)->EndEffect();
+			IFVIRTUALPTRNAME(item, NAME_Powerup, EndEffect)
+			{
+				VMValue params[1] = { item };
+				VMFrameStack stack;
+				GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+			}
 		}
 		item = item->Inventory;
 	}
@@ -596,63 +630,52 @@ void EndAllPowerupEffects(AInventory *item)
 
 void InitAllPowerupEffects(AInventory *item)
 {
+	auto ptype = PClass::FindActor(NAME_Powerup);
 	while (item != NULL)
 	{
-		if (item->IsKindOf(RUNTIME_CLASS(APowerup)))
+		if (item->IsKindOf(ptype))
 		{
-			static_cast<APowerup *>(item)->InitEffect();
+			IFVIRTUALPTRNAME(item, NAME_Powerup, EndEffect)
+			{
+				VMValue params[1] = { item };
+				VMFrameStack stack;
+				GlobalVMStack.Call(func, params, 1, nullptr, 0, nullptr);
+			}
 		}
 		item = item->Inventory;
 	}
 }
 
-// Base class for morphing projectiles --------------------------------------
-
-IMPLEMENT_CLASS(AMorphProjectile)
-
-int AMorphProjectile::DoSpecialDamage (AActor *target, int damage, FName damagetype)
-{
-	PClassActor *morph_flash = PClass::FindActor(MorphFlash);
-	PClassActor *unmorph_flash = PClass::FindActor(UnMorphFlash);
-	if (target->player)
-	{
-		PClassPlayerPawn *player_class = dyn_cast<PClassPlayerPawn>(PClass::FindClass(PlayerClass));
-		P_MorphPlayer (NULL, target->player, player_class, Duration, MorphStyle, morph_flash, unmorph_flash);
-	}
-	else
-	{
-		PClassActor *monster_class = PClass::FindActor(MonsterClass);
-		P_MorphMonster (target, monster_class, Duration, MorphStyle, morph_flash, unmorph_flash);
-	}
-	return -1;
-}
-
-void AMorphProjectile::Serialize (FArchive &arc)
-{
-	Super::Serialize (arc);
-	arc << PlayerClass << MonsterClass << Duration << MorphStyle << MorphFlash << UnMorphFlash;
-}
-
-
 // Morphed Monster (you must subclass this to do something useful) ---------
 
-IMPLEMENT_POINTY_CLASS (AMorphedMonster)
- DECLARE_POINTER (UnmorphedMe)
-END_POINTERS
+IMPLEMENT_CLASS(AMorphedMonster, false, true)
 
-void AMorphedMonster::Serialize (FArchive &arc)
+IMPLEMENT_POINTERS_START(AMorphedMonster)
+	IMPLEMENT_POINTER(UnmorphedMe)
+IMPLEMENT_POINTERS_END
+
+DEFINE_FIELD(AMorphedMonster, UnmorphedMe)
+DEFINE_FIELD(AMorphedMonster, UnmorphTime)
+DEFINE_FIELD(AMorphedMonster, MorphStyle)
+DEFINE_FIELD(AMorphedMonster, MorphExitFlash)
+
+void AMorphedMonster::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << UnmorphedMe << UnmorphTime << MorphStyle << MorphExitFlash << FlagsSave;
+	arc("unmorphedme", UnmorphedMe)
+		("unmorphtime", UnmorphTime)
+		("morphstyle", MorphStyle)
+		("morphexitflash", MorphExitFlash)
+		("flagsave", FlagsSave);
 }
 
-void AMorphedMonster::Destroy ()
+void AMorphedMonster::OnDestroy ()
 {
 	if (UnmorphedMe != NULL)
 	{
 		UnmorphedMe->Destroy ();
 	}
-	Super::Destroy ();
+	Super::OnDestroy();
 }
 
 void AMorphedMonster::Die (AActor *source, AActor *inflictor, int dmgflags)
@@ -667,7 +690,7 @@ void AMorphedMonster::Die (AActor *source, AActor *inflictor, int dmgflags)
 	if (UnmorphedMe != NULL && (UnmorphedMe->flags & MF_UNMORPHED))
 	{
 		UnmorphedMe->health = health;
-		UnmorphedMe->Die (source, inflictor, dmgflags);
+		UnmorphedMe->CallDie (source, inflictor, dmgflags);
 	}
 }
 

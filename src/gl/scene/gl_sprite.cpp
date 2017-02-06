@@ -1,42 +1,30 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2002-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_sprite.cpp
 ** Sprite/Particle rendering
 **
-**---------------------------------------------------------------------------
-** Copyright 2002-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
 */
+
 #include "gl/system/gl_system.h"
 #include "p_local.h"
 #include "p_effect.h"
@@ -48,6 +36,7 @@
 #include "r_utility.h"
 #include "a_pickups.h"
 #include "d_player.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_framebuffer.h"
@@ -64,6 +53,7 @@
 #include "gl/textures/gl_material.h"
 #include "gl/utility/gl_clock.h"
 #include "gl/data/gl_vertexbuffer.h"
+#include "gl/renderer/gl_quaddrawer.h"
 
 CVAR(Bool, gl_usecolorblending, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_spritebrightfog, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
@@ -86,6 +76,7 @@ EXTERN_CVAR (Float, transsouls)
 extern TArray<spritedef_t> sprites;
 extern TArray<spriteframe_t> SpriteFrames;
 extern TArray<PalEntry> BloodTranslationColors;
+extern bool r_showviewer;
 
 enum HWRenderStyle
 {
@@ -109,16 +100,165 @@ CVAR(Bool, gl_nolayer, false, 0)
 
 static const float LARGE_VALUE = 1e19f;
 
+
 //==========================================================================
 //
 // 
 //
 //==========================================================================
+
+void GLSprite::CalculateVertices(FVector3 *v)
+{
+	if (actor != nullptr && (actor->renderflags & RF_SPRITETYPEMASK) == RF_FLATSPRITE)
+	{
+		Matrix3x4 mat;
+		mat.MakeIdentity();
+
+		// [MC] Rotate around the center or offsets given to the sprites.
+		// Counteract any existing rotations, then rotate the angle.
+		// Tilt the actor up or down based on pitch (increase 'somersaults' forward).
+		// Then counteract the roll and DO A BARREL ROLL.
+
+		FAngle pitch = (float)-Angles.Pitch.Degrees;
+		pitch.Normalized180();
+
+		mat.Translate(x, z, y);
+		mat.Rotate(0, 1, 0, 270. - Angles.Yaw.Degrees);
+		mat.Rotate(1, 0, 0, pitch.Degrees);
+
+		if (actor->renderflags & RF_ROLLCENTER)
+		{
+			float cx = (x1 + x2) * 0.5;
+			float cy = (y1 + y2) * 0.5;
+
+			mat.Translate(cx - x, 0, cy - y);
+			mat.Rotate(0, 1, 0, - Angles.Roll.Degrees);
+			mat.Translate(-cx, -z, -cy);
+		}
+		else
+		{
+			mat.Rotate(0, 1, 0, - Angles.Roll.Degrees);
+			mat.Translate(-x, -z, -y);
+		}
+		v[0] = mat * FVector3(x2, z, y2);
+		v[1] = mat * FVector3(x1, z, y2);
+		v[2] = mat * FVector3(x2, z, y1);
+		v[3] = mat * FVector3(x1, z, y1);
+
+		glEnable(GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset(-1.0f, -128.0f);
+		return;
+	}
+	
+	// [BB] Billboard stuff
+	const bool drawWithXYBillboard = ((particle && gl_billboard_particles) || (!(actor && actor->renderflags & RF_FORCEYBILLBOARD)
+		//&& GLRenderer->mViewActor != NULL
+		&& (gl_billboard_mode == 1 || (actor && actor->renderflags & RF_FORCEXYBILLBOARD))));
+
+	const bool drawBillboardFacingCamera = gl_billboard_faces_camera;
+	// [Nash] has +ROLLSPRITE
+	const bool drawRollSpriteActor = (actor != nullptr && actor->renderflags & RF_ROLLSPRITE);
+
+
+	// [fgsfds] check sprite type mask
+	DWORD spritetype = (DWORD)-1;
+	if (actor != nullptr) spritetype = actor->renderflags & RF_SPRITETYPEMASK;
+
+	// [Nash] is a flat sprite
+	const bool isFlatSprite = (actor != nullptr) && (spritetype == RF_WALLSPRITE || spritetype == RF_FLATSPRITE);
+	const bool useOffsets = (actor != nullptr) && !(actor->renderflags & RF_ROLLCENTER);
+
+	// [Nash] check for special sprite drawing modes
+	if (drawWithXYBillboard || drawBillboardFacingCamera || drawRollSpriteActor || isFlatSprite)
+	{
+		// Compute center of sprite
+		float xcenter = (x1 + x2)*0.5;
+		float ycenter = (y1 + y2)*0.5;
+		float zcenter = (z1 + z2)*0.5;
+		float xx = -xcenter + x;
+		float zz = -zcenter + z;
+		float yy = -ycenter + y;
+		Matrix3x4 mat;
+		mat.MakeIdentity();
+		mat.Translate(xcenter, zcenter, ycenter); // move to sprite center
+
+												  // Order of rotations matters. Perform yaw rotation (Y, face camera) before pitch (X, tilt up/down).
+		if (drawBillboardFacingCamera && !isFlatSprite)
+		{
+			// [CMB] Rotate relative to camera XY position, not just camera direction,
+			// which is nicer in VR
+			float xrel = xcenter - ViewPos.X;
+			float yrel = ycenter - ViewPos.Y;
+			float absAngleDeg = RAD2DEG(atan2(-yrel, xrel));
+			float counterRotationDeg = 270. - GLRenderer->mAngles.Yaw.Degrees; // counteracts existing sprite rotation
+			float relAngleDeg = counterRotationDeg + absAngleDeg;
+
+			mat.Rotate(0, 1, 0, relAngleDeg);
+		}
+
+		// [fgsfds] calculate yaw vectors
+		float yawvecX = 0, yawvecY = 0, rollDegrees = 0;
+		float angleRad = (270. - GLRenderer->mAngles.Yaw).Radians();
+		if (actor)	rollDegrees = Angles.Roll.Degrees;
+		if (isFlatSprite)
+		{
+			yawvecX = Angles.Yaw.Cos();
+			yawvecY = Angles.Yaw.Sin();
+		}
+
+		// [fgsfds] Rotate the sprite about the sight vector (roll) 
+		if (spritetype == RF_WALLSPRITE)
+		{
+			mat.Rotate(0, 1, 0, 0);
+			if (drawRollSpriteActor)
+			{
+				if (useOffsets)	mat.Translate(xx, zz, yy);
+				mat.Rotate(yawvecX, 0, yawvecY, rollDegrees);
+				if (useOffsets) mat.Translate(-xx, -zz, -yy);
+			}
+		}
+		else if (drawRollSpriteActor)
+		{
+			if (useOffsets) mat.Translate(xx, zz, yy);
+			if (drawWithXYBillboard)
+			{
+				mat.Rotate(-sin(angleRad), 0, cos(angleRad), -GLRenderer->mAngles.Pitch.Degrees);
+			}
+			mat.Rotate(cos(angleRad), 0, sin(angleRad), rollDegrees);
+			if (useOffsets) mat.Translate(-xx, -zz, -yy);
+		}
+		else if (drawWithXYBillboard)
+		{
+			// Rotate the sprite about the vector starting at the center of the sprite
+			// triangle strip and with direction orthogonal to where the player is looking
+			// in the x/y plane.
+			mat.Rotate(-sin(angleRad), 0, cos(angleRad), -GLRenderer->mAngles.Pitch.Degrees);
+		}
+
+		mat.Translate(-xcenter, -zcenter, -ycenter); // retreat from sprite center
+		v[0] = mat * FVector3(x1, z1, y1);
+		v[1] = mat * FVector3(x2, z1, y2);
+		v[2] = mat * FVector3(x1, z2, y1);
+		v[3] = mat * FVector3(x2, z2, y2);
+	}
+	else // traditional "Y" billboard mode
+	{
+		v[0] = FVector3(x1, z1, y1);
+		v[1] = FVector3(x2, z1, y2);
+		v[2] = FVector3(x1, z2, y1);
+		v[3] = FVector3(x2, z2, y2);
+	}
+}
+
+//==========================================================================
+//
+// 
+//
+//==========================================================================
+
 void GLSprite::Draw(int pass)
 {
 	if (pass == GLPASS_DECALS || pass == GLPASS_LIGHTSONLY) return;
-
-
 
 	bool additivefog = false;
 	bool foglayer = false;
@@ -157,11 +297,10 @@ void GLSprite::Draw(int pass)
 			if (!gl_isBlack(Colormap.FadeColor))
 			{
 				float dist=Dist2(ViewPos.X, ViewPos.Y, x,y);
-
-				if (!Colormap.FadeColor.a) Colormap.FadeColor.a=clamp<int>(255-lightlevel,60,255);
+				int fogd = gl_GetFogDensity(lightlevel, Colormap.FadeColor, Colormap.fogdensity);
 
 				// this value was determined by trial and error and is scale dependent!
-				float factor=0.05f+exp(-Colormap.FadeColor.a*dist/62500.f);
+				float factor = 0.05f + exp(-fogd*dist / 62500.f);
 				fuzzalpha*=factor;
 				minalpha*=factor;
 			}
@@ -169,21 +308,37 @@ void GLSprite::Draw(int pass)
 			gl_RenderState.AlphaFunc(GL_GEQUAL, gl_mask_sprite_threshold);
 			gl_RenderState.SetColor(0.2f,0.2f,0.2f,fuzzalpha, Colormap.desaturation);
 			additivefog = true;
+			lightlist = nullptr;	// the fuzz effect does not use the sector's light level so splitting is not needed.
 		}
 		else if (RenderStyle.BlendOp == STYLEOP_Add && RenderStyle.DestAlpha == STYLEALPHA_One)
 		{
 			additivefog = true;
 		}
 	}
-	if (RenderStyle.BlendOp!=STYLEOP_Shadow)
+	else if (modelframe == nullptr)
+	{
+		glEnable(GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset(-1.0f, -128.0f);
+	}
+	if (RenderStyle.BlendOp != STYLEOP_Shadow)
 	{
 		if (gl_lights && GLRenderer->mLightCount && !gl_fixedcolormap && !fullbright)
 		{
 			gl_SetDynSpriteLight(gl_light_sprites ? actor : NULL, gl_light_particles ? particle : NULL);
 		}
+		sector_t *cursec = actor ? actor->Sector : particle ? particle->subsector->sector : nullptr;
+		if (cursec != nullptr)
+		{
+			PalEntry finalcol(ThingColor.a,
+				ThingColor.r * cursec->SpecialColors[sector_t::sprites].r / 255,
+				ThingColor.g * cursec->SpecialColors[sector_t::sprites].g / 255,
+				ThingColor.b * cursec->SpecialColors[sector_t::sprites].b / 255);
+
+			gl_RenderState.SetObjectColor(finalcol);
+		}
 		gl_SetColor(lightlevel, rel, Colormap, trans);
 	}
-	gl_RenderState.SetObjectColor(ThingColor);
+
 
 	if (gl_isBlack(Colormap.FadeColor)) foglevel=lightlevel;
 
@@ -243,6 +398,7 @@ void GLSprite::Draw(int pass)
 
 			FColormap thiscm;
 			thiscm.FadeColor = Colormap.FadeColor;
+			thiscm.fogdensity = Colormap.fogdensity;
 			thiscm.CopyFrom3DLight(&(*lightlist)[i]);
 			if (glset.nocoloredspritelighting)
 			{
@@ -263,154 +419,18 @@ void GLSprite::Draw(int pass)
 
 		if (!modelframe)
 		{
-			// [BB] Billboard stuff
-			const bool drawWithXYBillboard = ((particle && gl_billboard_particles) || (!(actor && actor->renderflags & RF_FORCEYBILLBOARD)
-				//&& GLRenderer->mViewActor != NULL
-				&& (gl_billboard_mode == 1 || (actor && actor->renderflags & RF_FORCEXYBILLBOARD))));
-
-			const bool drawBillboardFacingCamera = gl_billboard_faces_camera;
-			// [Nash] has +ROLLSPRITE
-			const bool drawRollSpriteActor = (actor != nullptr && actor->renderflags & RF_ROLLSPRITE);
 			gl_RenderState.Apply();
 
-			FVector3 v1;
-			FVector3 v2;
-			FVector3 v3;
-			FVector3 v4;
-
-			// [fgsfds] check sprite type mask
-			DWORD spritetype = (DWORD)-1;
-			if (actor != nullptr) spritetype = actor->renderflags & RF_SPRITETYPEMASK;
+			FVector3 v[4];
+			gl_RenderState.SetNormal(0, 0, 0);
+			CalculateVertices(v);
 			
-			// [Nash] is a flat sprite
-			const bool isFlatSprite = (actor != nullptr) && (spritetype == RF_WALLSPRITE || spritetype == RF_FLATSPRITE);
-			const bool dontFlip = (actor != nullptr) && (actor->renderflags & RF_DONTFLIP);
-			const bool useOffsets = (actor != nullptr) && !(actor->renderflags & RF_ROLLCENTER);
-			
-			// [Nash] check for special sprite drawing modes
-			if (drawWithXYBillboard || drawBillboardFacingCamera || drawRollSpriteActor || isFlatSprite)
-			{
-				// Compute center of sprite
-				float xcenter = (x1 + x2)*0.5;
-				float ycenter = (y1 + y2)*0.5;
-				float zcenter = (z1 + z2)*0.5;
-				float xx = -xcenter + x;
-				float zz = -zcenter + z;
-				float yy = -ycenter + y;
-				Matrix3x4 mat;
-				mat.MakeIdentity();
-				mat.Translate(xcenter, zcenter, ycenter); // move to sprite center
-
-				// Order of rotations matters. Perform yaw rotation (Y, face camera) before pitch (X, tilt up/down).
-				if (drawBillboardFacingCamera && !isFlatSprite) 
-				{
-					// [CMB] Rotate relative to camera XY position, not just camera direction,
-					// which is nicer in VR
-					float xrel = xcenter - ViewPos.X;
-					float yrel = ycenter - ViewPos.Y;
-					float absAngleDeg = RAD2DEG(atan2(-yrel, xrel));
-					float counterRotationDeg = 270. - GLRenderer->mAngles.Yaw.Degrees; // counteracts existing sprite rotation
-					float relAngleDeg = counterRotationDeg + absAngleDeg;
-
-					mat.Rotate(0, 1, 0, relAngleDeg);
-				}
-
-				// [fgsfds] calculate yaw vectors
-				float yawvecX = 0, yawvecY = 0, rollDegrees = 0;
-				float angleRad = (270. - GLRenderer->mAngles.Yaw).Radians();
-				if (actor)	rollDegrees = actor->Angles.Roll.Degrees;
-				if (isFlatSprite)
-				{
-					yawvecX = actor->Angles.Yaw.Cos();
-					yawvecY = actor->Angles.Yaw.Sin();
-				}
-
-				// [MC] This is the only thing that I changed in Nash's submission which 
-				// was constantly applying roll to everything. That was wrong. Flat sprites
-				// with roll literally look like paper thing space ships trying to swerve.
-				// However, it does well with wall sprites.
-				// Also, renamed FLOORSPRITE to FLATSPRITE because that's technically incorrect.
-				// I plan on adding proper FLOORSPRITEs which can actually curve along sloped
-				// 3D floors later... if possible.
-					
-				// Here we need some form of priority in order to work.
-				if (spritetype == RF_FLATSPRITE)
-				{
-					float pitchDegrees = -actor->Angles.Pitch.Degrees;
-					DVector3 apos = { x, y, z };
-					DVector3 diff = ViewPos - apos;
-					DAngle angto = diff.Angle();
-
-					angto = deltaangle(actor->Angles.Yaw, angto);
-
-					bool noFlipSprite = (!dontFlip || (fabs(angto) < 90.));
-					mat.Rotate(0, 1, 0, (noFlipSprite) ? 0 : 180);
-
-					mat.Rotate(-yawvecY, 0, yawvecX, (noFlipSprite) ? -pitchDegrees : pitchDegrees);
-					if (drawRollSpriteActor)
-					{
-						if (useOffsets)	mat.Translate(xx, zz, yy);
-						mat.Rotate(yawvecX, 0, yawvecY, (noFlipSprite) ? -rollDegrees : rollDegrees);
-						if (useOffsets) mat.Translate(-xx, -zz, -yy);
-					}
-				}
-				// [fgsfds] Rotate the sprite about the sight vector (roll) 
-				else if (spritetype == RF_WALLSPRITE)
-				{
-					mat.Rotate(0, 1, 0, 0);
-					if (drawRollSpriteActor)
-					{
-						if (useOffsets)	mat.Translate(xx, zz, yy);
-						mat.Rotate(yawvecX, 0, yawvecY, rollDegrees);
-						if (useOffsets) mat.Translate(-xx, -zz, -yy);
-					}
-				}
-				else if (drawRollSpriteActor)
-				{
-					if (useOffsets) mat.Translate(xx, zz, yy);
-					if (drawWithXYBillboard)
-					{
-						mat.Rotate(-sin(angleRad), 0, cos(angleRad), -GLRenderer->mAngles.Pitch.Degrees);
-					}
-					mat.Rotate(cos(angleRad), 0, sin(angleRad), rollDegrees);
-					if (useOffsets) mat.Translate(-xx, -zz, -yy);
-				}
-				
-				// apply the transform
-				else if (drawWithXYBillboard)
-				{
-					// Rotate the sprite about the vector starting at the center of the sprite
-					// triangle strip and with direction orthogonal to where the player is looking
-					// in the x/y plane.
-					mat.Rotate(-sin(angleRad), 0, cos(angleRad), -GLRenderer->mAngles.Pitch.Degrees);
-				}
-				
-				mat.Translate(-xcenter, -zcenter, -ycenter); // retreat from sprite center
-				v1 = mat * FVector3(x1, z1, y1);
-				v2 = mat * FVector3(x2, z1, y2);
-				v3 = mat * FVector3(x1, z2, y1);
-				v4 = mat * FVector3(x2, z2, y2);
-			}
-			else // traditional "Y" billboard mode
-			{
-				v1 = FVector3(x1, z1, y1);
-				v2 = FVector3(x2, z1, y2);
-				v3 = FVector3(x1, z2, y1);
-				v4 = FVector3(x2, z2, y2);
-			}
-
-			FFlatVertex *ptr;
-			unsigned int offset, count;
-			ptr = GLRenderer->mVBO->GetBuffer();
-			ptr->Set(v1[0], v1[1], v1[2], ul, vt);
-			ptr++;
-			ptr->Set(v2[0], v2[1], v2[2], ur, vt);
-			ptr++;
-			ptr->Set(v3[0], v3[1], v3[2], ul, vb);
-			ptr++;
-			ptr->Set(v4[0], v4[1], v4[2], ur, vb);
-			ptr++;
-			GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP, &offset, &count);
+			FQuadDrawer qd;
+			qd.Set(0, v[0][0], v[0][1], v[0][2], ul, vt);
+			qd.Set(1, v[1][0], v[1][1], v[1][2], ur, vt);
+			qd.Set(2, v[2][0], v[2][1], v[2][2], ul, vb);
+			qd.Set(3, v[3][0], v[3][1], v[3][2], ur, vb);
+			qd.Render(GL_TRIANGLE_STRIP);
 
 			if (foglayer)
 			{
@@ -420,7 +440,7 @@ void GLSprite::Draw(int pass)
 				gl_RenderState.BlendEquation(GL_FUNC_ADD);
 				gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				gl_RenderState.Apply();
-				GLRenderer->mVBO->RenderArray(GL_TRIANGLE_STRIP, offset, count);
+				qd.Render(GL_TRIANGLE_STRIP);
 				gl_RenderState.SetFixedColormap(CM_DEFAULT);
 			}
 		}
@@ -441,6 +461,16 @@ void GLSprite::Draw(int pass)
 		gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		gl_RenderState.BlendEquation(GL_FUNC_ADD);
 		gl_RenderState.SetTextureMode(TM_MODULATE);
+		if (actor != nullptr && (actor->renderflags & RF_SPRITETYPEMASK) == RF_FLATSPRITE)
+		{
+			glPolygonOffset(0.0f, 0.0f);
+			glDisable(GL_POLYGON_OFFSET_FILL);
+		}
+	}
+	else if (modelframe == nullptr)
+	{
+		glPolygonOffset(0.0f, 0.0f);
+		glDisable(GL_POLYGON_OFFSET_FILL);
 	}
 
 	gl_RenderState.SetObjectColor(0xffffffff);
@@ -458,7 +488,7 @@ inline void GLSprite::PutSprite(bool translucent)
 {
 	int list;
 	// [BB] Allow models to be drawn in the GLDL_TRANSLUCENT pass.
-	if (translucent || !modelframe)
+	if (translucent || actor == nullptr || (!modelframe && (actor->renderflags & RF_SPRITETYPEMASK) != RF_WALLSPRITE))
 	{
 		list = GLDL_TRANSLUCENT;
 	}
@@ -627,8 +657,14 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 	sector_t rs;
 	sector_t * rendersector;
 
+	if (thing == nullptr)
+		return;
+
+	// [ZZ] allow CustomSprite-style direct picnum specification
+	bool isPicnumOverride = thing->picnum.isValid();
+
 	// Don't waste time projecting sprites that are definitely not visible.
-	if (thing == NULL || thing->sprite == 0 || !thing->IsVisibleToPlayer())
+	if ((thing->sprite == 0 && !isPicnumOverride) || !thing->IsVisibleToPlayer() || !thing->IsInsideVisibleAngles())
 	{
 		return;
 	}
@@ -638,7 +674,6 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 		if (!(thing->flags & MF_STEALTH) || !gl_fixedcolormap || !gl_enhanced_nightvision || thing == camera)
 			return;
 	}
-
 	int spritenum = thing->sprite;
 	DVector2 sprscale = thing->Scale;
 	if (thing->player != NULL)
@@ -652,6 +687,19 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 	// [RH] Interpolate the sprite's position to make it look smooth
 	DVector3 thingpos = thing->InterpolatedPosition(r_TicFracF);
 	if (thruportal == 1) thingpos += Displacements.getOffset(thing->Sector->PortalGroup, sector->PortalGroup);
+
+	// Some added checks if the camera actor is not supposed to be seen. It can happen that some portal setup has this actor in view in which case it may not be skipped here
+	if (thing == camera && !r_showviewer)
+	{
+		DVector3 thingorigin = thing->Pos();
+		if (thruportal == 1) thingorigin += Displacements.getOffset(thing->Sector->PortalGroup, sector->PortalGroup);
+		if (fabs(thingorigin.X - ViewActorPos.X) < 2 && fabs(thingorigin.Y - ViewActorPos.Y) < 2) return;
+	}
+	// Thing is invisible if close to the camera.
+	if (thing->renderflags & RF_MAYBEINVISIBLE)
+	{
+		if (fabs(thingpos.X - ViewPos.X) < 32 && fabs(thingpos.Y - ViewPos.Y) < 32) return;
+	}
 
 	// Too close to the camera. This doesn't look good if it is a sprite.
 	if (fabs(thingpos.X - ViewPos.X) < 2 && fabs(thingpos.Y - ViewPos.Y) < 2)
@@ -689,6 +737,11 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 		int clipres = GLRenderer->mClipPortal->ClipPoint(thingpos);
 		if (clipres == GLPortal::PClip_InFront) return;
 	}
+	// disabled because almost none of the actual game code is even remotely prepared for this. If desired, use the INTERPOLATE flag.
+	if (thing->renderflags & RF_INTERPOLATEANGLES)
+		Angles = thing->InterpolatedAngles(r_TicFracF);
+	else
+		Angles = thing->Angles;
 
 	player_t *player = &players[consoleplayer];
 	FloatRect r;
@@ -708,7 +761,7 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 	x = thingpos.X;
 	z = thingpos.Z;
 	y = thingpos.Y;
-	if (spritetype == RF_FLATSPRITE) z -= thing->Floorclip;
+	if (spritetype == RF_FACESPRITE) z -= thing->Floorclip; // wall and flat sprites are to be considered level geometry so this may not apply.
 
 	// [RH] Make floatbobbing a renderer-only effect.
 	if (thing->flags2 & MF2_FLOATBOB)
@@ -717,21 +770,44 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 		z += fz;
 	}
 
-	modelframe = gl_FindModelFrame(thing->GetClass(), spritenum, thing->frame, !!(thing->flags & MF_DROPPED));
+	modelframe = isPicnumOverride ? nullptr : gl_FindModelFrame(thing->GetClass(), spritenum, thing->frame, !!(thing->flags & MF_DROPPED));
 	if (!modelframe)
 	{
 		bool mirror;
 		DAngle ang = (thingpos - ViewPos).Angle();
-		FTextureID patch = gl_GetSpriteFrame(spritenum, thing->frame, -1, (ang - thing->Angles.Yaw).BAMs(), &mirror);
+		FTextureID patch;
+		// [ZZ] add direct picnum override
+		if (isPicnumOverride)
+		{
+			patch = thing->picnum;
+			mirror = false;
+		}
+		else if (thing->flags7 & MF7_SPRITEANGLE)
+		{
+			patch = gl_GetSpriteFrame(spritenum, thing->frame, -1, (thing->SpriteAngle).BAMs(), &mirror);
+		}
+		else if (!(thing->renderflags & RF_FLATSPRITE))
+		{
+			patch = gl_GetSpriteFrame(spritenum, thing->frame, -1, (ang - (Angles.Yaw + thing->SpriteRotation)).BAMs(), &mirror);
+		}
+		else
+		{
+			// Flat sprites cannot rotate in a predictable manner.
+			patch = gl_GetSpriteFrame(spritenum, thing->frame, 0, 0, &mirror);
+		}
+
 		if (!patch.isValid()) return;
 		int type = thing->renderflags & RF_SPRITETYPEMASK;
 		gltexture = FMaterial::ValidateTexture(patch, (type == RF_FACESPRITE), false);
-		if (!gltexture) return;
+		if (!gltexture)
+			return;
 
 		vt = gltexture->GetSpriteVT();
 		vb = gltexture->GetSpriteVB();
+		if (thing->renderflags & RF_YFLIP) std::swap(vt, vb);
+
 		gltexture->GetSpriteRect(&r);
-		if (mirror)
+		if (mirror ^ !!(thing->renderflags & RF_XFLIP))
 		{
 			r.left = -r.width - r.left;	// mirror the sprite's x-offset
 			ul = gltexture->GetSpriteUL();
@@ -747,7 +823,8 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 
 		float rightfac = -r.left;
 		float leftfac = rightfac - r.width;
-
+		float bottomfac = -r.top;
+		float topfac = bottomfac - r.height;
 		z1 = z - r.top;
 		z2 = z1 - r.height;
 
@@ -772,11 +849,18 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 			y1 = y + viewvecX*leftfac;
 			y2 = y + viewvecX*rightfac;
 			break;
-
+			
 		case RF_FLATSPRITE:
+		{	
+			x1 = x + leftfac;
+			x2 = x + rightfac;
+			y1 = y - topfac;
+			y2 = y - bottomfac;
+		}
+		break;
 		case RF_WALLSPRITE:
-			viewvecX = thing->Angles.Yaw.Cos();
-			viewvecY = thing->Angles.Yaw.Sin();
+			viewvecX = Angles.Yaw.Cos();
+			viewvecY = Angles.Yaw.Sin();
 
 			x1 = x + viewvecY*leftfac;
 			x2 = x + viewvecY*rightfac;
@@ -839,7 +923,7 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 		Colormap=rendersector->ColorMap;
 		if (fullbright)
 		{
-			if (rendersector == &sectors[rendersector->sectornum] || in_area != area_below)	
+			if (rendersector == &level.sectors[rendersector->sectornum] || in_area != area_below)	
 				// under water areas keep their color for fullbright objects
 			{
 				// Only make the light white but keep everything else (fog, desaturation and Boom colormap.)
@@ -871,13 +955,13 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 		RenderStyle.CheckFuzz();
 		if (RenderStyle.BlendOp == STYLEOP_Fuzz)
 		{
-			if (gl_fuzztype != 0 && gl.glslversion > 0)
+			if (gl_fuzztype != 0 && !gl.legacyMode)
 			{
 				// Todo: implement shader selection here
 				RenderStyle = LegacyRenderStyles[STYLE_Translucent];
 				OverrideShader = gl_fuzztype + 4;
 				trans = 0.99f;	// trans may not be 1 here
-				hw_styleflags |= STYLEHW_NoAlphaTest;
+				hw_styleflags = STYLEHW_NoAlphaTest;
 			}
 			else
 			{
@@ -903,8 +987,7 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 		// This is a non-translucent sprite (i.e. STYLE_Normal or equivalent)
 		trans=1.f;
 		
-
-		if (!gl_sprite_blend || modelframe)
+		if (!gl_sprite_blend || modelframe || (thing->renderflags & (RF_FLATSPRITE|RF_WALLSPRITE)) || gl_billboard_faces_camera)
 		{
 			RenderStyle.SrcAlpha = STYLEALPHA_One;
 			RenderStyle.DestAlpha = STYLEALPHA_Zero;
@@ -915,8 +998,6 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 			RenderStyle.SrcAlpha = STYLEALPHA_Src;
 			RenderStyle.DestAlpha = STYLEALPHA_InvSrc;
 		}
-
-
 	}
 	if ((gltexture && gltexture->GetTransparent()) || (RenderStyle.Flags & STYLEF_RedIsAlpha))
 	{
@@ -968,7 +1049,7 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 	if (thing->Sector->e->XFloor.lightlist.Size() != 0 && gl_fixedcolormap == CM_DEFAULT && !fullbright &&
 		RenderStyle.BlendOp != STYLEOP_Shadow && RenderStyle.BlendOp != STYLEOP_RevSub)
 	{
-		if (gl.glslversion < 1.3)	// on old hardware we are rather limited...
+		if (gl.flags & RFL_NO_CLIP_PLANES)	// on old hardware we are rather limited...
 		{
 			lightlist = NULL;
 			if (!drawWithXYBillboard && !modelframe)
@@ -1007,7 +1088,7 @@ void GLSprite::ProcessParticle (particle_t *particle, sector_t *sector)//, int s
 
 	player_t *player=&players[consoleplayer];
 	
-	if (particle->trans==0) return;
+	if (particle->alpha==0) return;
 
 	lightlevel = gl_ClampLight(sector->GetTexture(sector_t::ceiling) == skyflatnum ? 
 		sector->GetCeilingLight() : sector->GetFloorLight());
@@ -1047,7 +1128,7 @@ void GLSprite::ProcessParticle (particle_t *particle, sector_t *sector)//, int s
 		Colormap.ClearColor();
 	}
 
-	trans=particle->trans/255.0f;
+	trans=particle->alpha;
 	RenderStyle = STYLE_Translucent;
 	OverrideShader = 0;
 
@@ -1145,7 +1226,7 @@ void gl_RenderActorsInPortal(FGLLinePortal *glport)
 			if (port2 != nullptr && port->mDestination == port2->mOrigin && port->mOrigin == port2->mDestination)
 			{
 
-				for (portnode_t *node = port->render_thinglist; node != nullptr; node = node->m_snext)
+				for (portnode_t *node = port->lineportal_thinglist; node != nullptr; node = node->m_snext)
 				{
 					AActor *th = node->m_thing;
 
@@ -1159,6 +1240,14 @@ void gl_RenderActorsInPortal(FGLLinePortal *glport)
 					DVector3 newpos = savedpos;
 					sector_t fakesector;
 
+					if (!r_showviewer && th == camera)
+					{
+						if (fabs(savedpos.X - ViewActorPos.X) < 2 && fabs(savedpos.Y - ViewActorPos.Y) < 2)
+						{
+							continue;
+						}
+					}
+
 					P_TranslatePortalXY(line, newpos.X, newpos.Y);
 					P_TranslatePortalZ(line, newpos.Z);
 					P_TranslatePortalAngle(line, th->Angles.Yaw);
@@ -1166,9 +1255,7 @@ void gl_RenderActorsInPortal(FGLLinePortal *glport)
 					th->Prev += newpos - savedpos;
 
 					GLSprite spr;
-					th->fillcolor = 0xff0000ff;
 					spr.Process(th, gl_FakeFlat(th->Sector, &fakesector, false), 2);
-					th->fillcolor = 0xffffffff;
 					th->Angles.Yaw = savedangle;
 					th->SetXYZ(savedpos);
 					th->Prev -= newpos - savedpos;

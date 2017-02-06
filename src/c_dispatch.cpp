@@ -53,7 +53,7 @@
 #include "v_text.h"
 #include "d_net.h"
 #include "d_main.h"
-#include "farchive.h"
+#include "serializer.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -65,7 +65,7 @@ class DWaitingCommand : public DThinker
 public:
 	DWaitingCommand (const char *cmd, int tics);
 	~DWaitingCommand ();
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 private:
@@ -187,12 +187,13 @@ static const char *KeyConfCommands[] =
 
 // CODE --------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DWaitingCommand)
+IMPLEMENT_CLASS(DWaitingCommand, false, false)
 
-void DWaitingCommand::Serialize (FArchive &arc)
+void DWaitingCommand::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << Command << TicsLeft;
+	arc("command", Command)
+		("ticsleft", TicsLeft);
 }
 
 DWaitingCommand::DWaitingCommand ()
@@ -224,7 +225,7 @@ void DWaitingCommand::Tick ()
 	}
 }
 
-IMPLEMENT_CLASS (DStoredCommand)
+IMPLEMENT_CLASS(DStoredCommand, false, false)
 
 DStoredCommand::DStoredCommand ()
 {
@@ -704,7 +705,7 @@ void AddCommandString (char *cmd, int keynum)
 
 					if (cmd[4] == ' ')
 					{
-						tics = strtol (cmd + 5, NULL, 0);
+						tics = (int)strtoll (cmd + 5, NULL, 0);
 					}
 					else
 					{
@@ -1039,7 +1040,11 @@ FString BuildString (int argc, FString *argv)
 
 		for (arg = 0; arg < argc; arg++)
 		{
-			if (strchr(argv[arg], '"'))
+			if (argv[arg][0] == '\0')
+			{ // It's an empty argument, we need to convert it to '""'
+				buf << "\"\" ";
+			}
+			else if (strchr(argv[arg], '"'))
 			{ // If it contains one or more quotes, we need to escape them.
 				buf << '"';
 				long substr_start = 0, quotepos;

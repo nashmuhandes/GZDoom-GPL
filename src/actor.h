@@ -34,6 +34,7 @@
 // States are tied to finite states are tied to animation frames.
 #include "info.h"
 
+#include <forward_list>
 #include "doomdef.h"
 #include "textures/textures.h"
 #include "r_data/renderstyle.h"
@@ -44,10 +45,9 @@
 #include "portal.h"
 
 struct subsector_t;
-class PClassAmmo;
 struct FBlockNode;
 struct FPortalGroupArray;
-
+struct visstyle_t;
 //
 // NOTES: AActor
 //
@@ -111,6 +111,8 @@ struct FPortalGroupArray;
 //
 // Any questions?
 //
+
+
 
 // --- mobj.flags ---
 enum ActorFlag
@@ -284,7 +286,7 @@ enum ActorFlag4
 enum ActorFlag5
 {
 	MF5_DONTDRAIN		= 0x00000001,	// cannot be drained health from.
-	/*		FREE SLOT	  0x00000002*/
+	MF5_GETOWNER		= 0x00000002,
 	MF5_NODROPOFF		= 0x00000004,	// cannot drop off under any circumstances.
 	MF5_NOFORWARDFALL	= 0x00000008,	// Does not make any actor fall forward by being damaged by this
 	MF5_COUNTSECRET		= 0x00000010,	// From Doom 64: actor acts like a secret
@@ -381,6 +383,11 @@ enum ActorFlag7
 	MF7_LAXTELEFRAGDMG	= 0x00100000,	// [MC] Telefrag damage can be reduced.
 	MF7_ICESHATTER		= 0x00200000,	// [MC] Shatters ice corpses regardless of damagetype.
 	MF7_ALLOWTHRUFLAGS	= 0x00400000,	// [MC] Allow THRUACTORS and the likes on puffs to prevent mod breakage.
+	MF7_USEKILLSCRIPTS	= 0x00800000,	// [JM] Use "KILL" Script on death if not forced by GameInfo.
+	MF7_NOKILLSCRIPTS	= 0x01000000,	// [JM] No "KILL" Script on death whatsoever, even if forced by GameInfo.
+	MF7_SPRITEANGLE		= 0x02000000,	// [MC] Utilize the SpriteAngle property and lock the rotation to the degrees specified.
+	MF7_SMASHABLE		= 0x04000000,	// dies if hitting the floor.
+	MF7_NOSHIELDREFLECT = 0x08000000,	// will not be reflected by shields.
 };
 
 // --- mobj.renderflags ---
@@ -411,9 +418,14 @@ enum ActorRenderFlag
 	RF_FLATSPRITE		= 0x2000,	// Flat sprite
 	RF_VOXELSPRITE		= 0x3000,	// Voxel object
 	RF_INVISIBLE		= 0x8000,	// Don't bother drawing this actor
+	RF_MAYBEINVISIBLE	= 0x10000,
 	RF_ROLLSPRITE		= 0x40000,	//[marrub]roll the sprite billboard
 	RF_DONTFLIP			= 0x80000,	// Don't flip it when viewed from behind.
-	RF_ROLLCENTER		= 0x100000, // Rotate from the center of sprite instead of offsets
+	RF_ROLLCENTER		= 0x00100000, // Rotate from the center of sprite instead of offsets
+	RF_MASKROTATION		= 0x00200000, // [MC] Only draw the actor when viewed from a certain angle range.
+	RF_ABSMASKANGLE		= 0x00400000, // [MC] The mask rotation does not offset by the actor's angle.
+	RF_ABSMASKPITCH		= 0x00800000, // [MC] The mask rotation does not offset by the actor's pitch.
+	RF_INTERPOLATEANGLES		= 0x01000000, // [MC] Allow interpolation of the actor's angle, pitch and roll.
 
 	RF_FORCEYBILLBOARD		= 0x10000,	// [BB] OpenGL only: draw with y axis billboard, i.e. anchored to the floor (overrides gl_billboard_mode setting)
 	RF_FORCEXYBILLBOARD		= 0x20000,	// [BB] OpenGL only: draw with xy axis billboard, i.e. unanchored (overrides gl_billboard_mode setting)
@@ -552,7 +564,14 @@ inline T *GetDefault ()
 
 struct line_t;
 struct secplane_t;
+struct msecnode_t;
 struct FStrifeDialogueNode;
+
+struct FLinkContext
+{
+	msecnode_t *sector_list = nullptr;
+	msecnode_t *render_list = nullptr;
+};
 
 class DDropItem : public DObject
 {
@@ -576,11 +595,14 @@ public:
 	AActor () throw();
 	AActor (const AActor &other) throw();
 	AActor &operator= (const AActor &other);
-	void Destroy ();
 	~AActor ();
 
-	void Serialize (FArchive &arc);
-	
+	virtual void OnDestroy() override;
+	virtual void Serialize(FSerializer &arc) override;
+	virtual void PostSerialize() override;
+	virtual void PostBeginPlay() override;		// Called immediately before the actor's first tick
+	virtual void Tick() override;
+
 	static AActor *StaticSpawn (PClassActor *type, const DVector3 &pos, replace_t allowreplacement, bool SpawningMapThing = false);
 
 	inline AActor *GetDefault () const
@@ -596,6 +618,8 @@ public:
 	// Adjusts the angle for deflection/reflection of incoming missiles
 	// Returns true if the missile should be allowed to explode anyway
 	bool AdjustReflectionAngle (AActor *thing, DAngle &angle);
+	int AbsorbDamage(int damage, FName dmgtype);
+	void AlterWeaponSprite(visstyle_t *vis);
 
 	// Returns true if this actor is within melee range of its target
 	bool CheckMeleeRange();
@@ -603,43 +627,50 @@ public:
 	bool CheckNoDelay();
 
 	virtual void BeginPlay();			// Called immediately after the actor is created
-	virtual void PostBeginPlay();		// Called immediately before the actor's first tick
-	virtual void LevelSpawned();		// Called after BeginPlay if this actor was spawned by the world
-	virtual void HandleSpawnFlags();	// Translates SpawnFlags into in-game flags.
+	void CallBeginPlay();
+
+	void LevelSpawned();				// Called after BeginPlay if this actor was spawned by the world
+	void HandleSpawnFlags();	// Translates SpawnFlags into in-game flags.
 
 	virtual void MarkPrecacheSounds() const;	// Marks sounds used by this actor for precaching.
 
 	virtual void Activate (AActor *activator);
-	virtual void Deactivate (AActor *activator);
+	void CallActivate(AActor *activator);
 
-	virtual void Tick ();
+	virtual void Deactivate(AActor *activator);
+	void CallDeactivate(AActor *activator);
 
 	// Called when actor dies
 	virtual void Die (AActor *source, AActor *inflictor, int dmgflags = 0);
+	void CallDie(AActor *source, AActor *inflictor, int dmgflags = 0);
 
 	// Perform some special damage action. Returns the amount of damage to do.
 	// Returning -1 signals the damage routine to exit immediately
 	virtual int DoSpecialDamage (AActor *target, int damage, FName damagetype);
+	int CallDoSpecialDamage(AActor *target, int damage, FName damagetype);
 
 	// Like DoSpecialDamage, but called on the actor receiving the damage.
 	virtual int TakeSpecialDamage (AActor *inflictor, AActor *source, int damage, FName damagetype);
+	int CallTakeSpecialDamage(AActor *inflictor, AActor *source, int damage, FName damagetype);
+
+	// Actor had MF_SKULLFLY set and rammed into something
+	// Returns false to stop moving and true to keep moving
+	virtual bool Slam(AActor *victim);
+	bool CallSlam(AActor *victim);
+
+	// Something just touched this actor.
+	virtual void Touch(AActor *toucher);
+	void CallTouch(AActor *toucher);
 
 	// Centaurs and ettins squeal when electrocuted, poisoned, or "holy"-ed
 	// Made a metadata property so no longer virtual
 	void Howl ();
 
-	// Actor just hit the floor
-	virtual void HitFloor ();
-
 	// plays bouncing sound
 	void PlayBounceSound(bool onfloor);
 
 	// Called when an actor with MF_MISSILE and MF2_FLOORBOUNCE hits the floor
-	virtual bool FloorBounceMissile (secplane_t &plane);
-
-	// Called when an actor is to be reflected by a disc of repulsion.
-	// Returns true to continue normal blast processing.
-	virtual bool SpecialBlastHandling (AActor *source, double strength);
+	bool FloorBounceMissile (secplane_t &plane);
 
 	// Called by RoughBlockCheck
 	bool IsOkayToAttack (AActor *target);
@@ -647,27 +678,28 @@ public:
 	// Plays the actor's ActiveSound if its voice isn't already making noise.
 	void PlayActiveSound ();
 
-	// Actor had MF_SKULLFLY set and rammed into something
-	// Returns false to stop moving and true to keep moving
-	virtual bool Slam (AActor *victim);
+	void RestoreSpecialPosition();
 
 	// Called by PIT_CheckThing() and needed for some Hexen things.
 	// Returns -1 for normal behavior, 0 to return false, and 1 to return true.
 	// I'm not sure I like it this way, but it will do for now.
-	virtual int SpecialMissileHit (AActor *victim);
+	// (virtual on the script side only)
+	int SpecialMissileHit (AActor *victim);
 
 	// Returns true if it's okay to switch target to "other" after being attacked by it.
-	virtual bool OkayToSwitchTarget (AActor *other);
+	bool OkayToSwitchTarget (AActor *other);
 
-	// Something just touched this actor.
-	virtual void Touch (AActor *toucher);
+	// Note: Although some of the inventory functions are virtual, this
+	// is not exposed to scripts, as the only class overriding them is 
+	// APlayerPawn for some specific handling for players. None of this
+	// should ever be overridden by custom classes.
 
 	// Adds the item to this actor's inventory and sets its Owner.
 	virtual void AddInventory (AInventory *item);
 
 	// Give an item to the actor and pick it up.
 	// Returns true if the item pickup succeeded.
-	virtual bool GiveInventory (PClassInventory *type, int amount, bool givecheat = false);
+	bool GiveInventory (PClassInventory *type, int amount, bool givecheat = false);
 
 	// Removes the item from the inventory list.
 	virtual void RemoveInventory (AInventory *item);
@@ -681,7 +713,7 @@ public:
 	virtual bool UseInventory (AInventory *item);
 
 	// Tosses an item out of the inventory.
-	virtual AInventory *DropInventory (AInventory *item);
+	AInventory *DropInventory (AInventory *item);
 
 	// Removes all items from the inventory.
 	void ClearInventory();
@@ -691,7 +723,7 @@ public:
 
 	// Finds the first item of a particular type.
 	AInventory *FindInventory (PClassActor *type, bool subclass=false);
-	AInventory *FindInventory (FName type);
+	AInventory *FindInventory (FName type, bool subclass = false);
 	template<class T> T *FindInventory ()
 	{
 		return static_cast<T *> (FindInventory (RUNTIME_TEMPLATE_CLASS(T)));
@@ -704,7 +736,7 @@ public:
 	AInventory *FirstInv ();
 
 	// Tries to give the actor some ammo.
-	bool GiveAmmo (PClassAmmo *type, int amount);
+	bool GiveAmmo (PClassInventory *type, int amount);
 
 	// Destroys all the inventory the actor is holding.
 	void DestroyAllInventory ();
@@ -723,7 +755,7 @@ public:
 	void ObtainInventory (AActor *other);
 
 	// Die. Now.
-	virtual bool Massacre ();
+	bool Massacre ();
 
 	// Transforms the actor into a finely-ground paste
 	virtual bool Grind(bool items);
@@ -745,16 +777,12 @@ public:
 	DVector3 GetPortalTransition(double byoffset, sector_t **pSec = NULL);
 
 	// What species am I?
-	virtual FName GetSpecies();
+	FName GetSpecies();
 
-	double GetBobOffset(double ticfrac = 0) const
-	{
-		if (!(flags2 & MF2_FLOATBOB))
-		{
-			return 0;
-		}
-		return BobSin(FloatBobPhase + level.maptime + ticfrac);
-	}
+	// set translation
+	void SetTranslation(FName trname);
+
+	double GetBobOffset(double ticfrac = 0) const;
 
 	// Enter the crash state
 	void Crash();
@@ -945,7 +973,7 @@ public:
 	{
 		SetOrigin(Pos() + vel, true);
 	}
-	virtual void SetOrigin(double x, double y, double z, bool moving);
+	void SetOrigin(double x, double y, double z, bool moving);
 	void SetOrigin(const DVector3 & npos, bool moving)
 	{
 		SetOrigin(npos.X, npos.Y, npos.Z, moving);
@@ -954,9 +982,10 @@ public:
 	inline void SetFriendPlayer(player_t *player);
 
 	bool IsVisibleToPlayer() const;
+	bool IsInsideVisibleAngles() const;
 
 	// Calculate amount of missile damage
-	virtual int GetMissileDamage(int mask, int add);
+	int GetMissileDamage(int mask, int add);
 
 	bool CanSeek(AActor *target) const;
 
@@ -977,18 +1006,25 @@ public:
 	DVector3		__Pos;		// double underscores so that it won't get used by accident. Access to this should be exclusively through the designated access functions.
 	DVector3		OldRenderPos;
 
+	DAngle			SpriteAngle;
+	DAngle			SpriteRotation;
+	DAngle			VisibleStartAngle;
+	DAngle			VisibleStartPitch;
+	DAngle			VisibleEndAngle;
+	DAngle			VisibleEndPitch;
 	DRotator		Angles;
 	DVector3		Vel;
 	double			Speed;
 	double			FloatSpeed;
 
-	WORD			sprite;				// used to find patch_t and flip value
-	BYTE			frame;				// sprite frame to draw
+	int				sprite;				// used to find patch_t and flip value
+	uint8_t			frame;				// sprite frame to draw
+	uint8_t			effects;			// [RH] see p_effect.h
+	uint8_t			fountaincolor;		// Split out of 'effect' to have easier access.
 	DVector2		Scale;				// Scaling values; 1 is normal size
 	FRenderStyle	RenderStyle;		// Style to draw this actor with
 	ActorRenderFlags	renderflags;		// Different rendering flags
 	FTextureID		picnum;				// Draw this instead of sprite if valid
-	DWORD			effects;			// [RH] see p_effect.h
 	double			Alpha;				// Since P_CheckSight makes an alpha check this can't be a float. It has to be a double.
 	DWORD			fillcolor;			// Color to draw when STYLE_Shaded
 
@@ -1005,12 +1041,15 @@ public:
 	struct sector_t	*ceilingsector;
 	FTextureID		ceilingpic;			// contacted sec ceilingpic
 	double			radius, Height;		// for movement checking
+	double			renderradius;
 
 	double			projectilepassheight;	// height for clipping projectile movement against this actor
 	
 	SDWORD			tics;				// state tic counter
 	FState			*state;
-	VMFunction		*Damage;			// For missiles and monster railgun
+	//VMFunction		*Damage;			// For missiles and monster railgun
+	int				DamageVal;
+	VMFunction		*DamageFunc;
 	int				projectileKickback;
 	ActorFlags		flags;
 	ActorFlags2		flags2;			// Heretic flags
@@ -1053,6 +1092,7 @@ public:
 	int				skillrespawncount;
 	int				TIDtoHate;			// TID of things to hate (0 if none)
 	FNameNoInit		Species;		// For monster families
+	TObjPtr<AActor>	alternative;	// (Un)Morphed actors stored here. Those with the MF_UNMORPHED flag are the originals.
 	TObjPtr<AActor>	tracer;			// Thing being chased/attacked for tracers
 	TObjPtr<AActor>	master;			// Thing which spawned this one (prevents mutual attacks)
 	double			Floorclip;		// value to use for floor clipping
@@ -1106,8 +1146,10 @@ public:
 
 	// a linked list of sectors where this object appears
 	struct msecnode_t	*touching_sectorlist;				// phares 3/14/98
-	struct msecnode_t	*render_sectorlist;		// same for cross-sectorportal rendering
-	struct portnode_t	*render_portallist;		// and for cross-lineportal
+	struct msecnode_t	*touching_sectorportallist;		// same for cross-sectorportal rendering
+	struct portnode_t	*touching_lineportallist;		// and for cross-lineportal
+	struct msecnode_t	*touching_rendersectors; // this is the list of sectors that this thing interesects with it's max(radius, renderradius).
+	int validcount;
 
 
 	TObjPtr<AInventory>	Inventory;		// [RH] This actor's inventory
@@ -1174,16 +1216,17 @@ public:
 private:
 	static AActor *TIDHash[128];
 	static inline int TIDHASH (int key) { return key & 127; }
+public:
 	static FSharedStringArena mStringPropertyData;
-
+private:
 	friend class FActorIterator;
 	friend bool P_IsTIDUsed(int tid);
 
 	bool FixMapthingPos();
 
 public:
-	void LinkToWorld (bool spawningmapthing=false, sector_t *sector = NULL);
-	void UnlinkFromWorld ();
+	void LinkToWorld (FLinkContext *ctx, bool spawningmapthing=false, sector_t *sector = NULL);
+	void UnlinkFromWorld(FLinkContext *ctx);
 	void AdjustFloorClip ();
 	bool InStateSequence(FState * newstate, FState * basestate);
 	int GetTics(FState * newstate);
@@ -1195,6 +1238,23 @@ public:
 	void ClearCounters();
 	FState *GetRaiseState();
 	void Revive();
+
+	void SetDamage(int dmg)
+	{
+		DamageVal = dmg;
+		DamageFunc = nullptr;
+	}
+
+	bool IsZeroDamage() const
+	{
+		return DamageVal == 0 && DamageFunc == nullptr;
+	}
+
+	void RestoreDamage()
+	{
+		DamageVal = GetDefault()->DamageVal;
+		DamageFunc = GetDefault()->DamageFunc;
+	}
 
 	FState *FindState (FName label) const
 	{
@@ -1259,6 +1319,14 @@ public:
 	DVector3 InterpolatedPosition(double ticFrac) const
 	{
 		return Prev + (ticFrac * (Pos() - Prev));
+	}
+	DRotator InterpolatedAngles(double ticFrac) const
+	{
+		DRotator result;
+		result.Yaw = PrevAngles.Yaw + deltaangle(PrevAngles.Yaw, Angles.Yaw) * ticFrac;
+		result.Pitch = PrevAngles.Pitch + deltaangle(PrevAngles.Pitch, Angles.Pitch) * ticFrac;
+		result.Roll = PrevAngles.Roll + deltaangle(PrevAngles.Roll, Angles.Roll) * ticFrac;
+		return result;
 	}
 	DVector3 PosPlusZ(double zadd) const
 	{
@@ -1327,7 +1395,7 @@ public:
 		Vel.Y = speed * Angles.Yaw.Sin();
 	}
 
-	void VelFromAngle(DAngle angle, double speed)
+	void VelFromAngle(double speed, DAngle angle)
 	{
 		Vel.X = speed * angle.Cos();
 		Vel.Y = speed * angle.Sin();
@@ -1375,6 +1443,7 @@ public:
 	}
 
 	int ApplyDamageFactor(FName damagetype, int damage) const;
+	int GetModifiedDamage(FName damagetype, int damage, bool passive);
 
 
 	// begin of GZDoom specific additions
@@ -1408,6 +1477,10 @@ public:
 			base = base->inext;
 
 		return base;
+	}
+	void Reinit()
+	{
+		base = nullptr;
 	}
 private:
 	AActor *base;
@@ -1492,6 +1565,7 @@ struct FTranslatedLineTarget
 {
 	AActor *linetarget;
 	DAngle angleFromSource;
+	DAngle attackAngleFromSource;
 	bool unlinked;	// found by a trace that went through an unlinked portal.
 };
 

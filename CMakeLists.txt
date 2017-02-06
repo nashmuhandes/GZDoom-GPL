@@ -14,6 +14,11 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR} )
 include( CreateLaunchers )
 include( FindPackageHandleStandardArgs )
 
+# Produce a warning if XP support will be missing.
+if( MSVC14 AND NOT CMAKE_GENERATOR_TOOLSET STREQUAL "v140_xp" )
+	message( WARNING "This project supports Windows XP (including XP x64), but you must set the optional toolset to v140_xp manually to have it in your build! Use -T \"v140_xp\" from the command prompt." )
+endif()
+
 # Support cross compiling
 option( FORCE_CROSSCOMPILE "Turn on cross compiling." NO )
 if( FORCE_CROSSCOMPILE )
@@ -25,8 +30,27 @@ if(CMAKE_CROSSCOMPILING)
 	include(${IMPORT_EXECUTABLES})
 endif()
 
+# Recursive function to place PK3 archive source files into a hierarchy of source file in the IDE
+function( assort_pk3_source_folder FOLDER_NAME PK3_DIR )
+	# Assort source files into folders in the IDE
+	file(GLOB PK3_SRCS ${PK3_DIR}/*) # Create list of all files in this folder
+	foreach(PK3_SRC ${PK3_SRCS})
+		# If there are subfolders, recurse into them
+		if(IS_DIRECTORY ${PK3_SRC})
+			get_filename_component(DIRNAME ${PK3_SRC} NAME)
+			# Exclude folder from list of source files
+			list(REMOVE_ITEM PK3_SRCS ${PK3_SRC})
+			# Recurse deeper into the filesystem folder tree
+			assort_pk3_source_folder( ${FOLDER_NAME}\\${DIRNAME} ${PK3_SRC} )
+		endif()
+		# Assign IDE group for current top-level source files
+		source_group(${FOLDER_NAME} FILES ${PK3_SRCS})
+	endforeach()
+endfunction()
+
 # Simplify pk3 building, add_pk3(filename srcdirectory)
 function( add_pk3 PK3_NAME PK3_DIR )
+	# message(STATUS "Creating build rule for PK3 ${PK3_NAME} ${PK3_DIR}")
 	# Generate target name. Just use "pk3" for main pk3 target.
 	string( REPLACE "." "_" PK3_TARGET ${PK3_NAME} )
 	if( ${PK3_TARGET} STREQUAL "zdoom_pk3" )
@@ -43,12 +67,42 @@ function( add_pk3 PK3_NAME PK3_DIR )
 			COMMAND zipdir -udf ${ZDOOM_OUTPUT_DIR}/${PK3_NAME} ${PK3_DIR}
 			DEPENDS zipdir )
 	endif()
-
-		# Touch the zipdir executable here so that the pk3s are forced to
-		# rebuild each time since their dependecy has "changed."
-		add_custom_target( ${PK3_TARGET} ALL
-			COMMAND ${CMAKE_COMMAND} -E touch $<TARGET_FILE:zipdir>
-			DEPENDS ${ZDOOM_OUTPUT_DIR}/${PK3_NAME} )
+	# Create a list of source files for this PK3, for use in the IDE
+	# Phase 1: Create a list of all source files for this PK3 archive, except
+	#  for a couple of strife image file names that confuse CMake.
+	file(GLOB_RECURSE PK3_SRCS ${PK3_DIR}/*)
+	# Exclude from the source list some gzdoom .png files with brackets in the
+	# file names here, because they confuse CMake.
+	# This only affects the list of source files shown in the IDE.
+	# It does not actually remove the files from the PK3 archive.
+	# First replace that toxic bracket character with something we can handle
+	string(REPLACE "[" confusing_bracket PK3_SRCS "${PK3_SRCS}")
+	string(REPLACE "]" confusing_bracket PK3_SRCS "${PK3_SRCS}")
+	foreach(PK3_SRC ${PK3_SRCS}) # All source files at all levels
+		# Exclude those quarantined source file source file names that once had a bracket
+		if(${PK3_SRC} MATCHES confusing_bracket)
+			# message(STATUS "Ignoring PK3 file name containing brackets "${PK3_SRC})
+			list(REMOVE_ITEM PK3_SRCS ${PK3_SRC})
+		endif()
+	endforeach()
+	# Phase 2: Create the PK3 build rule, including the source file list for the IDE
+	# Touch the zipdir executable here so that the pk3s are forced to
+	# rebuild each time since their dependency has "changed."
+	add_custom_target( ${PK3_TARGET} ALL
+		COMMAND ${CMAKE_COMMAND} -E touch $<TARGET_FILE:zipdir>
+		DEPENDS ${ZDOOM_OUTPUT_DIR}/${PK3_NAME}
+		SOURCES ${PK3_SRCS})
+	# Phase 3: Assign source files to a nice folder structure in the IDE
+	assort_pk3_source_folder("Source Files" ${PK3_DIR})
+	# Phase 4: Add the resulting PK3 to the install target.
+	if( WIN32 )
+		set( INSTALL_PK3_PATH . CACHE STRING "Directory where zdoom.pk3 will be placed during install." )
+	else()
+		set( INSTALL_PK3_PATH share/games/doom CACHE STRING "Directory where zdoom.pk3 will be placed during install." )
+	endif()
+	install(FILES "${PROJECT_BINARY_DIR}/${PK3_NAME}"
+			DESTINATION ${INSTALL_PK3_PATH}
+			COMPONENT "Game resources")
 endfunction()
 
 # Macro for building libraries without debugging information
@@ -118,7 +172,7 @@ if( MSVC )
 	# Function-level linking
 	# Disable run-time type information
 	set( ALL_C_FLAGS "/GF /Gy /GR-" )
-	
+
 	if( CMAKE_SIZEOF_VOID_P MATCHES "4")
 		# SSE2 option (to allow x87 in 32 bit and disallow extended feature sets which have not yet been checked for precision)
 		option (ZDOOM_USE_SSE2	"Use SSE2 instruction set")
@@ -133,7 +187,7 @@ if( MSVC )
 	else()
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} /arch:SSE2")
 	endif()
-	
+
 	# Avoid CRT DLL dependancies in release builds, optionally generate assembly output for checking crash locations.
 	option( ZDOOM_GENERATE_ASM "Generate assembly output." OFF )
 	if( ZDOOM_GENERATE_ASM )
@@ -142,7 +196,7 @@ if( MSVC )
 		set( REL_C_FLAGS "/MT /Oy /Oi" )
 	endif()
 
-	
+
 	# Debug allocations in debug builds
 	set( DEB_C_FLAGS "/D _CRTDBG_MAP_ALLOC /MTd" )
 
@@ -150,7 +204,7 @@ if( MSVC )
 	if( MSVC_VERSION GREATER 1399 )
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} /wd4996" )
 	endif()
-	
+
 	# The CMake configurations set /GR and /MD by default, which conflict with our settings.
 	string(REPLACE "/MD " " " CMAKE_CXX_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE} )
 	string(REPLACE "/MD " " " CMAKE_CXX_FLAGS_MINSIZEREL ${CMAKE_CXX_FLAGS_MINSIZEREL} )
@@ -206,6 +260,7 @@ if( ZLIB_FOUND AND NOT FORCE_INTERNAL_ZLIB )
 	message( STATUS "Using system zlib, includes found at ${ZLIB_INCLUDE_DIR}" )
 else()
 	message( STATUS "Using internal zlib" )
+	set( SKIP_INSTALL_ALL TRUE ) # Avoid installing zlib alongside zdoom
 	add_subdirectory( zlib )
 	set( ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/zlib )
 	set( ZLIB_LIBRARIES z )
@@ -249,11 +304,22 @@ if( NOT CMAKE_CROSSCOMPILING )
 	endif()
 endif()
 
+# Install the entire docs directory in the distributed zip package
+if( WIN32 )
+	set( INSTALL_DOCS_PATH docs CACHE STRING "Directory where the documentation will be placed during install." )
+else()
+	set( INSTALL_DOCS_PATH share/doc/${ZDOOM_EXE_NAME} CACHE STRING "Directory where the zdoom documentation will be placed during install." )
+endif()
+install(DIRECTORY docs/
+		DESTINATION ${INSTALL_DOCS_PATH}
+		COMPONENT "Documentation")
+
 add_subdirectory( lzma )
 add_subdirectory( tools )
 add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
+add_subdirectory( wadsrc_lights )
 add_subdirectory( src )
 
 if( NOT WIN32 AND NOT APPLE )

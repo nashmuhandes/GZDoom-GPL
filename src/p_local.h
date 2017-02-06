@@ -39,19 +39,15 @@ class APlayerPawn;
 struct line_t;
 struct sector_t;
 struct msecnode_t;
+struct portnode_t;
 struct secplane_t;
 struct FCheckPosition;
 struct FTranslatedLineTarget;
+struct FLinePortal;
 
 #include <stdlib.h>
 
 #define STEEPSLOPE		(46342/65536.)	// [RH] Minimum floorplane.c value for walking
-
-#define BONUSADD		6
-
-// mapblocks are used to check movement
-// against lines and things
-#define MAPBLOCKUNITS	128
 
 // Inspired by Maes
 extern int bmapnegx;
@@ -63,7 +59,7 @@ extern int bmapnegy;
 #define TALKRANGE		(128.)
 #define USERANGE		(64.)
 
-#define MELEERANGE		(64.)
+#define DEFMELEERANGE		(64.)
 #define SAWRANGE		(64.+(1./65536.))	// use meleerange + 1 so the puff doesn't skip the flash (i.e. plays all states)
 #define MISSILERANGE	(32*64.)
 #define PLAYERMISSILERANGE	(8192.)	// [RH] New MISSILERANGE for players
@@ -162,7 +158,7 @@ PClassActor *P_GetSpawnableType(int spawnnum);
 void InitSpawnablesFromMapinfo();
 int P_Thing_CheckInputNum(player_t *p, int inputnum);
 int P_Thing_Warp(AActor *caller, AActor *reference, double xofs, double yofs, double zofs, DAngle angle, int flags, double heightoffset, double radiusoffset, DAngle pitch);
-bool P_Thing_CheckProximity(AActor *self, PClass *classname, double distance, int count, int flags, int ptr);
+int P_Thing_CheckProximity(AActor *self, PClass *classname, double distance, int count, int flags, int ptr, bool counting = false);
 
 enum
 {
@@ -239,16 +235,12 @@ enum PCM
 
 
 AActor *P_BlockmapSearch (AActor *mo, int distance, AActor *(*check)(AActor*, int, void *), void *params = NULL);
-AActor *P_RoughMonsterSearch (AActor *mo, int distance, bool onlyseekable=false);
+AActor *P_RoughMonsterSearch (AActor *mo, int distance, bool onlyseekable=false, bool frontonly = false);
 
 //
 // P_MAP
 //
 
-
-// If "floatok" true, move would be ok
-// if within "tmfloorz - tmceilingz".
-extern msecnode_t		*sector_list;		// phares 3/16/98
 
 struct spechit_t
 {
@@ -268,7 +260,7 @@ bool P_CheckPosition(AActor *thing, const DVector2 &pos, FCheckPosition &tm, boo
 AActor	*P_CheckOnmobj (AActor *thing);
 void	P_FakeZMovement (AActor *mo);
 bool	P_TryMove(AActor* thing, const DVector2 &pos, int dropoff, const secplane_t * onfloor, FCheckPosition &tm, bool missileCheck = false);
-bool	P_TryMove(AActor* thing, const DVector2 &pos, int dropoff, const secplane_t * onfloor = NULL);
+bool	P_TryMove(AActor* thing, const DVector2 &pos, int dropoff, const secplane_t * onfloor = NULL, bool missilecheck = false);
 
 bool	P_CheckMove(AActor *thing, const DVector2 &pos, int flags = 0);
 void	P_ApplyTorque(AActor *mo);
@@ -308,7 +300,7 @@ enum
 };
 void	P_FindFloorCeiling (AActor *actor, int flags=0);
 
-bool	P_ChangeSector (sector_t* sector, int crunch, double amt, int floorOrCeil, bool isreset);
+bool	P_ChangeSector (sector_t* sector, int crunch, double amt, int floorOrCeil, bool isreset, bool instant = false);
 
 DAngle P_AimLineAttack(AActor *t1, DAngle angle, double distance, FTranslatedLineTarget *pLineTarget = NULL, DAngle vrange = 0., int flags = 0, AActor *target = NULL, AActor *friender = NULL);
 
@@ -328,6 +320,7 @@ enum	// P_LineAttack flags
 	LAF_NORANDOMPUFFZ = 2,
 	LAF_NOIMPACTDECAL = 4,
 	LAF_NOINTERACT =	8,
+	LAF_TARGETISSOURCE = 16,
 };
 
 AActor *P_LineAttack(AActor *t1, DAngle angle, double distance, DAngle pitch, int damage, FName damageType, PClassActor *pufftype, int flags = 0, FTranslatedLineTarget *victim = NULL, int *actualdamage = NULL);
@@ -393,14 +386,19 @@ enum
 	RADF_NODAMAGE = 8,
 	RADF_THRUSTZ = 16,
 };
-void	P_RadiusAttack (AActor *spot, AActor *source, int damage, int distance, 
+int	P_RadiusAttack (AActor *spot, AActor *source, int damage, int distance, 
 						FName damageType, int flags, int fulldamagedistance=0);
 
-void	P_DelSector_List();
-void	P_DelSeclist(msecnode_t *);							// phares 3/16/98
-msecnode_t *P_AddSecnode(sector_t *s, AActor *thing, msecnode_t *nextnode, msecnode_t *&sec_thinglist);
-msecnode_t*	P_DelSecnode(msecnode_t *, msecnode_t *sector_t::*head);
-void	P_CreateSecNodeList(AActor*);		// phares 3/14/98
+void	P_DelSeclist(msecnode_t *, msecnode_t *sector_t::*seclisthead);
+void	P_DelSeclist(portnode_t *, portnode_t *FLinePortal::*seclisthead);
+
+template<class nodetype, class linktype>
+nodetype *P_AddSecnode(linktype *s, AActor *thing, nodetype *nextnode, nodetype *&sec_thinglist);
+
+template<class nodetype, class linktype>
+nodetype* P_DelSecnode(nodetype *, nodetype *linktype::*head);
+
+msecnode_t *P_CreateSecNodeList(AActor *thing, double radius, msecnode_t *sector_list, msecnode_t *sector_t::*seclisthead);
 double	P_GetMoveFactor(const AActor *mo, double *frictionp);	// phares  3/6/98
 double		P_GetFriction(const AActor *mo, double *frictionfactor);
 

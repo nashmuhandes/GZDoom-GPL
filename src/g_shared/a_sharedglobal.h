@@ -10,7 +10,6 @@ struct side_t;
 struct F3DFloor;
 class DBaseDecal;
 
-void P_SpawnDirt (AActor *actor, double radius);
 class DBaseDecal *ShootDecal(const FDecalTemplate *tpl, AActor *basisactor, sector_t *sec, double x, double y, double z, DAngle angle, double tracedist, bool permanent);
 
 class DBaseDecal : public DThinker
@@ -24,8 +23,8 @@ public:
 	DBaseDecal (const AActor *actor);
 	DBaseDecal (const DBaseDecal *basis);
 
-	void Serialize (FArchive &arc);
-	void Destroy ();
+	void Serialize(FSerializer &arc);
+	void OnDestroy() override;
 	FTextureID StickToWall(side_t *wall, double x, double y, F3DFloor * ffloor);
 	double GetRealZ (const side_t *wall) const;
 	void SetShade (DWORD rgb);
@@ -33,9 +32,7 @@ public:
 	void Spread (const FDecalTemplate *tpl, side_t *wall, double x, double y, double z, F3DFloor * ffloor);
 	void GetXY (side_t *side, double &x, double &y) const;
 
-	static void SerializeChain (FArchive &arc, DBaseDecal **firstptr);
-
-	DBaseDecal *WallNext, **WallPrev;
+	DBaseDecal *WallNext, *WallPrev;
 
 	double LeftDistance;
 	double Z;
@@ -46,7 +43,8 @@ public:
 	FTextureID PicNum;
 	DWORD RenderFlags;
 	FRenderStyle RenderStyle;
-	sector_t * Sector;	// required for 3D floors
+	side_t *Side;
+	sector_t *Sector;
 
 protected:
 	virtual DBaseDecal *CloneSelf(const FDecalTemplate *tpl, double x, double y, double z, side_t *wall, F3DFloor * ffloor) const;
@@ -68,10 +66,7 @@ public:
 	static DImpactDecal *StaticCreate(const FDecalTemplate *tpl, const DVector3 &pos, side_t *wall, F3DFloor * ffloor, PalEntry color = 0);
 
 	void BeginPlay ();
-	void Destroy ();
-
-	void Serialize (FArchive &arc);
-	static void SerializeTime (FArchive &arc);
+	void OnDestroy() override;
 
 protected:
 	DBaseDecal *CloneSelf(const FDecalTemplate *tpl, double x, double y, double z, side_t *wall, F3DFloor * ffloor) const;
@@ -79,38 +74,6 @@ protected:
 
 private:
 	DImpactDecal();
-};
-
-class ATeleportFog : public AActor
-{
-	DECLARE_CLASS (ATeleportFog, AActor)
-public:
-	void PostBeginPlay ();
-};
-
-class ASkyViewpoint : public AActor
-{
-	DECLARE_CLASS (ASkyViewpoint, AActor)
-public:
-	void BeginPlay ();
-	void Destroy ();
-};
-
-// For an EE compatible linedef based definition.
-class ASkyCamCompat : public ASkyViewpoint
-{
-	DECLARE_CLASS (ASkyCamCompat, ASkyViewpoint)
-
-public:
-	void BeginPlay();
-};
-
-
-class AStackPoint : public ASkyViewpoint
-{
-	DECLARE_CLASS (AStackPoint, ASkyViewpoint)
-public:
-	void BeginPlay ();
 };
 
 class DFlashFader : public DThinker
@@ -121,8 +84,8 @@ public:
 	DFlashFader (float r1, float g1, float b1, float a1,
 				 float r2, float g2, float b2, float a2,
 				 float time, AActor *who);
-	void Destroy ();
-	void Serialize (FArchive &arc);
+	void OnDestroy() override;
+	void Serialize(FSerializer &arc);
 	void Tick ();
 	AActor *WhoFor() { return ForWho; }
 	void Cancel ();
@@ -153,7 +116,6 @@ struct FQuakeJiggers
 	DVector3 RelIntensity;
 	DVector3 Offset;
 	DVector3 RelOffset;
-	double Falloff, WFalloff, RFalloff, RWFalloff;
 	double RollIntensity, RollWave;
 };
 
@@ -166,7 +128,7 @@ public:
 		int damrad, int tremrad, FSoundID quakesfx, int flags, 
 		double waveSpeedX, double waveSpeedY, double waveSpeedZ, int falloff, int highpoint, double rollIntensity, double rollWave);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 	TObjPtr<AActor> m_Spot;
 	double m_TremorRadius, m_DamageRadius;
@@ -180,8 +142,7 @@ public:
 	int m_Highpoint, m_MiniCount;
 	double m_RollIntensity, m_RollWave;
 
-
-	double GetModIntensity(double intensity) const;
+	double GetModIntensity(double intensity, bool fake = false) const;
 	double GetModWave(double waveMultiplier) const;
 	double GetFalloff(double dist) const;
 
@@ -191,49 +152,21 @@ private:
 	DEarthquake ();
 };
 
-class AMorphProjectile : public AActor
-{
-	DECLARE_CLASS (AMorphProjectile, AActor)
-public:
-	int DoSpecialDamage (AActor *target, int damage, FName damagetype);
-	void Serialize (FArchive &arc);
-
-	FNameNoInit	PlayerClass, MonsterClass, MorphFlash, UnMorphFlash;
-	int Duration, MorphStyle;
-};
-
 class AMorphedMonster : public AActor
 {
 	DECLARE_CLASS (AMorphedMonster, AActor)
 	HAS_OBJECT_POINTERS
 public:
 	void Tick ();
-	void Serialize (FArchive &arc);
+	
+	void Serialize(FSerializer &arc);
 	void Die (AActor *source, AActor *inflictor, int dmgflags);
-	void Destroy ();
+	void OnDestroy() override;
 
 	TObjPtr<AActor> UnmorphedMe;
 	int UnmorphTime, MorphStyle;
 	PClassActor *MorphExitFlash;
 	ActorFlags FlagsSave;
 };
-
-class AMapMarker : public AActor
-{
-	DECLARE_CLASS(AMapMarker, AActor)
-public:
-	void BeginPlay ();
-	void Activate (AActor *activator);
-	void Deactivate (AActor *activator);
-};
-
-class AFastProjectile : public AActor
-{
-	DECLARE_CLASS(AFastProjectile, AActor)
-public:
-	void Tick ();
-	virtual void Effect();
-};
-
 
 #endif //__A_SHAREDGLOBAL_H__

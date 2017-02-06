@@ -43,9 +43,6 @@
 #include "gl/utility/gl_templates.h"
 #include "gl/data/gl_data.h"
 
-class ASkyViewpoint;
-
-
 struct GLHorizonInfo
 {
 	GLSectorPlane plane;
@@ -101,12 +98,14 @@ public:
 private:
 	void DrawPortalStencil();
 
+	DVector3 savedviewpath[2];
 	DVector3 savedViewPos;
+	DVector3 savedViewActorPos;
 	DAngle savedAngle;
+	bool savedshowviewer;
 	AActor * savedviewactor;
 	area_t savedviewarea;
 	ActorRenderFlags savedvisibility;
-	DVector3 savedviewpath[2];
 	GLPortal *PrevPortal;
 	GLPortal *PrevClipPortal;
 	TArray<BYTE> savedmapsection;
@@ -365,6 +364,8 @@ public:
 struct GLHorizonPortal : public GLPortal
 {
 	GLHorizonInfo * origin;
+	unsigned int voffset;
+	unsigned int vcount;
 	friend struct GLEEHorizonPortal;
 
 protected:
@@ -376,12 +377,7 @@ protected:
 
 public:
 	
-	GLHorizonPortal(GLHorizonInfo * pt, bool local = false)
-		: GLPortal(local)
-	{
-		origin=pt;
-	}
-
+	GLHorizonPortal(GLHorizonInfo * pt, bool local = false);
 };
 
 struct GLEEHorizonPortal : public GLPortal

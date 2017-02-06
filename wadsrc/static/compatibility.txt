@@ -27,6 +27,7 @@
 	setwallyscale 717 front bot 1.090909
 
 	setslopeoverflow
+	polyobj
 }
 
 B2D8DA03489D1C67F60DC87FBC4EA338 // map01 - Massmouth 2
@@ -397,6 +398,7 @@ D62DCA9EC226DE49108D5DD9271F7631 // Cheogsh 2 map04
 
 E89CCC7E155F1032F693359CC219BE6C // hexen.wad map30
 B9DFF13207EACAC675C71D82624D0007 // XtheaterIII map01
+6941BDC2F80C0FEBE34EFA23D5FB72B7 // sonic.wad map10
 {
 	DisablePushWindowCheck
 }
@@ -430,10 +432,69 @@ C98F79709BD7E0E4C19026AB9575EC6F // cc-cod.zip:codlev.wad map07
 	maskedmidtex
 }
 
+7B82B12A6990E09553B12FDB4E3824A0 // hti.wad map01
+{
+	teleport
+}
+
+8570AA0D6737C0A19DB66767764F157F // sonic.wad map04
+{
+	noslopeid
+}
+
+05AA32F1D2220A462DCDA245ED22B94B // sonic.wad map09
+{
+	polyobj
+}
+
+
 D7F6E9F08C39A17026349A04F8C0B0BE // Return to Hadron, e1m9
 19D03FFC875589E21EDBB7AB74EF4AEF // Return to Hadron, e1m9, 2016.01.03 update
 {
 	pointonline
+}
+
+// Remove unreachable secrets
+F6EE16F770AD309D608EA0B1F1E249FC // Ultimate Doom, e4m3
+{
+	setsectorspecial 124 0
+	setsectorspecial 125 0
+	// clear staircase to secret area
+	setsectorspecial 127 0
+	setsectorspecial 128 0
+	setsectorspecial 129 0
+	setsectorspecial 130 0
+	setsectorspecial 131 0
+	setsectorspecial 132 0
+	setsectorspecial 133 0
+	setsectorspecial 134 0
+	setsectorspecial 136 0
+	setsectorspecial 137 0
+	setsectorspecial 138 0
+	setsectorspecial 147 0
+	setsectorspecial 148 0
+	setsectorspecial 149 0
+	setsectorspecial 150 0
+	setsectorspecial 151 0
+	setsectorspecial 152 0
+	setsectorspecial 155 0
+}
+94D4C869A0C02EF4F7375022B36AAE45 // Ultimate Doom, e4m7
+{
+	setsectorspecial 263 0
+	setsectorspecial 264 0
+}
+1A540BA717BF9EC85F8522594C352F2A // Doom II, map15
+{
+	setsectorspecial 147 0
+}
+110F84DE041052B59307FAF0293E6BC0 // Doom II, map27
+{
+	setsectorspecial 93 0
+}
+ABC4EB5A1535ECCD0061AD14F3547908 // Plutonia Experiment, map26
+{
+	setsectorspecial 156 0
 }
 
 712BB4CFBD0753178CA0C6814BE4C288 // map12 BTSX_E1 - patch some rendering glitches that are problematic to detect

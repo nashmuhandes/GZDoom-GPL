@@ -36,6 +36,7 @@
 #include "g_level.h"
 #include "r_utility.h"
 #include "p_spec.h"
+#include "g_levellocals.h"
 
 extern gamestate_t wipegamestate;
 
@@ -43,7 +44,7 @@ extern gamestate_t wipegamestate;
 //
 // P_CheckTickerPaused
 //
-// Returns true if the ticker should be paused. In that cause, it also
+// Returns true if the ticker should be paused. In that case, it also
 // pauses sound effects and possibly music. If the ticker should not be
 // paused, then it returns false but does not unpause anything.
 //

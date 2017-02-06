@@ -9,54 +9,35 @@
 #include "r_sky.h"
 #include "g_level.h"
 #include "r_state.h"
-#include "farchive.h"
+#include "serializer.h"
+#include "g_levellocals.h"
 
 static FRandom pr_lightning ("Lightning");
 
-IMPLEMENT_CLASS (DLightningThinker)
+IMPLEMENT_CLASS(DLightningThinker, false, false)
 
 DLightningThinker::DLightningThinker ()
 	: DThinker (STAT_LIGHTNING)
 {
 	Stopped = false;
-	LightningLightLevels = NULL;
 	LightningFlashCount = 0;
 	NextLightningFlash = ((pr_lightning()&15)+5)*35; // don't flash at level start
 
-	LightningLightLevels = new short[numsectors];
-	clearbufshort(LightningLightLevels, numsectors, SHRT_MAX);
+	LightningLightLevels.Resize(level.sectors.Size());
+	fillshort(&LightningLightLevels[0], LightningLightLevels.Size(), SHRT_MAX);
 }
 
 DLightningThinker::~DLightningThinker ()
 {
-	if (LightningLightLevels != NULL)
-	{
-		delete[] LightningLightLevels;
-	}
 }
 
-void DLightningThinker::Serialize (FArchive &arc)
+void DLightningThinker::Serialize(FSerializer &arc)
 {
-	int i;
-	short *lights;
-
 	Super::Serialize (arc);
-
-	arc << Stopped << NextLightningFlash << LightningFlashCount;
-
-	if (arc.IsLoading ())
-	{
-		if (LightningLightLevels != NULL)
-		{
-			delete[] LightningLightLevels;
-		}
-		LightningLightLevels = new short[numsectors];
-	}
-	lights = LightningLightLevels;
-	for (i = numsectors; i > 0; ++lights, --i)
-	{
-		arc << *lights;
-	}
+	arc("stopped", Stopped)
+		("next", NextLightningFlash)
+		("count", LightningFlashCount)
+		("levels", LightningLightLevels);
 }
 
 void DLightningThinker::Tick ()
@@ -83,8 +64,8 @@ void DLightningThinker::LightningFlash ()
 		LightningFlashCount--;
 		if (LightningFlashCount)
 		{ // reduce the brightness of the flash
-			tempSec = sectors;
-			for (i = numsectors, j = 0; i > 0; ++j, --i, ++tempSec)
+			tempSec = &level.sectors[0];
+			for (i = level.sectors.Size(), j = 0; i > 0; ++j, --i, ++tempSec)
 			{
 				// [RH] Checking this sector's applicability to lightning now
 				// is not enough to know if we should lower its light level,
@@ -99,15 +80,15 @@ void DLightningThinker::LightningFlash ()
 		}					
 		else
 		{ // remove the alternate lightning flash special
-			tempSec = sectors;
-			for (i = numsectors, j = 0; i > 0; ++j, --i, ++tempSec)
+			tempSec = &level.sectors[0];
+			for (i = level.sectors.Size(), j = 0; i > 0; ++j, --i, ++tempSec)
 			{
 				if (LightningLightLevels[j] != SHRT_MAX)
 				{
 					tempSec->SetLightLevel(LightningLightLevels[j]);
 				}
 			}
-			clearbufshort(LightningLightLevels, numsectors, SHRT_MAX);
+			fillshort(&LightningLightLevels[0], level.sectors.Size(), SHRT_MAX);
 			level.flags &= ~LEVEL_SWAPSKIES;
 		}
 		return;
@@ -115,8 +96,8 @@ void DLightningThinker::LightningFlash ()
 
 	LightningFlashCount = (pr_lightning()&7)+8;
 	flashLight = 200+(pr_lightning()&31);
-	tempSec = sectors;
-	for (i = numsectors, j = 0; i > 0; --i, ++j, ++tempSec)
+	tempSec = &level.sectors[0];
+	for (i = level.sectors.Size(), j = 0; i > 0; ++j, --i, ++tempSec)
 	{
 		// allow combination of the lightning sector specials with bit masks
 		int special = tempSec->special;

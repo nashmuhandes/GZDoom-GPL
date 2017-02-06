@@ -44,6 +44,7 @@
 
 class FFont;
 class FileReader;
+struct line_t;
 
 
 enum
@@ -94,8 +95,9 @@ public:
 	void PurgeStrings();
 	void Clear();
 	void Dump() const;
-	void ReadStrings(PNGHandle *png, DWORD id);
-	void WriteStrings(FILE *file, DWORD id) const;
+	void UnlockForLevel(int level)	;
+	void ReadStrings(FSerializer &file, const char *key);
+	void WriteStrings(FSerializer &file, const char *key) const;
 
 private:
 	int FindString(const char *str, size_t len, unsigned int h, unsigned int bucketnum);
@@ -111,7 +113,11 @@ private:
 		FString Str;
 		unsigned int Hash;
 		unsigned int Next;
-		unsigned int LockCount;
+		bool Mark;
+		TArray<int> Locks;
+
+		void Lock();
+		void Unlock();
 	};
 	TArray<PoolEntry> Pool;
 	unsigned int PoolBuckets[NUM_BUCKETS];
@@ -120,10 +126,9 @@ private:
 extern ACSStringPool GlobalACSStrings;
 
 void P_CollectACSGlobalStrings();
-void P_ReadACSVars(PNGHandle *);
-void P_WriteACSVars(FILE*);
+void P_ReadACSVars(FSerializer &);
+void P_WriteACSVars(FSerializer &);
 void P_ClearACSVars(bool);
-void P_SerializeACSScriptNumber(FArchive &arc, int &scriptnum, bool was2byte);
 
 struct ACSProfileInfo
 {
@@ -270,6 +275,9 @@ enum
 	SCRIPT_Unloading	= 13,
 	SCRIPT_Disconnect	= 14,
 	SCRIPT_Return		= 15,
+	SCRIPT_Event		= 16, // [BB]
+	SCRIPT_Kill			= 17, // [JM]
+	SCRIPT_Reopen		= 18, // [Nash]
 };
 
 // Script flags
@@ -322,7 +330,7 @@ public:
 	static void StaticUnloadModules ();
 	static bool StaticCheckAllGood ();
 	static FBehavior *StaticGetModule (int lib);
-	static void StaticSerializeModuleStates (FArchive &arc);
+	static void StaticSerializeModuleStates (FSerializer &arc);
 	static void StaticMarkLevelVarStrings();
 	static void StaticLockLevelVarStrings();
 	static void StaticUnlockLevelVarStrings();
@@ -366,8 +374,8 @@ private:
 	void UnescapeStringTable(BYTE *chunkstart, BYTE *datastart, bool haspadding);
 	int FindStringInChunk (DWORD *chunk, const char *varname) const;
 
-	void SerializeVars (FArchive &arc);
-	void SerializeVarSet (FArchive &arc, SDWORD *vars, int max);
+	void SerializeVars (FSerializer &arc);
+	void SerializeVarSet (FSerializer &arc, SDWORD *vars, int max);
 
 	void MarkMapVarStrings() const;
 	void LockMapVarStrings() const;
@@ -857,7 +865,7 @@ public:
 		const int *args, int argcount, int flags);
 	~DLevelScript ();
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	int RunScript ();
 
 	inline void SetState (EScriptState newstate) { state = newstate; }
@@ -867,22 +875,21 @@ public:
 
 	void MarkLocalVarStrings() const
 	{
-		GlobalACSStrings.MarkStringArray(localvars, numlocalvars);
+		GlobalACSStrings.MarkStringArray(&Localvars[0], Localvars.Size());
 	}
 	void LockLocalVarStrings() const
 	{
-		GlobalACSStrings.LockStringArray(localvars, numlocalvars);
+		GlobalACSStrings.LockStringArray(&Localvars[0], Localvars.Size());
 	}
 	void UnlockLocalVarStrings() const
 	{
-		GlobalACSStrings.UnlockStringArray(localvars, numlocalvars);
+		GlobalACSStrings.UnlockStringArray(&Localvars[0], Localvars.Size());
 	}
 
 protected:
 	DLevelScript	*next, *prev;
 	int				script;
-	SDWORD			*localvars;
-	int				numlocalvars;
+	TArray<int32_t>	Localvars;
 	int				*pc;
 	EScriptState	state;
 	int				statedata;
@@ -942,7 +949,7 @@ public:
 	DACSThinker ();
 	~DACSThinker ();
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 	typedef TMap<int, DLevelScript *> ScriptMap;
@@ -963,8 +970,6 @@ private:
 // The structure used to control scripts between maps
 struct acsdefered_t
 {
-	struct acsdefered_t *next;
-
 	enum EType
 	{
 		defexecute,
@@ -977,6 +982,6 @@ struct acsdefered_t
 	int playernum;
 };
 
-FArchive &operator<< (FArchive &arc, acsdefered_t *&defer);
+FSerializer &Serialize(FSerializer &arc, const char *key, acsdefered_t &defer, acsdefered_t *def);
 
 #endif //__P_ACS_H__

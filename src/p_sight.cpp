@@ -29,6 +29,7 @@
 #include "r_state.h"
 
 #include "stats.h"
+#include "g_levellocals.h"
 
 static FRandom pr_botchecksight ("BotCheckSight");
 static FRandom pr_checksight ("CheckSight");
@@ -116,6 +117,7 @@ public:
 		sightend = t2->PosRelative(task->portalgroup);
 		sightstart.Z += t1->Height * 0.75;
 
+		portalgroup = task->portalgroup;
 		Startfrac = task->Frac;
 		Trace = { sightstart.X, sightstart.Y, sightend.X - sightstart.X, sightend.Y - sightstart.Y };
 		Lastztop = Lastzbottom = sightstart.Z;
@@ -482,7 +484,7 @@ int SightCheck::P_SightBlockLinesIterator (int x, int y)
 
 	for (list = blockmaplump + offset + 1; *list != -1; list++)
 	{
-		if (!P_SightCheckLine (&lines[*list]))
+		if (!P_SightCheckLine (&level.lines[*list]))
 		{
 			if (!portalfound) return 0;
 			else res = -1;
@@ -716,6 +718,7 @@ bool SightCheck::P_SightPathTraverse ()
 // step through map blocks
 // Count is present to prevent a round off error from skipping the break
 
+	int itres;
 	for (count = 0 ; count < 1000 ; count++)
 	{
 		// end traversing when reaching the end of the blockmap
@@ -724,15 +727,15 @@ bool SightCheck::P_SightPathTraverse ()
 		{
 			break;
 		}
-		int res = P_SightBlockLinesIterator(mapx, mapy);
-		if (res == 0)
+		itres = P_SightBlockLinesIterator(mapx, mapy);
+		if (itres == 0)
 		{
 			sightcounts[1]++;
 			return false;	// early out
 		}
 
 		// either reached the end or had an early-out condition with portals left to check,
-		if (res == -1 || (mapxstep | mapystep) == 0)
+		if (itres == -1 || (mapxstep | mapystep) == 0)
 			break;
 
 		switch (((xs_FloorToInt(yintercept) == mapy) << 1) | (xs_FloorToInt(xintercept) == mapx))
@@ -787,7 +790,10 @@ sightcounts[1]++;
 //
 sightcounts[2]++;
 
-	return P_SightTraverseIntercepts ( );
+	bool traverseres = P_SightTraverseIntercepts ( );
+	if (itres == -1) return false;	// if the iterator had an early out there was no line of sight. The traverser was only called to collect more portals.
+	if (seeingthing->Sector->PortalGroup != portalgroup) return false;	// We are in a different group than the seeingthing, so this trace cannot determine visibility alone.
+	return traverseres;
 }
 
 /*
@@ -818,7 +824,7 @@ bool P_CheckSight (AActor *t1, AActor *t2, int flags)
 
 	const sector_t *s1 = t1->Sector;
 	const sector_t *s2 = t2->Sector;
-	int pnum = int(s1 - sectors) * numsectors + int(s2 - sectors);
+	int pnum = int(s1->Index()) * level.sectors.Size() + int(s2->Index());
 
 //
 // check for trivial rejection
@@ -903,6 +909,14 @@ sightcounts[0]++;
 done:
 	SightCycles.Unclock();
 	return res;
+}
+
+DEFINE_ACTION_FUNCTION(AActor, CheckSight)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_OBJECT_NOT_NULL(target, AActor);
+	PARAM_INT_DEF(flags);
+	ACTION_RETURN_BOOL(P_CheckSight(self, target, flags));
 }
 
 ADD_STAT (sight)

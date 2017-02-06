@@ -185,7 +185,7 @@ public:
 		platRaiseAndStayLockout,
 	};
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 	bool IsLift() const { return m_Type == platDownWaitUpStay || m_Type == platDownWaitUpStayStone; }
@@ -213,13 +213,13 @@ private:
 
 	friend bool	EV_DoPlat (int tag, line_t *line, EPlatType type,
 						   double height, double speed, int delay, int lip, int change);
-	friend void EV_StopPlat (int tag);
+	friend void EV_StopPlat (int tag, bool remove);
 	friend void P_ActivateInStasis (int tag);
 };
 
 bool EV_DoPlat (int tag, line_t *line, DPlat::EPlatType type,
 				double height, double speed, int delay, int lip, int change);
-void EV_StopPlat (int tag);
+void EV_StopPlat (int tag, bool remove);
 void P_ActivateInStasis (int tag);
 
 //
@@ -242,9 +242,9 @@ public:
 	DPillar (sector_t *sector, EPillar type, double speed, double height,
 			 double height2, int crush, bool hexencrush);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
-	void Destroy();
+	void OnDestroy() override;
 
 protected:
 	EPillar		m_Type;
@@ -284,7 +284,7 @@ public:
 	DDoor (sector_t *sector);
 	DDoor (sector_t *sec, EVlDoor type, double speed, int delay, int lightTag, int topcountdown);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 protected:
 	EVlDoor		m_Type;
@@ -326,7 +326,7 @@ public:
 	DAnimatedDoor (sector_t *sector);
 	DAnimatedDoor (sector_t *sec, line_t *line, int speed, int delay, FDoorAnimation *anim);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 	bool StartClosing ();
@@ -406,7 +406,7 @@ public:
 	DCeiling (sector_t *sec);
 	DCeiling (sector_t *sec, double speed1, double speed2, int silent);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 protected:
@@ -435,14 +435,14 @@ private:
 	DCeiling ();
 
 	friend bool P_CreateCeiling(sector_t *sec, DCeiling::ECeiling type, line_t *line, int tag, double speed, double speed2, double height, int crush, int silent, int change, DCeiling::ECrushMode hexencrush);
-	friend bool EV_CeilingCrushStop (int tag);
+	friend bool EV_CeilingCrushStop (int tag, bool remove);
 	friend void P_ActivateInStasisCeiling (int tag);
 };
 
 bool P_CreateCeiling(sector_t *sec, DCeiling::ECeiling type, line_t *line, int tag, double speed, double speed2, double height, int crush, int silent, int change, DCeiling::ECrushMode hexencrush);
 bool EV_DoCeiling (DCeiling::ECeiling type, line_t *line, int tag, double speed, double speed2, double height, int crush, int silent, int change, DCeiling::ECrushMode hexencrush = DCeiling::ECrushMode::crushDoom);
 
-bool EV_CeilingCrushStop (int tag);
+bool EV_CeilingCrushStop (int tag, bool remove);
 void P_ActivateInStasisCeiling (int tag);
 
 
@@ -504,18 +504,20 @@ public:
 	enum EStairType
 	{
 		stairUseSpecials = 1,
-		stairSync = 2
+		stairSync = 2,
+		stairCrush = 4,
 	};
 
 	DFloor (sector_t *sec);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 //protected:
 	EFloor	 	m_Type;
 	int 		m_Crush;
 	bool		m_Hexencrush;
+	bool		m_Instant;
 	int 		m_Direction;
 	secspecial_t m_NewSpecial;
 	FTextureID	m_Texture;
@@ -573,8 +575,8 @@ public:
 
 	DElevator (sector_t *sec);
 
-	void Destroy();
-	void Serialize (FArchive &arc);
+	void OnDestroy() override;
+	void Serialize(FSerializer &arc);
 	void Tick ();
 
 protected:
@@ -602,7 +604,7 @@ class DWaggleBase : public DMover
 public:
 	DWaggleBase (sector_t *sec);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 
 protected:
 	double m_OriginalDist;
@@ -613,13 +615,11 @@ protected:
 	double m_ScaleDelta;
 	int m_Ticker;
 	int m_State;
-	TObjPtr<DInterpolation> m_Interpolation;
 
 	friend bool EV_StartWaggle (int tag, line_t *line, int height, int speed,
 		int offset, int timer, bool ceiling);
 
 	void DoWaggle (bool ceiling);
-	void Destroy();
 	DWaggleBase ();
 };
 

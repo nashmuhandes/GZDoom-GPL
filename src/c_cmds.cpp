@@ -71,6 +71,8 @@
 #include "v_video.h"
 #include "r_utility.h"
 #include "r_data/r_interpolate.h"
+#include "c_functions.h"
+#include "g_levellocals.h"
 
 extern FILE *Logfile;
 extern bool insave;
@@ -402,9 +404,9 @@ CCMD (give)
 	Net_WriteByte (DEM_GIVECHEAT);
 	Net_WriteString (argv[1]);
 	if (argv.argc() > 2)
-		Net_WriteWord (clamp (atoi (argv[2]), 1, 32767));
+		Net_WriteLong(atoi(argv[2]));
 	else
-		Net_WriteWord (0);
+		Net_WriteLong(0);
 }
 
 CCMD (take)
@@ -415,9 +417,9 @@ CCMD (take)
 	Net_WriteByte (DEM_TAKECHEAT);
 	Net_WriteString (argv[1]);
 	if (argv.argc() > 2)
-		Net_WriteWord (clamp (atoi (argv[2]), 1, 32767));
+		Net_WriteLong(atoi (argv[2]));
 	else
-		Net_WriteWord (0);
+		Net_WriteLong (0);
 }
 
 CCMD (gameversion)
@@ -811,7 +813,7 @@ CCMD (load)
 		return;
 	}
 	FString fname = argv[1];
-	DefaultExtension (fname, ".zds");
+	DefaultExtension (fname, "." SAVEGAME_EXT);
     G_LoadGame (fname);
 }
 
@@ -831,7 +833,7 @@ CCMD (save)
         return;
     }
     FString fname = argv[1];
-	DefaultExtension (fname, ".zds");
+	DefaultExtension (fname, "." SAVEGAME_EXT);
 	G_SaveGame (fname, argv.argc() > 2 ? argv[2] : argv[1]);
 }
 
@@ -870,20 +872,17 @@ CCMD (wdir)
 //
 //
 //-----------------------------------------------------------------------------
+
 CCMD(linetarget)
 {
 	FTranslatedLineTarget t;
 
 	if (CheckCheatmode () || players[consoleplayer].mo == NULL) return;
-	P_AimLineAttack(players[consoleplayer].mo,players[consoleplayer].mo->Angles.Yaw, MISSILERANGE, &t, 0.);
+	C_AimLine(&t, false);
 	if (t.linetarget)
-	{
-		Printf("Target=%s, Health=%d, Spawnhealth=%d\n",
-			t.linetarget->GetClass()->TypeName.GetChars(),
-			t.linetarget->health,
-			t.linetarget->SpawnHealth());
-	}
-	else Printf("No target found\n");
+		C_PrintInfo(t.linetarget);
+	else
+		Printf("No target found\n");
 }
 
 // As linetarget, but also give info about non-shootable actors
@@ -892,18 +891,18 @@ CCMD(info)
 	FTranslatedLineTarget t;
 
 	if (CheckCheatmode () || players[consoleplayer].mo == NULL) return;
-	P_AimLineAttack(players[consoleplayer].mo,players[consoleplayer].mo->Angles.Yaw, MISSILERANGE,
-		&t, 0.,	ALF_CHECKNONSHOOTABLE|ALF_FORCENOSMART);
+	C_AimLine(&t, true);
 	if (t.linetarget)
-	{
-		Printf("Target=%s, Health=%d, Spawnhealth=%d\n",
-			t.linetarget->GetClass()->TypeName.GetChars(),
-			t.linetarget->health,
-			t.linetarget->SpawnHealth());
-		PrintMiscActorInfo(t.linetarget);
-	}
-	else Printf("No target found. Info cannot find actors that have "
+		C_PrintInfo(t.linetarget);
+	else
+		Printf("No target found. Info cannot find actors that have "
 				"the NOBLOCKMAP flag or have height/radius of 0.\n");
+}
+
+CCMD(myinfo)
+{
+	if (CheckCheatmode () || players[consoleplayer].mo == NULL) return;
+	C_PrintInfo(players[consoleplayer].mo);
 }
 
 typedef bool (*ActorTypeChecker) (AActor *);
@@ -923,10 +922,21 @@ static bool IsActorACountItem(AActor *mo)
 	return mo->IsKindOf(RUNTIME_CLASS(AInventory)) && mo->flags&MF_SPECIAL && mo->flags&MF_COUNTITEM;
 }
 
-static void PrintFilteredActorList(const ActorTypeChecker IsActorType, const char *FilterName)
+// [SP] for all actors
+static bool IsActor(AActor *mo)
+{
+	if (mo->IsKindOf(RUNTIME_CLASS(AInventory)))
+		return static_cast<AInventory *>(mo)->Owner == NULL; // [SP] Exclude inventory-owned items
+	else
+		return true;
+}
+
+// [SP] modified - now allows showing count only, new arg must be passed. Also now still counts regardless, if lists are printed.
+static void PrintFilteredActorList(const ActorTypeChecker IsActorType, const char *FilterName, bool countOnly)
 {
 	AActor *mo;
 	const PClass *FilterClass = NULL;
+	int counter = 0;
 
 	if (FilterName != NULL)
 	{
@@ -943,10 +953,32 @@ static void PrintFilteredActorList(const ActorTypeChecker IsActorType, const cha
 	{
 		if ((FilterClass == NULL || mo->IsA(FilterClass)) && IsActorType(mo))
 		{
-			Printf ("%s at (%f,%f,%f)\n",
-				mo->GetClass()->TypeName.GetChars(), mo->X(), mo->Y(), mo->Z());
+			counter++;
+			if (!countOnly)
+				Printf ("%s at (%f,%f,%f)\n",
+					mo->GetClass()->TypeName.GetChars(), mo->X(), mo->Y(), mo->Z());
 		}
 	}
+	Printf("%i match(s) found.\n", counter);
+}
+
+//-----------------------------------------------------------------------------
+//
+//
+//
+//-----------------------------------------------------------------------------
+CCMD(actorlist) // [SP] print all actors (this can get quite big?)
+{
+	if (CheckCheatmode ()) return;
+
+	PrintFilteredActorList(IsActor, argv.argc() > 1 ? argv[1] : NULL, false);
+}
+
+CCMD(actornum) // [SP] count all actors
+{
+	if (CheckCheatmode ()) return;
+
+	PrintFilteredActorList(IsActor, argv.argc() > 1 ? argv[1] : NULL, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -958,7 +990,14 @@ CCMD(monster)
 {
 	if (CheckCheatmode ()) return;
 
-	PrintFilteredActorList(IsActorAMonster, argv.argc() > 1 ? argv[1] : NULL);
+	PrintFilteredActorList(IsActorAMonster, argv.argc() > 1 ? argv[1] : NULL, false);
+}
+
+CCMD(monsternum) // [SP] count monsters
+{
+	if (CheckCheatmode ()) return;
+
+	PrintFilteredActorList(IsActorAMonster, argv.argc() > 1 ? argv[1] : NULL, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -970,7 +1009,14 @@ CCMD(items)
 {
 	if (CheckCheatmode ()) return;
 
-	PrintFilteredActorList(IsActorAnItem, argv.argc() > 1 ? argv[1] : NULL);
+	PrintFilteredActorList(IsActorAnItem, argv.argc() > 1 ? argv[1] : NULL, false);
+}
+
+CCMD(itemsnum) // [SP] # of any items
+{
+	if (CheckCheatmode ()) return;
+
+	PrintFilteredActorList(IsActorAnItem, argv.argc() > 1 ? argv[1] : NULL, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -982,7 +1028,14 @@ CCMD(countitems)
 {
 	if (CheckCheatmode ()) return;
 
-	PrintFilteredActorList(IsActorACountItem, argv.argc() > 1 ? argv[1] : NULL);
+	PrintFilteredActorList(IsActorACountItem, argv.argc() > 1 ? argv[1] : NULL, false);
+}
+
+CCMD(countitemsnum) // [SP] # of counted items
+{
+	if (CheckCheatmode ()) return;
+
+	PrintFilteredActorList(IsActorACountItem, argv.argc() > 1 ? argv[1] : NULL, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -1090,7 +1143,7 @@ CCMD(currentpos)
 	}
 	else
 	{
-		Printf("You are not in game!");
+		Printf("You are not in game!\n");
 	}
 }
 
@@ -1137,18 +1190,18 @@ static void PrintSecretString(const char *string, bool thislevel)
 		{
 			if (string[1] == 'S' || string[1] == 's')
 			{
-				long secnum = strtol(string+2, (char**)&string, 10);
+				auto secnum = (unsigned)strtoull(string+2, (char**)&string, 10);
 				if (*string == ';') string++;
-				if (thislevel && secnum >= 0 && secnum < numsectors)
+				if (thislevel && secnum < level.sectors.Size())
 				{
-					if (sectors[secnum].isSecret()) colstr = TEXTCOLOR_RED;
-					else if (sectors[secnum].wasSecret()) colstr = TEXTCOLOR_GREEN;
+					if (level.sectors[secnum].isSecret()) colstr = TEXTCOLOR_RED;
+					else if (level.sectors[secnum].wasSecret()) colstr = TEXTCOLOR_GREEN;
 					else colstr = TEXTCOLOR_ORANGE;
 				}
 			}
 			else if (string[1] == 'T' || string[1] == 't')
 			{
-				long tid = strtol(string+2, (char**)&string, 10);
+				long tid = (long)strtoll(string+2, (char**)&string, 10);
 				if (*string == ';') string++;
 				FActorIterator it(tid);
 				AActor *actor;

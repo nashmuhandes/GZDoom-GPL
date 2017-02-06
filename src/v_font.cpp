@@ -90,7 +90,6 @@ The FON2 header is followed by variable length data:
 #include "cmdlib.h"
 #include "sc_man.h"
 #include "hu_stuff.h"
-#include "farchive.h"
 #include "textures/textures.h"
 #include "r_data/r_translate.h"
 #include "colormatcher.h"
@@ -340,33 +339,6 @@ FFont *V_GetFont(const char *name)
 	}
 	return font;
 }
-//==========================================================================
-//
-// SerializeFFontPtr
-//
-//==========================================================================
-
-FArchive &SerializeFFontPtr (FArchive &arc, FFont* &font)
-{
-	if (arc.IsStoring ())
-	{
-		arc << font->Name;
-	}
-	else
-	{
-		char *name = NULL;
-
-		arc << name;
-		font = V_GetFont(name);
-		if (font == NULL)
-		{
-			Printf ("Could not load font %s\n", name);
-			font = SmallFont;
-		}
-		delete[] name;
-	}
-	return arc;
-}
 
 //==========================================================================
 //
@@ -551,6 +523,13 @@ FFont *FFont::FindFont (const char *name)
 		font = font->Next;
 	}
 	return font;
+}
+
+DEFINE_ACTION_FUNCTION(FFont, FindFont)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(name);
+	ACTION_RETURN_POINTER(FFont::FindFont(name));
 }
 
 //==========================================================================
@@ -2328,19 +2307,19 @@ void V_InitFontColors ()
 				else if (sc.Compare ("Flat:"))
 				{
 					sc.MustGetString();
-					logcolor = V_GetColor (NULL, sc.String);
+					logcolor = V_GetColor (NULL, sc);
 				}
 				else
 				{
 					// Get first color
-					c = V_GetColor (NULL, sc.String);
+					c = V_GetColor (NULL, sc);
 					tparm.Start[0] = RPART(c);
 					tparm.Start[1] = GPART(c);
 					tparm.Start[2] = BPART(c);
 
 					// Get second color
 					sc.MustGetString();
-					c = V_GetColor (NULL, sc.String);
+					c = V_GetColor (NULL, sc);
 					tparm.End[0] = RPART(c);
 					tparm.End[1] = GPART(c);
 					tparm.End[2] = BPART(c);

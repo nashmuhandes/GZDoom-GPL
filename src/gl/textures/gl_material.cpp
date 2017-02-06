@@ -1,39 +1,24 @@
-/*
-** gl_material.cpp
-** 
-**---------------------------------------------------------------------------
-** Copyright 2004-2009 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
-*/
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 
 #include "gl/system/gl_system.h"
 #include "w_wad.h"
@@ -202,6 +187,7 @@ unsigned char * FGLTexture::CreateTexBuffer(int translation, int & w, int & h, F
 {
 	unsigned char * buffer;
 	int W, H;
+	int isTransparent = -1;
 
 
 	// Textures that are already scaled in the texture lump will not get replaced
@@ -239,14 +225,16 @@ unsigned char * FGLTexture::CreateTexBuffer(int translation, int & w, int & h, F
 			int trans = tex->CopyTrueColorPixels(&imgCreate, exx, exx);
 			bmp.CopyPixelDataRGB(0, 0, imgCreate.GetPixels(), W, H, 4, W * 4, 0, CF_BGRA);
 			tex->CheckTrans(buffer, W*H, trans);
-			bIsTransparent = tex->gl_info.mIsTransparent;
+			isTransparent = tex->gl_info.mIsTransparent;
+			if (bIsTransparent == -1) bIsTransparent = isTransparent;
 		}
 	}
 	else if (translation<=0)
 	{
 		int trans = tex->CopyTrueColorPixels(&bmp, exx, exx);
 		tex->CheckTrans(buffer, W*H, trans);
-		bIsTransparent = tex->gl_info.mIsTransparent;
+		isTransparent = tex->gl_info.mIsTransparent;
+		if (bIsTransparent == -1) bIsTransparent = isTransparent;
 	}
 	else
 	{
@@ -254,7 +242,8 @@ unsigned char * FGLTexture::CreateTexBuffer(int translation, int & w, int & h, F
 		// Since FTexture's method is doing exactly that by calling GetPixels let's use that here
 		// to do all the dirty work for us. ;)
 		tex->FTexture::CopyTrueColorPixels(&bmp, exx, exx);
-		bIsTransparent = 0;
+		isTransparent = 0;
+		// This is not conclusive for setting the texture's transparency info.
 	}
 
 	// if we just want the texture for some checks there's no need for upsampling.
@@ -262,7 +251,7 @@ unsigned char * FGLTexture::CreateTexBuffer(int translation, int & w, int & h, F
 
 	// [BB] The hqnx upsampling (not the scaleN one) destroys partial transparency, don't upsamle textures using it.
 	// [BB] Potentially upsample the buffer.
-	return gl_CreateUpsampledTextureBuffer ( tex, buffer, W, H, w, h, !!bIsTransparent);
+	return gl_CreateUpsampledTextureBuffer ( tex, buffer, W, H, w, h, !!isTransparent);
 }
 
 
@@ -296,7 +285,7 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int clampmode, int transla
 	if (translation <= 0) translation = -translation;
 	else
 	{
-		alphatrans = (gl.glslversion == 0 && translation == TRANSLATION(TRANSLATION_Standard, 8));
+		alphatrans = (gl.legacyMode && DWORD(translation) == TRANSLATION(TRANSLATION_Standard, 8));
 		translation = GLTranslationPalette::GetInternalTranslation(translation);
 	}
 
@@ -307,7 +296,7 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int clampmode, int transla
 	if (hwtex)
 	{
 		// Texture has become invalid
-		if ((!tex->bHasCanvas && (!tex->bWarped || gl.glslversion == 0)) && tex->CheckModified())
+		if ((!tex->bHasCanvas && (!tex->bWarped || gl.legacyMode)) && tex->CheckModified())
 		{
 			Clean(true);
 			hwtex = CreateHwTexture();
@@ -325,7 +314,7 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int clampmode, int transla
 			if (!tex->bHasCanvas)
 			{
 				buffer = CreateTexBuffer(translation, w, h, hirescheck, true, alphatrans);
-				if (tex->bWarped && gl.glslversion == 0 && w*h <= 256*256)	// do not software-warp larger textures, especially on the old systems that still need this fallback.
+				if (tex->bWarped && gl.legacyMode && w*h <= 256*256)	// do not software-warp larger textures, especially on the old systems that still need this fallback.
 				{
 					// need to do software warping
 					FWarpTexture *wt = static_cast<FWarpTexture*>(tex);
@@ -337,7 +326,7 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int clampmode, int transla
 				}
 				tex->ProcessData(buffer, w, h, false);
 			}
-			if (!hwtex->CreateTexture(buffer, w, h, texunit, needmipmap, translation)) 
+			if (!hwtex->CreateTexture(buffer, w, h, texunit, needmipmap, translation, "FGLTexture.Bind")) 
 			{
 				// could not create texture
 				delete[] buffer;
@@ -458,6 +447,11 @@ FMaterial::FMaterial(FTexture * tx, bool expanded)
 	}
 	else if (tx->bHasCanvas)
 	{
+		if (tx->gl_info.shaderindex >= FIRST_USER_SHADER)
+		{
+			mShaderIndex = tx->gl_info.shaderindex;
+		}
+		// no brightmap for cameratexture
 	}
 	else
 	{
@@ -489,7 +483,7 @@ FMaterial::FMaterial(FTexture * tx, bool expanded)
 	mSpriteU[0] = mSpriteV[0] = 0.f;
 	mSpriteU[1] = mSpriteV[1] = 1.f;
 
-	FTexture *basetex = (tx->bWarped && gl.glslversion == 0)? tx : tx->GetRedirect(false);
+	FTexture *basetex = (tx->bWarped && gl.legacyMode)? tx : tx->GetRedirect(false);
 	// allow the redirect only if the textute is not expanded or the scale matches.
 	if (!expanded || (tx->Scale.X == basetex->Scale.X && tx->Scale.Y == basetex->Scale.Y))
 	{
@@ -598,8 +592,16 @@ bool FMaterial::TrimBorders(int *rect)
 	}
 
 	int size = w*h;
-	if (size == 1) return false;
-
+	if (size == 1)
+	{
+		// nothing to be done here.
+		rect[0] = 0;
+		rect[1] = 0;
+		rect[2] = 1;
+		rect[3] = 1;
+		delete[] buffer;
+		return true;
+	}
 	int first, last;
 
 	for(first = 0; first < size; first++)
@@ -669,6 +671,12 @@ static FMaterial *last;
 static int lastclamp;
 static int lasttrans;
 
+void FMaterial::InitGlobalState()
+{
+	last = nullptr;
+	lastclamp = 0;
+	lasttrans = 0;
+}
 
 void FMaterial::Bind(int clampmode, int translation)
 {

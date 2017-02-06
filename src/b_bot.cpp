@@ -12,17 +12,21 @@
 #include "cmdlib.h"
 #include "teaminfo.h"
 #include "d_net.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "d_player.h"
 
-IMPLEMENT_POINTY_CLASS(DBot)
- DECLARE_POINTER(dest)
- DECLARE_POINTER(prev)
- DECLARE_POINTER(enemy)
- DECLARE_POINTER(missile)
- DECLARE_POINTER(mate)
- DECLARE_POINTER(last_mate)
-END_POINTERS
+IMPLEMENT_CLASS(DBot, false, true)
+
+IMPLEMENT_POINTERS_START(DBot)
+	IMPLEMENT_POINTER(dest)
+	IMPLEMENT_POINTER(prev)
+	IMPLEMENT_POINTER(enemy)
+	IMPLEMENT_POINTER(missile)
+	IMPLEMENT_POINTER(mate)
+	IMPLEMENT_POINTER(last_mate)
+IMPLEMENT_POINTERS_END
+
+DEFINE_FIELD(DBot, dest)
 
 DBot::DBot ()
 : DThinker(STAT_BOT)
@@ -55,31 +59,44 @@ void DBot::Clear ()
 	old = { 0, 0 };
 }
 
-void DBot::Serialize (FArchive &arc)
+FSerializer &Serialize(FSerializer &arc, const char *key, botskill_t &skill, botskill_t *def)
+{
+	if (arc.BeginObject(key))
+	{
+		arc("aiming", skill.aiming)
+			("perfection", skill.perfection)
+			("reaction", skill.reaction)
+			("isp", skill.isp)
+			.EndObject();
+	}
+	return arc;
+}
+
+void DBot::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
 
-	arc << player
-		<< Angle
-		<< dest
-		<< prev
-		<< enemy
-		<< missile
-		<< mate
-		<< last_mate
-		<< skill
-		<< t_active
-		<< t_respawn
-		<< t_strafe
-		<< t_react
-		<< t_fight
-		<< t_roam
-		<< t_rocket
-		<< first_shot
-		<< sleft
-		<< allround
-		<< increase
-		<< old;
+	arc("player", player)
+		("angle", Angle)
+		("dest", dest)
+		("prev", prev)
+		("enemy", enemy)
+		("missile", missile)
+		("mate", mate)
+		("lastmate", last_mate)
+		("skill", skill)
+		("active", t_active)
+		("respawn", t_respawn)
+		("strafe", t_strafe)
+		("react", t_react)
+		("fight", t_fight)
+		("roam", t_roam)
+		("rocket", t_rocket)
+		("firstshot", first_shot)
+		("sleft", sleft)
+		("allround", allround)
+		("increase", increase)
+		("old", old);
 }
 
 void DBot::Tick ()
@@ -191,11 +208,6 @@ CCMD (listbots)
 		count++;
 	}
 	Printf ("> %d bots\n", count);
-}
-
-FArchive &operator<< (FArchive &arc, botskill_t &skill)
-{
-	return arc << skill.aiming << skill.perfection << skill.reaction << skill.isp;
 }
 
 // set the bot specific weapon information

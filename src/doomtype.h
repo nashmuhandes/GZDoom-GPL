@@ -49,57 +49,6 @@
 class PClassActor;
 typedef TMap<int, PClassActor *> FClassMap;
 
-// Since this file is included by everything, it seems an appropriate place
-// to check the NOASM/USEASM macros.
-
-// There are three assembly-related macros:
-//
-//		NOASM	- Assembly code is disabled
-//		X86_ASM	- Using ia32 assembly code
-//		X64_ASM	- Using amd64 assembly code
-//
-// Note that these relate only to using the pure assembly code. Inline
-// assembly may still be used without respect to these macros, as
-// deemed appropriate.
-
-#ifndef NOASM
-// Select the appropriate type of assembly code to use.
-
-#if defined(_M_IX86) || defined(__i386__)
-
-#define X86_ASM
-#ifdef X64_ASM
-#undef X64_ASM
-#endif
-
-#elif defined(_M_X64) || defined(__amd64__)
-
-#define X64_ASM
-#ifdef X86_ASM
-#undef X86_ASM
-#endif
-
-#else
-
-#define NOASM
-
-#endif
-
-#endif
-
-#ifdef NOASM
-// Ensure no assembly macros are defined if NOASM is defined.
-
-#ifdef X86_ASM
-#undef X86_ASM
-#endif
-
-#ifdef X64_ASM
-#undef X64_ASM
-#endif
-
-#endif
-
 
 #if defined(_MSC_VER)
 #define NOVTABLE __declspec(novtable)
@@ -148,7 +97,7 @@ int Printf (int printlevel, const char *, ...) GCCPRINTF(2,3);
 int Printf (const char *, ...) GCCPRINTF(1,2);
 
 // [RH] Same here:
-int DPrintf (const char *, ...) GCCPRINTF(1,2);
+int DPrintf (int level, const char *, ...) GCCPRINTF(2,3);
 
 extern "C" int mysnprintf(char *buffer, size_t count, const char *format, ...) GCCPRINTF(3,4);
 extern "C" int myvsnprintf(char *buffer, size_t count, const char *format, va_list argptr) GCCFORMAT(3);
@@ -161,15 +110,19 @@ enum
 	PRINT_MEDIUM,	// death messages
 	PRINT_HIGH,		// critical messages
 	PRINT_CHAT,		// chat messages
-	PRINT_TEAMCHAT	// chat messages from a teammate
+	PRINT_TEAMCHAT,	// chat messages from a teammate
+	PRINT_LOG,		// only to logfile
+	PRINT_BOLD = 200				// What Printf_Bold used
 };
-#define PRINT_LOW				0				// pickup messages
-#define PRINT_MEDIUM			1				// death messages
-#define PRINT_HIGH				2				// critical messages
-#define PRINT_CHAT				3				// chat messages
-#define PRINT_TEAMCHAT			4				// chat messages from a teammate
-#define PRINT_LOG				5				// only to logfile
-#define PRINT_BOLD				200				// What Printf_Bold used
+
+enum
+{
+	DMSG_OFF,		// no developer messages.
+	DMSG_ERROR,		// general notification messages
+	DMSG_WARNING,	// warnings
+	DMSG_NOTIFY,	// general notification messages
+	DMSG_SPAMMY,	// for those who want to see everything, regardless of its usefulness.
+};
 
 struct PalEntry
 {
@@ -203,13 +156,11 @@ struct PalEntry
 #endif
 };
 
-class FArchive;
 class PClassInventory;
 
 class FTextureID
 {
 	friend class FTextureManager;
-	friend FArchive &operator<< (FArchive &arc, FTextureID &tex);
 	friend FTextureID GetHUDIcon(PClassInventory *cls);
 	friend void R_InitSpriteDefs();
 
@@ -234,6 +185,13 @@ protected:
 	FTextureID(int num) { texnum = num; }
 private:
 	int texnum;
+};
+
+// This is for the script interface which needs to do casts from int to texture.
+class FSetTextureID : public FTextureID
+{
+public:
+	FSetTextureID(int v) : FTextureID(v) {}
 };
 
 
@@ -263,12 +221,14 @@ char ( &_ArraySizeHelper( T (&array)[N] ))[N];
 #ifdef __MACH__
 #define SECTION_AREG "__DATA,areg"
 #define SECTION_CREG "__DATA,creg"
+#define SECTION_FREG "__DATA,freg"
 #define SECTION_GREG "__DATA,greg"
 #define SECTION_MREG "__DATA,mreg"
 #define SECTION_YREG "__DATA,yreg"
 #else
 #define SECTION_AREG "areg"
 #define SECTION_CREG "creg"
+#define SECTION_FREG "freg"
 #define SECTION_GREG "greg"
 #define SECTION_MREG "mreg"
 #define SECTION_YREG "yreg"

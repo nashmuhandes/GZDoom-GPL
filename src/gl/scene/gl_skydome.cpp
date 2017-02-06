@@ -1,11 +1,31 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2003-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
-** gl_sky.cpp
 **
 ** Draws the sky.  Loosely based on the JDoom sky and the ZDoomGL 0.66.2 sky.
 **
+** for FSkyVertexBuffer::SkyVertex only:
 **---------------------------------------------------------------------------
 ** Copyright 2003 Tim Stump
-** Copyright 2005 Christoph Oelckers
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -19,8 +39,6 @@
 **    documentation and/or other materials provided with the distribution.
 ** 3. The name of the author may not be used to endorse or promote products
 **    derived from this software without specific prior written permission.
-** 4. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
 **
 ** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 ** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -42,7 +60,7 @@
 #include "w_wad.h"
 #include "r_state.h"
 #include "r_utility.h"
-//#include "gl/gl_intern.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/data/gl_data.h"
@@ -87,7 +105,7 @@ FSkyVertexBuffer::~FSkyVertexBuffer()
 void FSkyVertexBuffer::BindVBO()
 {
 	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
-	if (gl.glslversion > 0)
+	if (!gl.legacyMode)
 	{
 		glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FSkyVertex), &VSO->x);
 		glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FSkyVertex), &VSO->u);
@@ -96,6 +114,7 @@ void FSkyVertexBuffer::BindVBO()
 		glEnableVertexAttribArray(VATTR_TEXCOORD);
 		glEnableVertexAttribArray(VATTR_COLOR);
 		glDisableVertexAttribArray(VATTR_VERTEX2);
+		glDisableVertexAttribArray(VATTR_NORMAL);
 	}
 	else
 	{
@@ -119,7 +138,7 @@ void FSkyVertexBuffer::SkyVertex(int r, int c, bool zflip)
 	static const FAngle maxSideAngle = 60.f;
 	static const float scale = 10000.;
 
-	FAngle topAngle= (c / (float)mColumns * 360.f);
+	FAngle topAngle = (c / (float)mColumns * 360.f);
 	FAngle sideAngle = maxSideAngle * (mRows - r) / mRows;
 	float height = sideAngle.Sin();
 	float realRadius = scale * sideAngle.Cos();
@@ -127,13 +146,13 @@ void FSkyVertexBuffer::SkyVertex(int r, int c, bool zflip)
 	float z = (!zflip) ? scale * height : -scale * height;
 
 	FSkyVertex vert;
-	
+
 	vert.color = r == 0 ? 0xffffff : 0xffffffff;
-		
+
 	// And the texture coordinates.
-	if(!zflip)	// Flipped Y is for the lower hemisphere.
+	if (!zflip)	// Flipped Y is for the lower hemisphere.
 	{
-		vert.u = (-c / (float)mColumns) ;
+		vert.u = (-c / (float)mColumns);
 		vert.v = (r / (float)mRows);
 	}
 	else
@@ -142,7 +161,7 @@ void FSkyVertexBuffer::SkyVertex(int r, int c, bool zflip)
 		vert.v = 1.0f + ((mRows - r) / (float)mRows);
 	}
 
-	if (r != 4) z+=300;
+	if (r != 4) z += 300;
 	// And finally the vertex.
 	vert.x = -pos.X;	// Doom mirrors the sky vertically!
 	vert.y = z - 1.f;
@@ -194,27 +213,93 @@ void FSkyVertexBuffer::CreateDome()
 	// the first thing we put into the buffer is the fog layer object which is just 4 triangles around the viewpoint.
 
 	mVertices.Reserve(12);
-	mVertices[0].Set( 1.0f,  1.0f, -1.0f);
-	mVertices[1].Set( 1.0f, -1.0f, -1.0f);
-	mVertices[2].Set(-1.0f,  0.0f, -1.0f);
+	mVertices[0].Set(1.0f, 1.0f, -1.0f);
+	mVertices[1].Set(1.0f, -1.0f, -1.0f);
+	mVertices[2].Set(-1.0f, 0.0f, -1.0f);
 
-	mVertices[3].Set( 1.0f,  1.0f, -1.0f);
-	mVertices[4].Set( 1.0f, -1.0f, -1.0f);
-	mVertices[5].Set( 0.0f,  0.0f,  1.0f);
+	mVertices[3].Set(1.0f, 1.0f, -1.0f);
+	mVertices[4].Set(1.0f, -1.0f, -1.0f);
+	mVertices[5].Set(0.0f, 0.0f, 1.0f);
 
 	mVertices[6].Set(-1.0f, 0.0f, -1.0f);
-	mVertices[7].Set( 1.0f, 1.0f, -1.0f);
-	mVertices[8].Set( 0.0f, 0.0f,  1.0f);
+	mVertices[7].Set(1.0f, 1.0f, -1.0f);
+	mVertices[8].Set(0.0f, 0.0f, 1.0f);
 
 	mVertices[9].Set(1.0f, -1.0f, -1.0f);
 	mVertices[10].Set(-1.0f, 0.0f, -1.0f);
-	mVertices[11].Set( 0.0f, 0.0f,  1.0f);
+	mVertices[11].Set(0.0f, 0.0f, 1.0f);
 
 	mColumns = 128;
 	mRows = 4;
 	CreateSkyHemisphere(SKYHEMI_UPPER);
 	CreateSkyHemisphere(SKYHEMI_LOWER);
 	mPrimStart.Push(mVertices.Size());
+
+	mSideStart = mVertices.Size();
+	mFaceStart[0] = mSideStart + 10;
+	mFaceStart[1] = mFaceStart[0] + 4;
+	mFaceStart[2] = mFaceStart[1] + 4;
+	mFaceStart[3] = mFaceStart[2] + 4;
+	mFaceStart[4] = mFaceStart[3] + 4;
+	mFaceStart[5] = mFaceStart[4] + 4;
+	mFaceStart[6] = mFaceStart[5] + 4;
+	mVertices.Reserve(10 + 7*4);
+	FSkyVertex *ptr = &mVertices[mSideStart];
+
+	// all sides
+	ptr[0].SetXYZ(128.f, 128.f, -128.f, 0, 0);
+	ptr[1].SetXYZ(128.f, -128.f, -128.f, 0, 1);
+	ptr[2].SetXYZ(-128.f, 128.f, -128.f, 0.25f, 0);
+	ptr[3].SetXYZ(-128.f, -128.f, -128.f, 0.25f, 1);
+	ptr[4].SetXYZ(-128.f, 128.f, 128.f, 0.5f, 0);
+	ptr[5].SetXYZ(-128.f, -128.f, 128.f, 0.5f, 1);
+	ptr[6].SetXYZ(128.f, 128.f, 128.f, 0.75f, 0);
+	ptr[7].SetXYZ(128.f, -128.f, 128.f, 0.75f, 1);
+	ptr[8].SetXYZ(128.f, 128.f, -128.f, 1, 0);
+	ptr[9].SetXYZ(128.f, -128.f, -128.f, 1, 1);
+
+	// north face
+	ptr[10].SetXYZ(128.f, 128.f, -128.f, 0, 0);
+	ptr[11].SetXYZ(-128.f, 128.f, -128.f, 1, 0);
+	ptr[12].SetXYZ(128.f, -128.f, -128.f, 0, 1);
+	ptr[13].SetXYZ(-128.f, -128.f, -128.f, 1, 1);
+
+	// east face
+	ptr[14].SetXYZ(-128.f, 128.f, -128.f, 0, 0);
+	ptr[15].SetXYZ(-128.f, 128.f, 128.f, 1, 0);
+	ptr[16].SetXYZ(-128.f, -128.f, -128.f, 0, 1);
+	ptr[17].SetXYZ(-128.f, -128.f, 128.f, 1, 1);
+
+	// south face
+	ptr[18].SetXYZ(-128.f, 128.f, 128.f, 0, 0);
+	ptr[19].SetXYZ(128.f, 128.f, 128.f, 1, 0);
+	ptr[20].SetXYZ(-128.f, -128.f, 128.f, 0, 1);
+	ptr[21].SetXYZ(128.f, -128.f, 128.f, 1, 1);
+
+	// west face
+	ptr[22].SetXYZ(128.f, 128.f, 128.f, 0, 0);
+	ptr[23].SetXYZ(128.f, 128.f, -128.f, 1, 0);
+	ptr[24].SetXYZ(128.f, -128.f, 128.f, 0, 1);
+	ptr[25].SetXYZ(128.f, -128.f, -128.f, 1, 1);
+
+	// bottom face
+	ptr[26].SetXYZ(128.f, -128.f, -128.f, 0, 0);
+	ptr[27].SetXYZ(-128.f, -128.f, -128.f, 1, 0);
+	ptr[28].SetXYZ(128.f, -128.f, 128.f, 0, 1);
+	ptr[29].SetXYZ(-128.f, -128.f, 128.f, 1, 1);
+
+	// top face
+	ptr[30].SetXYZ(128.f, 128.f, -128.f, 0, 0);
+	ptr[31].SetXYZ(-128.f, 128.f, -128.f, 1, 0);
+	ptr[32].SetXYZ(128.f, 128.f, 128.f, 0, 1);
+	ptr[33].SetXYZ(-128.f, 128.f, 128.f, 1, 1);
+
+	// top face flipped
+	ptr[34].SetXYZ(128.f, 128.f, -128.f, 0, 1);
+	ptr[35].SetXYZ(-128.f, 128.f, -128.f, 1, 1);
+	ptr[36].SetXYZ(128.f, 128.f, 128.f, 0, 0);
+	ptr[37].SetXYZ(-128.f, 128.f, 128.f, 1, 0);
+
 	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
 	glBufferData(GL_ARRAY_BUFFER, mVertices.Size() * sizeof(FSkyVertex), &mVertices[0], GL_STATIC_DRAW);
 }
@@ -255,7 +340,7 @@ void FSkyVertexBuffer::RenderDome(FMaterial *tex, int mode)
 		RenderRow(GL_TRIANGLE_FAN, rc);
 		gl_RenderState.EnableTexture(true);
 		// The color array can only be activated now if this is drawn without shader
-		if (gl.glslversion == 0)
+		if (gl.legacyMode)
 		{
 			glEnableClientState(GL_COLOR_ARRAY);
 		}
@@ -292,26 +377,32 @@ void RenderDome(FMaterial * tex, float x_offset, float y_offset, bool mirror, in
 		gl_RenderState.EnableModelMatrix(true);
 
 		gl_RenderState.mModelMatrix.loadIdentity();
-		gl_RenderState.mModelMatrix.rotate(-180.0f+x_offset, 0.f, 1.f, 0.f);
+		gl_RenderState.mModelMatrix.rotate(-180.0f + x_offset, 0.f, 1.f, 0.f);
 
 		float xscale = texw < 1024.f ? floor(1024.f / float(texw)) : 1.f;
 		float yscale = 1.f;
-		if (texh < 128)
+		if (texh <= 128 && (level.flags & LEVEL_FORCETILEDSKY))
+		{
+			gl_RenderState.mModelMatrix.translate(0.f, (-40 + tex->tex->SkyOffset + skyoffset)*skyoffsetfactor, 0.f);
+			gl_RenderState.mModelMatrix.scale(1.f, 1.2f * 1.17f, 1.f);
+			yscale = 240.f / texh;
+		}
+		else if (texh < 128)
 		{
 			// smaller sky textures must be tiled. We restrict it to 128 sky pixels, though
 			gl_RenderState.mModelMatrix.translate(0.f, -1250.f, 0.f);
-			gl_RenderState.mModelMatrix.scale(1.f, 128/230.f, 1.f);
+			gl_RenderState.mModelMatrix.scale(1.f, 128 / 230.f, 1.f);
 			yscale = 128 / texh;	// intentionally left as integer.
 		}
 		else if (texh < 200)
 		{
 			gl_RenderState.mModelMatrix.translate(0.f, -1250.f, 0.f);
-			gl_RenderState.mModelMatrix.scale(1.f, texh/230.f, 1.f);
+			gl_RenderState.mModelMatrix.scale(1.f, texh / 230.f, 1.f);
 		}
 		else if (texh <= 240)
 		{
 			gl_RenderState.mModelMatrix.translate(0.f, (200 - texh + tex->tex->SkyOffset + skyoffset)*skyoffsetfactor, 0.f);
-			gl_RenderState.mModelMatrix.scale(1.f, 1.f + ((texh-200.f)/200.f) * 1.17f, 1.f);
+			gl_RenderState.mModelMatrix.scale(1.f, 1.f + ((texh - 200.f) / 200.f) * 1.17f, 1.f);
 		}
 		else
 		{
@@ -321,7 +412,7 @@ void RenderDome(FMaterial * tex, float x_offset, float y_offset, bool mirror, in
 		}
 		gl_RenderState.EnableTextureMatrix(true);
 		gl_RenderState.mTextureMatrix.loadIdentity();
-		gl_RenderState.mTextureMatrix.scale(mirror? -xscale : xscale, yscale, 1.f);
+		gl_RenderState.mTextureMatrix.scale(mirror ? -xscale : xscale, yscale, 1.f);
 		gl_RenderState.mTextureMatrix.translate(1.f, y_offset / texh, 1.f);
 	}
 
@@ -351,7 +442,6 @@ static void RenderBox(FTextureID texno, FMaterial * gltex, float x_offset, bool 
 	else
 		gl_RenderState.mModelMatrix.rotate(-180.0f+x_offset, glset.skyrotatevector2.X, glset.skyrotatevector2.Z, glset.skyrotatevector2.Y);
 
-	FFlatVertex *ptr;
 	if (sb->faces[5]) 
 	{
 		faces=4;
@@ -360,65 +450,25 @@ static void RenderBox(FTextureID texno, FMaterial * gltex, float x_offset, bool 
 		tex = FMaterial::ValidateTexture(sb->faces[0], false);
 		gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 		gl_RenderState.Apply();
-
-		ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(128.f, 128.f, -128.f, 0, 0);
-		ptr++;
-		ptr->Set(-128.f, 128.f, -128.f, 1, 0);
-		ptr++;
-		ptr->Set(128.f, -128.f, -128.f, 0, 1);
-		ptr++;
-		ptr->Set(-128.f, -128.f, -128.f, 1, 1);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+		glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(0), 4);
 
 		// east
 		tex = FMaterial::ValidateTexture(sb->faces[1], false);
 		gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 		gl_RenderState.Apply();
-
-		ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(-128.f, 128.f, -128.f, 0, 0);
-		ptr++;
-		ptr->Set(-128.f, 128.f, 128.f, 1, 0);
-		ptr++;
-		ptr->Set(-128.f, -128.f, -128.f, 0, 1);
-		ptr++;
-		ptr->Set(-128.f, -128.f, 128.f, 1, 1);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+		glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(1), 4);
 
 		// south
 		tex = FMaterial::ValidateTexture(sb->faces[2], false);
 		gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 		gl_RenderState.Apply();
-
-		ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(-128.f, 128.f, 128.f, 0, 0);
-		ptr++;
-		ptr->Set(128.f, 128.f, 128.f, 1, 0);
-		ptr++;
-		ptr->Set(-128.f, -128.f, 128.f, 0, 1);
-		ptr++;
-		ptr->Set(128.f, -128.f, 128.f, 1, 1);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+		glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(2), 4);
 
 		// west
 		tex = FMaterial::ValidateTexture(sb->faces[3], false);
 		gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 		gl_RenderState.Apply();
-
-		ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(128.f, 128.f, 128.f, 0, 0);
-		ptr++;
-		ptr->Set(128.f, 128.f, -128.f, 1, 0);
-		ptr++;
-		ptr->Set(128.f, -128.f, 128.f, 0, 1);
-		ptr++;
-		ptr->Set(128.f, -128.f, -128.f, 1, 1);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+		glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(3), 4);
 	}
 	else 
 	{
@@ -426,62 +476,21 @@ static void RenderBox(FTextureID texno, FMaterial * gltex, float x_offset, bool 
 		tex = FMaterial::ValidateTexture(sb->faces[0], false);
 		gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 		gl_RenderState.Apply();
-
-		ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(128.f, 128.f, -128.f, 0, 0);
-		ptr++;
-		ptr->Set(128.f, -128.f, -128.f, 0, 1);
-		ptr++;
-		ptr->Set(-128.f, 128.f, -128.f, 0.25f, 0);
-		ptr++;
-		ptr->Set(-128.f, -128.f, -128.f, 0.25f, 1);
-		ptr++;
-		ptr->Set(-128.f, 128.f, 128.f, 0.5f, 0);
-		ptr++;
-		ptr->Set(-128.f, -128.f, 128.f, 0.5f, 1);
-		ptr++;
-		ptr->Set(128.f, 128.f, 128.f, 0.75f, 0);
-		ptr++;
-		ptr->Set(128.f, -128.f, 128.f, 0.75f, 1);
-		ptr++;
-		ptr->Set(128.f, 128.f, -128.f, 1, 0);
-		ptr++;
-		ptr->Set(128.f, -128.f, -128.f, 1, 1);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+		glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(-1), 10);
 	}
 
 	// top
 	tex = FMaterial::ValidateTexture(sb->faces[faces], false);
 	gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 	gl_RenderState.Apply();
-
-	ptr = GLRenderer->mVBO->GetBuffer();
-	ptr->Set(128.f, 128.f, -128.f, 0, sb->fliptop);
-	ptr++;
-	ptr->Set(-128.f, 128.f, -128.f, 1, sb->fliptop);
-	ptr++;
-	ptr->Set(128.f, 128.f, 128.f, 0, !sb->fliptop);
-	ptr++;
-	ptr->Set(-128.f, 128.f, 128.f, 1, !sb->fliptop);
-	ptr++;
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+	glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(sb->fliptop? 6:5), 4);
 
 	// bottom
 	tex = FMaterial::ValidateTexture(sb->faces[faces+1], false);
 	gl_RenderState.SetMaterial(tex, CLAMP_XY, 0, -1, false);
 	gl_RenderState.Apply();
+	glDrawArrays(GL_TRIANGLE_STRIP, GLRenderer->mSkyVBO->FaceStart(4), 4);
 
-	ptr = GLRenderer->mVBO->GetBuffer();
-	ptr->Set(128.f, -128.f, -128.f, 0, 0);
-	ptr++;
-	ptr->Set(-128.f, -128.f, -128.f, 1, 0);
-	ptr++;
-	ptr->Set(128.f, -128.f, 128.f, 0, 1);
-	ptr++;
-	ptr->Set(-128.f, -128.f, 128.f, 1, 1);
-	ptr++;
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
 	gl_RenderState.EnableModelMatrix(false);
 }
 
@@ -510,15 +519,15 @@ void GLSkyPortal::DrawContents()
 	bool oldClamp = gl_RenderState.SetDepthClamp(true);
 
 	gl_MatrixStack.Push(gl_RenderState.mViewMatrix);
-	GLRenderer->SetupView(0, 0, 0, ViewAngle, !!(MirrorFlag&1), !!(PlaneMirrorFlag&1));
+	GLRenderer->SetupView(0, 0, 0, ViewAngle, !!(MirrorFlag & 1), !!(PlaneMirrorFlag & 1));
 
+	gl_RenderState.SetVertexBuffer(GLRenderer->mSkyVBO);
 	if (origin->texture[0] && origin->texture[0]->tex->gl_info.bSkybox)
 	{
 		RenderBox(origin->skytexno1, origin->texture[0], origin->x_offset[0], origin->sky2);
 	}
 	else
 	{
-		gl_RenderState.SetVertexBuffer(GLRenderer->mSkyVBO);
 		if (origin->texture[0]==origin->texture[1] && origin->doublesky) origin->doublesky=false;	
 
 		if (origin->texture[0])
@@ -547,8 +556,8 @@ void GLSkyPortal::DrawContents()
 			gl_RenderState.EnableTexture(true);
 			gl_RenderState.SetObjectColor(0xffffffff);
 		}
-		gl_RenderState.SetVertexBuffer(GLRenderer->mVBO);
 	}
+	gl_RenderState.SetVertexBuffer(GLRenderer->mVBO);
 	gl_MatrixStack.Pop(gl_RenderState.mViewMatrix);
 	gl_RenderState.ApplyMatrices();
 	glset.lightmode = oldlightmode;

@@ -60,11 +60,12 @@ EXTERN_CVAR (Bool, cl_run)
 // Player's name
 //
 //=============================================================================
+IMPLEMENT_CLASS(DPlayerNameBox, false, false)
 
-FPlayerNameBox::FPlayerNameBox(int x, int y, int height, int frameofs, const char *text, FFont *font, EColorRange color, FName action)
-: FListMenuItemSelectable(x, y, height, action)
+DPlayerNameBox::DPlayerNameBox(int x, int y, int height, int frameofs, const char *text, FFont *font, EColorRange color, FName action)
+: DListMenuItemSelectable(x, y, height, action)
 {
-	mText = copystring(text);
+	mText = text;
 	mFont = font;
 	mFontColor = color;
 	mFrameSize = frameofs;
@@ -72,18 +73,13 @@ FPlayerNameBox::FPlayerNameBox(int x, int y, int height, int frameofs, const cha
 	mEntering = false;
 }
 
-FPlayerNameBox::~FPlayerNameBox()
-{
-	if (mText != NULL) delete [] mText;
-}
-
 //=============================================================================
 //
 //
 //
 //=============================================================================
 
-bool FPlayerNameBox::SetString(int i, const char *s)
+bool DPlayerNameBox::SetString(int i, const char *s)
 {
 	if (i == 0)
 	{
@@ -94,7 +90,7 @@ bool FPlayerNameBox::SetString(int i, const char *s)
 	return false;
 }
 
-bool FPlayerNameBox::GetString(int i, char *s, int len)
+bool DPlayerNameBox::GetString(int i, char *s, int len)
 {
 	if (i == 0)
 	{
@@ -111,7 +107,7 @@ bool FPlayerNameBox::GetString(int i, char *s, int len)
 //
 //=============================================================================
 
-void FPlayerNameBox::DrawBorder (int x, int y, int len)
+void DPlayerNameBox::DrawBorder (int x, int y, int len)
 {
 	FTexture *left = TexMan[TexMan.CheckForTexture("M_LSLEFT", FTexture::TEX_MiscPatch)];
 	FTexture *mid = TexMan[TexMan.CheckForTexture("M_LSCNTR", FTexture::TEX_MiscPatch)];
@@ -150,7 +146,7 @@ void FPlayerNameBox::DrawBorder (int x, int y, int len)
 //
 //=============================================================================
 
-void FPlayerNameBox::Drawer(bool selected)
+void DPlayerNameBox::Drawer(bool selected)
 {
 	const char *text = mText;
 	if (text != NULL)
@@ -186,7 +182,7 @@ void FPlayerNameBox::Drawer(bool selected)
 //
 //=============================================================================
 
-bool FPlayerNameBox::MenuEvent(int mkey, bool fromcontroller)
+bool DPlayerNameBox::MenuEvent(int mkey, bool fromcontroller)
 {
 	if (mkey == MKEY_Enter)
 	{
@@ -216,11 +212,12 @@ bool FPlayerNameBox::MenuEvent(int mkey, bool fromcontroller)
 // items for the player menu
 //
 //=============================================================================
+IMPLEMENT_CLASS(DValueTextItem, false, false)
 
-FValueTextItem::FValueTextItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, EColorRange valuecolor, FName action, FName values)
-: FListMenuItemSelectable(x, y, height, action)
+DValueTextItem::DValueTextItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, EColorRange valuecolor, FName action, FName values)
+: DListMenuItemSelectable(x, y, height, action)
 {
-	mText = copystring(text);
+	mText = text;
 	mFont = font;
 	mFontColor = color;
 	mFontColor2 = valuecolor;
@@ -238,18 +235,13 @@ FValueTextItem::FValueTextItem(int x, int y, int height, const char *text, FFont
 	}
 }
 
-FValueTextItem::~FValueTextItem()
-{
-	if (mText != NULL) delete [] mText;
-}
-
 //=============================================================================
 //
 //
 //
 //=============================================================================
 
-bool FValueTextItem::SetString(int i, const char *s)
+bool DValueTextItem::SetString(int i, const char *s)
 {
 	// should actually use the index...
 	FString str = s;
@@ -264,7 +256,7 @@ bool FValueTextItem::SetString(int i, const char *s)
 //
 //=============================================================================
 
-bool FValueTextItem::SetValue(int i, int value)
+bool DValueTextItem::SetValue(int i, int value)
 {
 	if (i == 0)
 	{
@@ -274,7 +266,7 @@ bool FValueTextItem::SetValue(int i, int value)
 	return false;
 }
 
-bool FValueTextItem::GetValue(int i, int *pvalue)
+bool DValueTextItem::GetValue(int i, int *pvalue)
 {
 	if (i == 0)
 	{
@@ -290,7 +282,7 @@ bool FValueTextItem::GetValue(int i, int *pvalue)
 //
 //=============================================================================
 
-bool FValueTextItem::MenuEvent (int mkey, bool fromcontroller)
+bool DValueTextItem::MenuEvent (int mkey, bool fromcontroller)
 {
 	if (mSelections.Size() > 1)
 	{
@@ -316,7 +308,7 @@ bool FValueTextItem::MenuEvent (int mkey, bool fromcontroller)
 //
 //=============================================================================
 
-void FValueTextItem::Drawer(bool selected)
+void DValueTextItem::Drawer(bool selected)
 {
 	const char *text = mText;
 
@@ -337,11 +329,12 @@ void FValueTextItem::Drawer(bool selected)
 // items for the player menu
 //
 //=============================================================================
+IMPLEMENT_CLASS(DSliderItem, false, false)
 
-FSliderItem::FSliderItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, FName action, int min, int max, int step)
-: FListMenuItemSelectable(x, y, height, action)
+DSliderItem::DSliderItem(int x, int y, int height, const char *text, FFont *font, EColorRange color, FName action, int min, int max, int step)
+: DListMenuItemSelectable(x, y, height, action)
 {
-	mText = copystring(text);
+	mText = text;
 	mFont = font;
 	mFontColor = color;
 	mSelection = 0;
@@ -350,18 +343,13 @@ FSliderItem::FSliderItem(int x, int y, int height, const char *text, FFont *font
 	mStep = step;
 }
 
-FSliderItem::~FSliderItem()
-{
-	if (mText != NULL) delete [] mText;
-}
-
 //=============================================================================
 //
 //
 //
 //=============================================================================
 
-bool FSliderItem::SetValue(int i, int value)
+bool DSliderItem::SetValue(int i, int value)
 {
 	if (i == 0)
 	{
@@ -371,7 +359,7 @@ bool FSliderItem::SetValue(int i, int value)
 	return false;
 }
 
-bool FSliderItem::GetValue(int i, int *pvalue)
+bool DSliderItem::GetValue(int i, int *pvalue)
 {
 	if (i == 0)
 	{
@@ -387,7 +375,7 @@ bool FSliderItem::GetValue(int i, int *pvalue)
 //
 //=============================================================================
 
-bool FSliderItem::MenuEvent (int mkey, bool fromcontroller)
+bool DSliderItem::MenuEvent (int mkey, bool fromcontroller)
 {
 	if (mkey == MKEY_Left)
 	{
@@ -410,7 +398,7 @@ bool FSliderItem::MenuEvent (int mkey, bool fromcontroller)
 //
 //=============================================================================
 
-bool FSliderItem::MouseEvent(int type, int x, int y)
+bool DSliderItem::MouseEvent(int type, int x, int y)
 {
 	DListMenu *lm = static_cast<DListMenu*>(DMenu::CurrentMenu);
 	if (type != DMenu::MOUSE_Click)
@@ -450,7 +438,7 @@ bool FSliderItem::MouseEvent(int type, int x, int y)
 //
 //=============================================================================
 
-void FSliderItem::DrawSlider (int x, int y)
+void DSliderItem::DrawSlider (int x, int y)
 {
 	int range = mMaxrange - mMinrange;
 	int cur = mSelection - mMinrange;
@@ -476,7 +464,7 @@ void FSliderItem::DrawSlider (int x, int y)
 //
 //=============================================================================
 
-void FSliderItem::Drawer(bool selected)
+void DSliderItem::Drawer(bool selected)
 {
 	const char *text = mText;
 
@@ -511,11 +499,11 @@ class DPlayerMenu : public DListMenu
 	void UpdateTranslation();
 	void SendNewColor (int red, int green, int blue);
 
-	void PlayerNameChanged(FListMenuItem *li);
-	void ColorSetChanged (FListMenuItem *li);
-	void ClassChanged (FListMenuItem *li);
-	void AutoaimChanged (FListMenuItem *li);
-	void SkinChanged (FListMenuItem *li);
+	void PlayerNameChanged(DMenuItemBase *li);
+	void ColorSetChanged (DMenuItemBase *li);
+	void ClassChanged (DMenuItemBase *li);
+	void AutoaimChanged (DMenuItemBase *li);
+	void SkinChanged (DMenuItemBase *li);
 
 
 public:
@@ -529,7 +517,7 @@ public:
 	void Drawer ();
 };
 
-IMPLEMENT_CLASS(DPlayerMenu)
+IMPLEMENT_CLASS(DPlayerMenu, false, false)
 
 //=============================================================================
 //
@@ -539,7 +527,7 @@ IMPLEMENT_CLASS(DPlayerMenu)
 
 void DPlayerMenu::Init(DMenu *parent, FListMenuDescriptor *desc)
 {
-	FListMenuItem *li;
+	DMenuItemBase *li;
 
 	Super::Init(parent, desc);
 	PickPlayerClass();
@@ -548,14 +536,14 @@ void DPlayerMenu::Init(DMenu *parent, FListMenuDescriptor *desc)
 	li = GetItem(NAME_Playerdisplay);
 	if (li != NULL)
 	{
-		li->SetValue(FListMenuItemPlayerDisplay::PDF_ROTATION, 0);
-		li->SetValue(FListMenuItemPlayerDisplay::PDF_MODE, 1);
-		li->SetValue(FListMenuItemPlayerDisplay::PDF_TRANSLATE, 1);
-		li->SetValue(FListMenuItemPlayerDisplay::PDF_CLASS, players[consoleplayer].userinfo.GetPlayerClassNum());
+		li->SetValue(DListMenuItemPlayerDisplay::PDF_ROTATION, 0);
+		li->SetValue(DListMenuItemPlayerDisplay::PDF_MODE, 1);
+		li->SetValue(DListMenuItemPlayerDisplay::PDF_TRANSLATE, 1);
+		li->SetValue(DListMenuItemPlayerDisplay::PDF_CLASS, players[consoleplayer].userinfo.GetPlayerClassNum());
 		if (PlayerClass != NULL && !(GetDefaultByType (PlayerClass->Type)->flags4 & MF4_NOSKIN) &&
 			players[consoleplayer].userinfo.GetPlayerClassNum() != -1)
 		{
-			li->SetValue(FListMenuItemPlayerDisplay::PDF_SKIN, players[consoleplayer].userinfo.GetSkin());
+			li->SetValue(DListMenuItemPlayerDisplay::PDF_SKIN, players[consoleplayer].userinfo.GetSkin());
 		}
 	}
 
@@ -667,10 +655,10 @@ bool DPlayerMenu::Responder (event_t *ev)
 	{
 		// turn the player sprite around
 		mRotation = 8 - mRotation;
-		FListMenuItem *li = GetItem(NAME_Playerdisplay);
+		DMenuItemBase *li = GetItem(NAME_Playerdisplay);
 		if (li != NULL)
 		{
-			li->SetValue(FListMenuItemPlayerDisplay::PDF_ROTATION, mRotation);
+			li->SetValue(DListMenuItemPlayerDisplay::PDF_ROTATION, mRotation);
 		}
 		return true;
 	}
@@ -757,7 +745,7 @@ void DPlayerMenu::SendNewColor (int red, int green, int blue)
 
 void DPlayerMenu::UpdateColorsets()
 {
-	FListMenuItem *li = GetItem(NAME_Color);
+	DMenuItemBase *li = GetItem(NAME_Color);
 	if (li != NULL)
 	{
 		int sel = 0;
@@ -793,7 +781,7 @@ void DPlayerMenu::UpdateSkins()
 {
 	int sel = 0;
 	int skin;
-	FListMenuItem *li = GetItem(NAME_Skin);
+	DMenuItemBase *li = GetItem(NAME_Skin);
 	if (li != NULL)
 	{
 		if (GetDefaultByType (PlayerClass->Type)->flags4 & MF4_NOSKIN ||
@@ -824,7 +812,7 @@ void DPlayerMenu::UpdateSkins()
 		li = GetItem(NAME_Playerdisplay);
 		if (li != NULL)
 		{
-			li->SetValue(FListMenuItemPlayerDisplay::PDF_SKIN, skin);
+			li->SetValue(DListMenuItemPlayerDisplay::PDF_SKIN, skin);
 		}
 	}
 	UpdateTranslation();
@@ -836,7 +824,7 @@ void DPlayerMenu::UpdateSkins()
 //
 //=============================================================================
 
-void DPlayerMenu::PlayerNameChanged(FListMenuItem *li)
+void DPlayerMenu::PlayerNameChanged(DMenuItemBase *li)
 {
 	char pp[MAXPLAYERNAME+1];
 	const char *p;
@@ -864,7 +852,7 @@ void DPlayerMenu::PlayerNameChanged(FListMenuItem *li)
 //
 //=============================================================================
 
-void DPlayerMenu::ColorSetChanged (FListMenuItem *li)
+void DPlayerMenu::ColorSetChanged (DMenuItemBase *li)
 {
 	int	sel;
 
@@ -874,9 +862,9 @@ void DPlayerMenu::ColorSetChanged (FListMenuItem *li)
 
 		if (sel > 0) mycolorset = PlayerColorSets[sel-1];
 
-		FListMenuItem *red   = GetItem(NAME_Red);
-		FListMenuItem *green = GetItem(NAME_Green);
-		FListMenuItem *blue  = GetItem(NAME_Blue);
+		DMenuItemBase *red   = GetItem(NAME_Red);
+		DMenuItemBase *green = GetItem(NAME_Green);
+		DMenuItemBase *blue  = GetItem(NAME_Blue);
 
 		// disable the sliders if a valid colorset is selected
 		if (red != NULL) red->Enable(mycolorset == -1);
@@ -897,7 +885,7 @@ void DPlayerMenu::ColorSetChanged (FListMenuItem *li)
 //
 //=============================================================================
 
-void DPlayerMenu::ClassChanged (FListMenuItem *li)
+void DPlayerMenu::ClassChanged (DMenuItemBase *li)
 {
 	if (PlayerClasses.Size () == 1)
 	{
@@ -920,7 +908,7 @@ void DPlayerMenu::ClassChanged (FListMenuItem *li)
 		li = GetItem(NAME_Playerdisplay);
 		if (li != NULL)
 		{
-			li->SetValue(FListMenuItemPlayerDisplay::PDF_CLASS, players[consoleplayer].userinfo.GetPlayerClassNum());
+			li->SetValue(DListMenuItemPlayerDisplay::PDF_CLASS, players[consoleplayer].userinfo.GetPlayerClassNum());
 		}
 	}
 }
@@ -931,7 +919,7 @@ void DPlayerMenu::ClassChanged (FListMenuItem *li)
 //
 //=============================================================================
 
-void DPlayerMenu::SkinChanged (FListMenuItem *li)
+void DPlayerMenu::SkinChanged (DMenuItemBase *li)
 {
 	if (GetDefaultByType (PlayerClass->Type)->flags4 & MF4_NOSKIN ||
 		players[consoleplayer].userinfo.GetPlayerClassNum() == -1)
@@ -951,7 +939,7 @@ void DPlayerMenu::SkinChanged (FListMenuItem *li)
 		li = GetItem(NAME_Playerdisplay);
 		if (li != NULL)
 		{
-			li->SetValue(FListMenuItemPlayerDisplay::PDF_SKIN, sel);
+			li->SetValue(DListMenuItemPlayerDisplay::PDF_SKIN, sel);
 		}
 	}
 }
@@ -962,7 +950,7 @@ void DPlayerMenu::SkinChanged (FListMenuItem *li)
 //
 //=============================================================================
 
-void DPlayerMenu::AutoaimChanged (FListMenuItem *li)
+void DPlayerMenu::AutoaimChanged (DMenuItemBase *li)
 {
 	int	sel;
 
@@ -983,7 +971,7 @@ bool DPlayerMenu::MenuEvent (int mkey, bool fromcontroller)
 	int v;
 	if (mDesc->mSelectedItem >= 0)
 	{
-		FListMenuItem *li = mDesc->mItems[mDesc->mSelectedItem];
+		DMenuItemBase *li = mDesc->mItems[mDesc->mSelectedItem];
 		if (li->MenuEvent(mkey, fromcontroller))
 		{
 			FName current = li->GetAction(NULL);
@@ -1079,7 +1067,7 @@ bool DPlayerMenu::MenuEvent (int mkey, bool fromcontroller)
 bool DPlayerMenu::MouseEvent(int type, int x, int y)
 {
 	int v;
-	FListMenuItem *li = mFocusControl;
+	DMenuItemBase *li = mFocusControl;
 	bool res = Super::MouseEvent(type, x, y);
 	if (li == NULL) li = mFocusControl;
 	if (li != NULL)
@@ -1110,6 +1098,9 @@ bool DPlayerMenu::MouseEvent(int type, int x, int y)
 				uint32 color = players[consoleplayer].userinfo.GetColor();
 				SendNewColor (RPART(color), GPART(color), v);
 			}
+			break;
+		case NAME_Autoaim:
+			AutoaimChanged(li);
 			break;
 		}
 	}

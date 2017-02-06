@@ -77,6 +77,7 @@
 #include "r_utility.h"
 #include "menu/menu.h"
 #include "intermission/intermission.h"
+#include "g_levellocals.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -124,7 +125,8 @@ public:
 	int PolyNum;
 	int SideNum;
 };
-IMPLEMENT_CLASS(DSectorMarker)
+
+IMPLEMENT_CLASS(DSectorMarker, false, false)
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
 
@@ -322,12 +324,12 @@ static void MarkRoot()
 	Mark(Args);
 	Mark(screen);
 	Mark(StatusBar);
-	Mark(DMenu::CurrentMenu);
+	M_MarkMenus();
 	Mark(DIntermissionController::CurrentIntermission);
 	DThinker::MarkRoots();
 	FCanvasTextureInfo::Mark();
 	Mark(DACSThinker::ActiveThinker);
-	for (auto &s : sectorPortals)
+	for (auto &s : level.sectorPortals)
 	{
 		Mark(s.mSkybox);
 	}
@@ -345,13 +347,13 @@ static void MarkRoot()
 	// Mark sound sequences.
 	DSeqNode::StaticMarkHead();
 	// Mark sectors.
-	if (SectorMarker == NULL && sectors != NULL)
+	if (SectorMarker == nullptr && level.sectors.Size() > 0)
 	{
 		SectorMarker = new DSectorMarker;
 	}
-	else if (sectors == NULL)
+	else if (level.sectors.Size() == 0)
 	{
-		SectorMarker = NULL;
+		SectorMarker = nullptr;
 	}
 	else
 	{
@@ -377,7 +379,7 @@ static void MarkRoot()
 		Mark(PClass::AllClasses[i]);
 	}
 	// Mark global symbols
-	GlobalSymbols.MarkSymbols();
+	Namespaces.MarkSymbols();
 	// Mark bot stuff.
 	Mark(bglobal.firstthing);
 	Mark(bglobal.body1);
@@ -676,26 +678,25 @@ size_t DSectorMarker::PropagateMark()
 	int i;
 	int marked = 0;
 	bool moretodo = false;
+	int numsectors = level.sectors.Size();
 
-	if (sectors != NULL)
+	for (i = 0; i < SECTORSTEPSIZE && SecNum + i < numsectors; ++i)
 	{
-		for (i = 0; i < SECTORSTEPSIZE && SecNum + i < numsectors; ++i)
-		{
-			sector_t *sec = &sectors[SecNum + i];
-			GC::Mark(sec->SoundTarget);
-			GC::Mark(sec->SecActTarget);
-			GC::Mark(sec->floordata);
-			GC::Mark(sec->ceilingdata);
-			GC::Mark(sec->lightingdata);
-			for(int j=0;j<4;j++) GC::Mark(sec->interpolations[j]);
-		}
-		marked += i * sizeof(sector_t);
-		if (SecNum + i < numsectors)
-		{
-			SecNum += i;
-			moretodo = true;
-		}
+		sector_t *sec = &level.sectors[SecNum + i];
+		GC::Mark(sec->SoundTarget);
+		GC::Mark(sec->SecActTarget);
+		GC::Mark(sec->floordata);
+		GC::Mark(sec->ceilingdata);
+		GC::Mark(sec->lightingdata);
+		for(int j=0;j<4;j++) GC::Mark(sec->interpolations[j]);
 	}
+	marked += i * sizeof(sector_t);
+	if (SecNum + i < numsectors)
+	{
+		SecNum += i;
+		moretodo = true;
+	}
+
 	if (!moretodo && polyobjs != NULL)
 	{
 		for (i = 0; i < POLYSTEPSIZE && PolyNum + i < po_NumPolyobjs; ++i)
@@ -709,15 +710,15 @@ size_t DSectorMarker::PropagateMark()
 			moretodo = true;
 		}
 	}
-	if (!moretodo && sides != NULL)
+	if (!moretodo && level.sides.Size() > 0)
 	{
-		for (i = 0; i < SIDEDEFSTEPSIZE && SideNum + i < numsides; ++i)
+		for (i = 0; i < SIDEDEFSTEPSIZE && SideNum + i < (int)level.sides.Size(); ++i)
 		{
-			side_t *side = &sides[SideNum + i];
+			side_t *side = &level.sides[SideNum + i];
 			for(int j=0;j<3;j++) GC::Mark(side->textures[j].interpolation);
 		}
 		marked += i * sizeof(side_t);
-		if (SideNum + i < numsides)
+		if (SideNum + i < (int)level.sides.Size())
 		{
 			SideNum += i;
 			moretodo = true;

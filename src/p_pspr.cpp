@@ -25,16 +25,17 @@
 #include "gi.h"
 #include "p_pspr.h"
 #include "templates.h"
-#include "thingdef/thingdef.h"
 #include "g_level.h"
-#include "farchive.h"
 #include "d_player.h"
+#include "serializer.h"
+#include "v_text.h"
+#include "cmdlib.h"
+#include "g_levellocals.h"
 
 
 // MACROS ------------------------------------------------------------------
 
 #define LOWERSPEED				6.
-#define RAISESPEED				6.
 
 // TYPES -------------------------------------------------------------------
 
@@ -79,7 +80,6 @@ CVAR(Int, sv_fastweapons, false, CVAR_SERVERINFO);
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
 static FRandom pr_wpnreadysnd ("WpnReadySnd");
-static FRandom pr_gunshot ("GunShot");
 
 static const FGenericButtons ButtonChecks[] =
 {
@@ -99,10 +99,32 @@ static const FGenericButtons ButtonChecks[] =
 //
 //------------------------------------------------------------------------
 
-IMPLEMENT_POINTY_CLASS(DPSprite)
-	DECLARE_POINTER(Caller)
-	DECLARE_POINTER(Next)
-END_POINTERS
+IMPLEMENT_CLASS(DPSprite, false, true)
+
+IMPLEMENT_POINTERS_START(DPSprite)
+	IMPLEMENT_POINTER(Caller)
+	IMPLEMENT_POINTER(Next)
+IMPLEMENT_POINTERS_END
+
+DEFINE_FIELD_NAMED(DPSprite, State, CurState)	// deconflict with same named type
+DEFINE_FIELD(DPSprite, Caller)
+DEFINE_FIELD(DPSprite, Next)
+DEFINE_FIELD(DPSprite, Owner)
+DEFINE_FIELD(DPSprite, Sprite)
+DEFINE_FIELD(DPSprite, Frame)
+DEFINE_FIELD(DPSprite, ID)
+DEFINE_FIELD(DPSprite, processPending)
+DEFINE_FIELD(DPSprite, x)
+DEFINE_FIELD(DPSprite, y)
+DEFINE_FIELD(DPSprite, oldx)
+DEFINE_FIELD(DPSprite, oldy)
+DEFINE_FIELD(DPSprite, firstTic)
+DEFINE_FIELD(DPSprite, Tics)
+DEFINE_FIELD_BIT(DPSprite, Flags, bAddWeapon, PSPF_ADDWEAPON)
+DEFINE_FIELD_BIT(DPSprite, Flags, bAddBob, PSPF_ADDBOB)
+DEFINE_FIELD_BIT(DPSprite, Flags, bPowDouble, PSPF_POWDOUBLE)
+DEFINE_FIELD_BIT(DPSprite, Flags, bCVarFast, PSPF_CVARFAST)
+DEFINE_FIELD_BIT(DPSprite, Flags, bFlip, PSPF_FLIP)
 
 //------------------------------------------------------------------------
 //
@@ -117,6 +139,7 @@ DPSprite::DPSprite(player_t *owner, AActor *caller, int id)
   Flags(0),
   Caller(caller),
   Owner(owner),
+  Sprite(0),
   ID(id),
   processPending(true)
 {
@@ -170,6 +193,14 @@ DPSprite *player_t::FindPSprite(int layer)
 	return pspr;
 }
 
+DEFINE_ACTION_FUNCTION(_PlayerInfo, FindPSprite)	// the underscore is needed to get past the name mangler which removes the first clas name character to match the class representation (needs to be fixed in a later commit)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_INT(id);
+	ACTION_RETURN_OBJECT(self->FindPSprite((PSPLayers)id));
+}
+
+
 //------------------------------------------------------------------------
 //
 //
@@ -182,6 +213,16 @@ void P_SetPsprite(player_t *player, PSPLayers id, FState *state, bool pending)
 	player->GetPSprite(id)->SetState(state, pending);
 }
 
+DEFINE_ACTION_FUNCTION(_PlayerInfo, SetPSprite)	// the underscore is needed to get past the name mangler which removes the first clas name character to match the class representation (needs to be fixed in a later commit)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_INT(id);
+	PARAM_POINTER(state, FState);
+	PARAM_BOOL_DEF(pending);
+	P_SetPsprite(self, (PSPLayers)id, state, pending);
+	return 0;
+}
+
 DPSprite *player_t::GetPSprite(PSPLayers layer)
 {
 	AActor *oldcaller = nullptr;
@@ -191,7 +232,7 @@ DPSprite *player_t::GetPSprite(PSPLayers layer)
 	{
 		if (mo != nullptr)
 		{
-			newcaller = mo->FindInventory(RUNTIME_CLASS(APowerTargeter), true);
+			newcaller = mo->FindInventory(NAME_PowerTargeter, true);
 		}
 	}
 	else if (layer == PSP_STRIFEHANDS)
@@ -237,12 +278,19 @@ DPSprite *player_t::GetPSprite(PSPLayers layer)
 			pspr->y = WEAPONTOP;
 		}
 
-		pspr->oldx = pspr->x;
-		pspr->oldy = pspr->y;
+		pspr->firstTic = true;
 	}
 
 	return pspr;
 }
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, GetPSprite)	// the underscore is needed to get past the name mangler which removes the first clas name character to match the class representation (needs to be fixed in a later commit)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_INT(id);
+	ACTION_RETURN_OBJECT(self->GetPSprite((PSPLayers)id));
+}
+
 
 //---------------------------------------------------------------------------
 //
@@ -263,8 +311,7 @@ void DPSprite::NewTick()
 			while (pspr)
 			{
 				pspr->processPending = true;
-				pspr->oldx = pspr->x;
-				pspr->oldy = pspr->y;
+				pspr->ResetInterpolation();
 
 				pspr = pspr->Next;
 			}
@@ -295,6 +342,27 @@ void DPSprite::SetState(FState *newstate, bool pending)
 			Destroy();
 			return;
 		}
+
+		if (!(newstate->UseFlags & (SUF_OVERLAY|SUF_WEAPON)))	// Weapon and overlay are mostly the same, the main difference is that weapon states restrict the self pointer to class Actor.
+		{
+			auto so = FState::StaticFindStateOwner(newstate);
+			Printf(TEXTCOLOR_RED "State %s.%d not flagged for use in overlays or weapons\n", so->TypeName.GetChars(), int(newstate - so->OwnedStates));
+			State = nullptr;
+			Destroy();
+			return;
+		}
+		else if (!(newstate->UseFlags & SUF_WEAPON))
+		{
+			if (Caller->IsKindOf(RUNTIME_CLASS(AWeapon)))
+			{
+				auto so = FState::StaticFindStateOwner(newstate);
+				Printf(TEXTCOLOR_RED "State %s.%d not flagged for use in weapons\n", so->TypeName.GetChars(), int(newstate - so->OwnedStates));
+				State = nullptr;
+				Destroy();
+				return;
+			}
+		}
+
 		State = newstate;
 
 		if (newstate->sprite != SPR_FIXED)
@@ -323,13 +391,14 @@ void DPSprite::SetState(FState *newstate, bool pending)
 
 		if (ID != PSP_FLASH)
 		{ // It's still possible to set the flash layer's offsets with the action function.
+			// Anything going through here cannot be reliably interpolated so this has to reset the interpolation coordinates if it changes the values.
 			if (newstate->GetMisc1())
 			{ // Set coordinates.
-				x = newstate->GetMisc1();
+				oldx = x = newstate->GetMisc1();
 			}
 			if (newstate->GetMisc2())
 			{
-				y = newstate->GetMisc2();
+				oldy = y = newstate->GetMisc2();
 			}
 		}
 
@@ -337,6 +406,14 @@ void DPSprite::SetState(FState *newstate, bool pending)
 		{
 			FState *nextstate;
 			FStateParamInfo stp = { newstate, STATE_Psprite, ID };
+			if (newstate->ActionFunc != nullptr && newstate->ActionFunc->Unsafe)
+			{
+				// If an unsafe function (i.e. one that accesses user variables) is being detected, print a warning once and remove the bogus function. We may not call it because that would inevitably crash.
+				auto owner = FState::StaticFindStateOwner(newstate);
+				Printf(TEXTCOLOR_RED "Unsafe state call in state %s.%d to %s which accesses user variables. The action function has been removed from this state\n",
+					owner->TypeName.GetChars(), int(newstate - owner->OwnedStates), newstate->ActionFunc->PrintableName.GetChars());
+				newstate->ActionFunc = nullptr;
+			}
 			if (newstate->CallAction(Owner->mo, Caller, &stp, &nextstate))
 			{
 				// It's possible this call resulted in this very layer being replaced.
@@ -362,6 +439,15 @@ void DPSprite::SetState(FState *newstate, bool pending)
 	} while (!Tics); // An initial state of 0 could cycle through.
 
 	return;
+}
+
+DEFINE_ACTION_FUNCTION(DPSprite, SetState)
+{
+	PARAM_SELF_PROLOGUE(DPSprite);
+	PARAM_POINTER(state, FState);
+	PARAM_BOOL_DEF(pending);
+	self->SetState(state, pending);
+	return 0;
 }
 
 //---------------------------------------------------------------------------
@@ -394,7 +480,7 @@ void P_BringUpWeapon (player_t *player)
 	if (weapon != nullptr &&
 		weapon->SisterWeapon &&
 		weapon->SisterWeapon->WeaponFlags & WIF_POWERED_UP &&
-		player->mo->FindInventory (RUNTIME_CLASS(APowerWeaponLevel2), true))
+		player->mo->FindInventory (PClass::FindActor(NAME_PowerWeaponLevel2), true))
 	{
 		weapon = weapon->SisterWeapon;
 	}
@@ -418,6 +504,13 @@ void P_BringUpWeapon (player_t *player)
 		P_SetPsprite(player, PSP_FLASH, nullptr);
 		P_SetPsprite(player, PSP_WEAPON, weapon->GetUpState());
 	}
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, BringUpWeapon)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	P_BringUpWeapon(self);
+	return 0;
 }
 
 //---------------------------------------------------------------------------
@@ -510,12 +603,18 @@ void P_DropWeapon (player_t *player)
 	}
 	// Since the weapon is dropping, stop blocking switching.
 	player->WeaponState &= ~WF_DISABLESWITCH;
-	if (player->ReadyWeapon != nullptr)
+	if ((player->ReadyWeapon != nullptr) && (player->health > 0 || !(player->ReadyWeapon->WeaponFlags & WIF_NODEATHDESELECT)))
 	{
 		P_SetPsprite(player, PSP_WEAPON, player->ReadyWeapon->GetDownState());
 	}
 }
 
+DEFINE_ACTION_FUNCTION(_PlayerInfo, DropWeapon)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	P_DropWeapon(self);
+	return 0;
+}
 //============================================================================
 //
 // P_BobWeapon
@@ -525,6 +624,7 @@ void P_DropWeapon (player_t *player)
 // A_WeaponReady every tic, and it looks bad if they don't bob smoothly.
 //
 // [XA] Added new bob styles and exposed bob properties. Thanks, Ryan Cordell!
+// [SP] Added new user option for bob speed
 //
 //============================================================================
 
@@ -552,8 +652,9 @@ void P_BobWeapon (player_t *player, float *x, float *y, double ticfrac)
 
 	for (int i = 0; i < 2; i++)
 	{
-		// Bob the weapon based on movement speed.
-		FAngle angle = (BobSpeed * 35 / TICRATE*(level.time - 1 + i)) * (360.f / 8192.f);
+		// Bob the weapon based on movement speed. ([SP] And user's bob speed setting)
+		FAngle angle = (BobSpeed * player->userinfo.GetWBobSpeed() * 35 /
+			TICRATE*(level.time - 1 + i)) * (360.f / 8192.f);
 
 		// [RH] Smooth transitions between bobbing and not-bobbing frames.
 		// This also fixes the bug where you can "stick" a weapon off-center by
@@ -581,8 +682,9 @@ void P_BobWeapon (player_t *player, float *x, float *y, double ticfrac)
 
 		if (curbob != 0)
 		{
-			float bobx = float(player->bob * Rangex);
-			float boby = float(player->bob * Rangey);
+			//[SP] Added in decorate player.viewbob checks
+			float bobx = float(player->bob * Rangex * (float)player->mo->ViewBob);
+			float boby = float(player->bob * Rangey * (float)player->mo->ViewBob);
 			switch (bobstyle)
 			{
 			case AWeapon::BobNormal:
@@ -739,10 +841,10 @@ void DoReadyWeapon(AActor *self)
 	DoReadyWeaponToGeneric(self, ~0);
 }
 
-DEFINE_ACTION_FUNCTION_PARAMS(AInventory, A_WeaponReady)
+DEFINE_ACTION_FUNCTION(AStateProvider, A_WeaponReady)
 {
-	PARAM_ACTION_PROLOGUE;
-	PARAM_INT_OPT(flags)	{ flags = 0; }
+	PARAM_ACTION_PROLOGUE(AStateProvider);
+	PARAM_INT_DEF(flags);
 
 													DoReadyWeaponToSwitch(self, !(flags & WRF_NoSwitch));
 	if ((flags & WRF_NoFire) != WRF_NoFire)			DoReadyWeaponToFire(self, !(flags & WRF_NoPrimary), !(flags & WRF_NoSecondary));
@@ -871,10 +973,10 @@ static void P_CheckWeaponButtons (player_t *player)
 //
 //---------------------------------------------------------------------------
 
-DEFINE_ACTION_FUNCTION_PARAMS(AInventory, A_ReFire)
+DEFINE_ACTION_FUNCTION(AStateProvider, A_ReFire)
 {
-	PARAM_ACTION_PROLOGUE;
-	PARAM_STATE_OPT(state)	{ state = NULL; }
+	PARAM_ACTION_PROLOGUE(AStateProvider);
+	PARAM_STATE_ACTION_DEF(state);
 	A_ReFire(self, state);
 	return 0;
 }
@@ -909,40 +1011,6 @@ void A_ReFire(AActor *self, FState *state)
 	}
 }
 
-DEFINE_ACTION_FUNCTION(AInventory, A_ClearReFire)
-{
-	PARAM_ACTION_PROLOGUE;
-	player_t *player = self->player;
-
-	if (NULL != player)
-	{
-		player->refire = 0;
-	}
-	return 0;
-}
-
-//---------------------------------------------------------------------------
-//
-// PROC A_CheckReload
-//
-// Present in Doom, but unused. Also present in Strife, and actually used.
-// This and what I call A_XBowReFire are actually the same thing in Strife,
-// not two separate functions as I have them here.
-//
-//---------------------------------------------------------------------------
-
-DEFINE_ACTION_FUNCTION(AInventory, A_CheckReload)
-{
-	PARAM_ACTION_PROLOGUE;
-
-	if (self->player != NULL)
-	{
-		self->player->ReadyWeapon->CheckAmmo (
-			self->player->ReadyWeapon->bAltFire ? AWeapon::AltFire
-			: AWeapon::PrimaryFire, true);
-	}
-	return 0;
-}
 
 //---------------------------------------------------------------------------
 //
@@ -954,6 +1022,7 @@ enum WOFFlags
 	WOF_KEEPX =		1,
 	WOF_KEEPY =		1 << 1,
 	WOF_ADD =		1 << 2,
+	WOF_INTERPOLATE = 1 << 3,
 };
 
 void A_OverlayOffset(AActor *self, int layer, double wx, double wy, int flags)
@@ -982,6 +1051,7 @@ void A_OverlayOffset(AActor *self, int layer, double wx, double wy, int flags)
 			else
 			{
 				psp->x = wx;
+				if (!(flags & WOF_INTERPOLATE)) psp->oldx = psp->x;
 			}
 		}
 		if (!(flags & WOF_KEEPY))
@@ -993,6 +1063,7 @@ void A_OverlayOffset(AActor *self, int layer, double wx, double wy, int flags)
 			else
 			{
 				psp->y = wy;
+				if (!(flags & WOF_INTERPOLATE)) psp->oldy = psp->y;
 			}
 		}
 	}
@@ -1000,21 +1071,21 @@ void A_OverlayOffset(AActor *self, int layer, double wx, double wy, int flags)
 
 DEFINE_ACTION_FUNCTION(AActor, A_OverlayOffset)
 {
-	PARAM_ACTION_PROLOGUE;
-	PARAM_INT_OPT(layer)	{ layer = PSP_WEAPON; }
-	PARAM_FLOAT_OPT(wx)		{ wx = 0.; }
-	PARAM_FLOAT_OPT(wy)		{ wy = 32.; }
-	PARAM_INT_OPT(flags)	{ flags = 0; }
-	A_OverlayOffset(self, layer, wx, wy, flags);
+	PARAM_ACTION_PROLOGUE(AActor);
+	PARAM_INT_DEF(layer)
+	PARAM_FLOAT_DEF(wx)	
+	PARAM_FLOAT_DEF(wy)	
+	PARAM_INT_DEF(flags)
+	A_OverlayOffset(self, ((layer != 0) ? layer : stateinfo->mPSPIndex), wx, wy, flags);
 	return 0;
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_WeaponOffset)
 {
-	PARAM_ACTION_PROLOGUE;
-	PARAM_FLOAT_OPT(wx) { wx = 0.; }
-	PARAM_FLOAT_OPT(wy) { wy = 32.; }
-	PARAM_INT_OPT(flags) { flags = 0; }
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT_DEF(wx)	
+	PARAM_FLOAT_DEF(wy)	
+	PARAM_INT_DEF(flags)
 	A_OverlayOffset(self, PSP_WEAPON, wx, wy, flags);
 	return 0;
 }
@@ -1027,15 +1098,15 @@ DEFINE_ACTION_FUNCTION(AActor, A_WeaponOffset)
 
 DEFINE_ACTION_FUNCTION(AActor, A_OverlayFlags)
 {
-	PARAM_ACTION_PROLOGUE;
+	PARAM_ACTION_PROLOGUE(AActor);
 	PARAM_INT(layer);
 	PARAM_INT(flags);
 	PARAM_BOOL(set);
 
-	if (self->player == nullptr)
+	if (!ACTION_CALL_FROM_PSPRITE())
 		return 0;
 
-	DPSprite *pspr = self->player->FindPSprite(layer);
+	DPSprite *pspr = self->player->FindPSprite(((layer != 0) ? layer : stateinfo->mPSPIndex));
 
 	if (pspr == nullptr)
 		return 0;
@@ -1050,92 +1121,68 @@ DEFINE_ACTION_FUNCTION(AActor, A_OverlayFlags)
 
 //---------------------------------------------------------------------------
 //
-// PROC A_Lower
-//
+// PROC OverlayX/Y
+// Action function to return the X/Y of an overlay.
 //---------------------------------------------------------------------------
 
-DEFINE_ACTION_FUNCTION(AInventory, A_Lower)
+static double GetOverlayPosition(AActor *self, int layer, bool gety)
 {
-	PARAM_ACTION_PROLOGUE;
+	if (layer)
+	{
+		DPSprite *pspr = self->player->FindPSprite(layer);
 
-	player_t *player = self->player;
-	DPSprite *psp;
+		if (pspr != nullptr)
+		{
+			return gety ? (pspr->y) : (pspr->x);
+		}
+	}
+	return 0.;
+}
 
-	if (nullptr == player)
+DEFINE_ACTION_FUNCTION(AActor, OverlayX)
+{
+	PARAM_ACTION_PROLOGUE(AActor);
+	PARAM_INT_DEF(layer);
+
+	if (ACTION_CALL_FROM_PSPRITE())
 	{
-		return 0;
+		double res = GetOverlayPosition(self, ((layer != 0) ? layer : stateinfo->mPSPIndex), false);
+		ACTION_RETURN_FLOAT(res);	
 	}
-	if (nullptr == player->ReadyWeapon)
+	ACTION_RETURN_FLOAT(0.);
+}
+
+DEFINE_ACTION_FUNCTION(AActor, OverlayY)
+{
+	PARAM_ACTION_PROLOGUE(AActor);
+	PARAM_INT_DEF(layer);
+
+	if (ACTION_CALL_FROM_PSPRITE())
 	{
-		P_BringUpWeapon(player);
-		return 0;
+		double res = GetOverlayPosition(self, ((layer != 0) ? layer : stateinfo->mPSPIndex), true);
+		ACTION_RETURN_FLOAT(res);
 	}
-	psp = player->GetPSprite(PSP_WEAPON);
-	if (player->morphTics || player->cheats & CF_INSTANTWEAPSWITCH)
-	{
-		psp->y = WEAPONBOTTOM;
-	}
-	else
-	{
-		psp->y += LOWERSPEED;
-	}
-	if (psp->y < WEAPONBOTTOM)
-	{ // Not lowered all the way yet
-		return 0;
-	}
-	if (player->playerstate == PST_DEAD)
-	{ // Player is dead, so don't bring up a pending weapon
-		// Player is dead, so keep the weapon off screen
-		P_SetPsprite(player, PSP_FLASH, nullptr);
-		psp->SetState(nullptr);
-		return 0;
-	}
-	// [RH] Clear the flash state. Only needed for Strife.
-	P_SetPsprite(player, PSP_FLASH, nullptr);
-	P_BringUpWeapon (player);
-	return 0;
+	ACTION_RETURN_FLOAT(0.);
 }
 
 //---------------------------------------------------------------------------
 //
-// PROC A_Raise
-//
+// PROC OverlayID
+// Because non-action functions cannot acquire the ID of the overlay...
 //---------------------------------------------------------------------------
 
-DEFINE_ACTION_FUNCTION(AInventory, A_Raise)
+DEFINE_ACTION_FUNCTION(AActor, OverlayID)
 {
-	PARAM_ACTION_PROLOGUE;
+	PARAM_ACTION_PROLOGUE(AActor);
 
-	if (self == nullptr)
+	if (ACTION_CALL_FROM_PSPRITE())
 	{
-		return 0;
+		ACTION_RETURN_INT(stateinfo->mPSPIndex);
 	}
-	player_t *player = self->player;
-	DPSprite *psp;
-
-	if (nullptr == player)
-	{
-		return 0;
-	}
-	if (player->PendingWeapon != WP_NOCHANGE)
-	{
-		P_DropWeapon(player);
-		return 0;
-	}
-	if (player->ReadyWeapon == nullptr)
-	{
-		return 0;
-	}
-	psp = player->GetPSprite(PSP_WEAPON);
-	psp->y -= RAISESPEED;
-	if (psp->y > WEAPONTOP)
-	{ // Not raised all the way yet
-		return 0;
-	}
-	psp->y = WEAPONTOP;
-	psp->SetState(player->ReadyWeapon->GetReadyState());
-	return 0;
+	ACTION_RETURN_INT(0);
 }
+
+
 
 //---------------------------------------------------------------------------
 //
@@ -1143,12 +1190,12 @@ DEFINE_ACTION_FUNCTION(AInventory, A_Raise)
 //
 //---------------------------------------------------------------------------
 
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Overlay)
+DEFINE_ACTION_FUNCTION(AActor, A_Overlay)
 {
-	PARAM_ACTION_PROLOGUE;
+	PARAM_ACTION_PROLOGUE(AActor);
 	PARAM_INT		(layer);
-	PARAM_STATE_OPT	(state) { state = nullptr; }
-	PARAM_BOOL_OPT	(dontoverride)	{ dontoverride = false; }
+	PARAM_STATE_ACTION_DEF(state);
+	PARAM_BOOL_DEF(dontoverride);
 
 	player_t *player = self->player;
 
@@ -1163,12 +1210,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Overlay)
 	ACTION_RETURN_BOOL(true);
 }
 
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ClearOverlays)
+DEFINE_ACTION_FUNCTION(AActor, A_ClearOverlays)
 {
-	PARAM_ACTION_PROLOGUE;
-	PARAM_INT_OPT(start) { start = 0; }
-	PARAM_INT_OPT(stop) { stop = 0; }
-	PARAM_BOOL_OPT(safety) { safety = true; }
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT_DEF(start);
+	PARAM_INT_DEF(stop);
+	PARAM_BOOL_DEF(safety)
 
 	if (self->player == nullptr)
 		ACTION_RETURN_INT(0);
@@ -1207,47 +1254,6 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ClearOverlays)
 }
 
 //
-// A_GunFlash
-//
-enum GF_Flags
-{
-	GFF_NOEXTCHANGE = 1,
-};
-
-DEFINE_ACTION_FUNCTION_PARAMS(AInventory, A_GunFlash)
-{
-	PARAM_ACTION_PROLOGUE;
-	PARAM_STATE_OPT(flash)	{ flash = nullptr; }
-	PARAM_INT_OPT  (flags)	{ flags = 0; }
-
-	player_t *player = self->player;
-
-	if (nullptr == player)
-	{
-		return 0;
-	}
-	if (!(flags & GFF_NOEXTCHANGE))
-	{
-		player->mo->PlayAttacking2 ();
-	}
-	if (flash == nullptr)
-	{
-		if (player->ReadyWeapon->bAltFire)
-		{
-			flash = player->ReadyWeapon->FindState(NAME_AltFlash);
-		}
-		if (flash == nullptr)
-		{
-			flash = player->ReadyWeapon->FindState(NAME_Flash);
-		}
-	}
-	P_SetPsprite(player, PSP_FLASH, flash);
-	return 0;
-}
-
-
-
-//
 // WEAPON ATTACKS
 //
 
@@ -1284,69 +1290,12 @@ DAngle P_BulletSlope (AActor *mo, FTranslatedLineTarget *pLineTarget, int aimfla
 	return pitch;
 }
 
-
-//
-// P_GunShot
-//
-void P_GunShot (AActor *mo, bool accurate, PClassActor *pufftype, DAngle pitch)
+DEFINE_ACTION_FUNCTION(AActor, BulletSlope)
 {
-	DAngle 	angle;
-	int 		damage;
-		
-	damage = 5*(pr_gunshot()%3+1);
-	angle = mo->Angles.Yaw;
-
-	if (!accurate)
-	{
-		angle += pr_gunshot.Random2 () * (5.625 / 256);
-	}
-
-	P_LineAttack (mo, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, pufftype);
-}
-
-DEFINE_ACTION_FUNCTION(AInventory, A_Light0)
-{
-	PARAM_ACTION_PROLOGUE;
-
-	if (self->player != NULL)
-	{
-		self->player->extralight = 0;
-	}
-	return 0;
-}
-
-DEFINE_ACTION_FUNCTION(AInventory, A_Light1)
-{
-	PARAM_ACTION_PROLOGUE;
-
-	if (self->player != NULL)
-	{
-		self->player->extralight = 1;
-	}
-	return 0;
-}
-
-DEFINE_ACTION_FUNCTION(AInventory, A_Light2)
-{
-	PARAM_ACTION_PROLOGUE;
-
-	if (self->player != NULL)
-	{
-		self->player->extralight = 2;
-	}
-	return 0;
-}
-
-DEFINE_ACTION_FUNCTION_PARAMS(AInventory, A_Light)
-{
-	PARAM_ACTION_PROLOGUE;
-	PARAM_INT(light);
-
-	if (self->player != NULL)
-	{
-		self->player->extralight = clamp<int>(light, -20, 20);
-	}
-	return 0;
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_POINTER_DEF(t, FTranslatedLineTarget);
+	PARAM_INT_DEF(aimflags);
+	ACTION_RETURN_FLOAT(P_BulletSlope(self, t, aimflags).Degrees);
 }
 
 //------------------------------------------------------------------------
@@ -1396,20 +1345,23 @@ void player_t::TickPSprites()
 		pspr = pspr->Next;
 	}
 
-	if (ReadyWeapon == nullptr && (health > 0 || mo->DamageType != NAME_Fire))
+	if ((health > 0) || (ReadyWeapon != nullptr && !(ReadyWeapon->WeaponFlags & WIF_NODEATHINPUT)))
 	{
-		if (PendingWeapon != WP_NOCHANGE)
-			P_BringUpWeapon(this);
-	}
-	else
-	{
-		P_CheckWeaponSwitch(this);
-		if (WeaponState & (WF_WEAPONREADY | WF_WEAPONREADYALT))
+		if (ReadyWeapon == nullptr)
 		{
-			P_CheckWeaponFire(this);
+			if (PendingWeapon != WP_NOCHANGE)
+				P_BringUpWeapon(this);
 		}
-		// Check custom buttons
-		P_CheckWeaponButtons(this);
+		else
+		{
+			P_CheckWeaponSwitch(this);
+			if (WeaponState & (WF_WEAPONREADY | WF_WEAPONREADYALT))
+			{
+				P_CheckWeaponFire(this);
+			}
+			// Check custom buttons
+			P_CheckWeaponButtons(this);
+		}
 	}
 }
 
@@ -1444,13 +1396,23 @@ void DPSprite::Tick()
 //
 //------------------------------------------------------------------------
 
-void DPSprite::Serialize(FArchive &arc)
+void DPSprite::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
 
-	arc << Next << Caller << Owner << Flags
-		<< State << Tics << Sprite << Frame
-		<< ID << x << y << oldx << oldy;
+	arc("next", Next)
+		("caller", Caller)
+		("owner", Owner)
+		("flags", Flags)
+		("state", State)
+		("tics", Tics)
+		.Sprite("sprite", Sprite, nullptr)
+		("frame", Frame)
+		("id", ID)
+		("x", x)
+		("y", y)
+		("oldx", oldx)
+		("oldy", oldy);
 }
 
 //------------------------------------------------------------------------
@@ -1472,13 +1434,72 @@ void player_t::DestroyPSprites()
 	}
 }
 
+//------------------------------------------------------------------------------------
+//
+// Setting a random flash like some of Doom's weapons can easily crash when the
+// definition is overridden incorrectly so let's check that the state actually exists.
+// Be aware though that this will not catch all DEHACKED related problems. But it will
+// find all DECORATE related ones.
+//
+//------------------------------------------------------------------------------------
+
+void P_SetSafeFlash(AWeapon *weapon, player_t *player, FState *flashstate, int index)
+{
+	if (flashstate != nullptr)
+	{
+		PClassActor *cls = weapon->GetClass();
+		while (cls != RUNTIME_CLASS(AWeapon))
+		{
+			if (flashstate >= cls->OwnedStates && flashstate < cls->OwnedStates + cls->NumOwnedStates)
+			{
+				// The flash state belongs to this class.
+				// Now let's check if the actually wanted state does also
+				if (flashstate + index < cls->OwnedStates + cls->NumOwnedStates)
+				{
+					// we're ok so set the state
+					P_SetPsprite(player, PSP_FLASH, flashstate + index, true);
+					return;
+				}
+				else
+				{
+					// oh, no! The state is beyond the end of the state table so use the original flash state.
+					P_SetPsprite(player, PSP_FLASH, flashstate, true);
+					return;
+				}
+			}
+			// try again with parent class
+			cls = static_cast<PClassActor *>(cls->ParentClass);
+		}
+		// if we get here the state doesn't seem to belong to any class in the inheritance chain
+		// This can happen with Dehacked if the flash states are remapped. 
+		// The only way to check this would be to go through all Dehacked modifiable actors, convert
+		// their states into a single flat array and find the correct one.
+		// Rather than that, just check to make sure it belongs to something.
+		if (FState::StaticFindStateOwner(flashstate + index) == NULL)
+		{ // Invalid state. With no index offset, it should at least be valid.
+			index = 0;
+		}
+	}
+	P_SetPsprite(player, PSP_FLASH, flashstate + index, true);
+}
+
+DEFINE_ACTION_FUNCTION(_PlayerInfo, SetSafeFlash)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_OBJECT_NOT_NULL(weapon, AWeapon);
+	PARAM_POINTER(state, FState);
+	PARAM_INT(index);
+	P_SetSafeFlash(weapon, self, state, index);
+	return 0;
+}
+
 //------------------------------------------------------------------------
 //
 //
 //
 //------------------------------------------------------------------------
 
-void DPSprite::Destroy()
+void DPSprite::OnDestroy()
 {
 	// Do not crash if this gets called on partially initialized objects.
 	if (Owner != nullptr && Owner->psprites != nullptr)
@@ -1501,7 +1522,7 @@ void DPSprite::Destroy()
 			GC::WriteBarrier(Next);
 		}
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //------------------------------------------------------------------------

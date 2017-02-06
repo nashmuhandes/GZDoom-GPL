@@ -30,6 +30,7 @@ struct FStrifeDialogueNode
 	FSoundID SpeakerVoice;
 	FTextureID Backdrop;
 	char *Dialogue;
+	char *Goodbye = nullptr; // must init to null for binary scripts to work as intended
 
 	FStrifeDialogueReply *Children;
 };
@@ -44,6 +45,8 @@ struct FStrifeDialogueReply
 	int ActionSpecial;
 	int Args[5];
 	TArray<FStrifeDialogueItemCheck> ItemCheck;
+	TArray<FStrifeDialogueItemCheck> ItemCheckRequire;
+	TArray<FStrifeDialogueItemCheck> ItemCheckExclude;
 	char *Reply;
 	char *QuickYes;
 	int NextNode;	// index into StrifeDialogues

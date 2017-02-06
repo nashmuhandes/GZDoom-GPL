@@ -51,9 +51,9 @@
 #include "colormatcher.h"
 #include "v_palette.h"
 #include "d_player.h"
-#include "farchive.h"
 
-
+CVAR( Float, blood_fade_scalar, 1.0f, CVAR_ARCHIVE )	// [SP] Pulled from Skulltag - changed default from 0.5 to 1.0
+CVAR( Float, pickup_fade_scalar, 1.0f, CVAR_ARCHIVE )	// [SP] Uses same logic as blood_fade_scalar except for pickups
 
 // [RH] Amount of red flash for up to 114 damage points. Calculated by hand
 //		using a logarithmic scale and my trusty HP48G.
@@ -104,7 +104,7 @@ void V_AddPlayerBlend (player_t *CPlayer, float blend[4], float maxinvalpha, int
 	// [RH] All powerups can affect the screen blending now
 	for (AInventory *item = CPlayer->mo->Inventory; item != NULL; item = item->Inventory)
 	{
-		PalEntry color = item->GetBlend ();
+		PalEntry color = item->CallGetBlend ();
 		if (color.a != 0)
 		{
 			V_AddBlend (color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f, blend);
@@ -114,6 +114,9 @@ void V_AddPlayerBlend (player_t *CPlayer, float blend[4], float maxinvalpha, int
 	if (CPlayer->bonuscount)
 	{
 		cnt = CPlayer->bonuscount << 3;
+
+		// [SP] Allow player to tone down intensity of pickup flash.
+		cnt = (int)( cnt * pickup_fade_scalar );
 		
 		V_AddBlend (RPART(gameinfo.pickupcolor)/255.f, GPART(gameinfo.pickupcolor)/255.f, 
 					BPART(gameinfo.pickupcolor)/255.f, cnt > 128 ? 0.5f : cnt / 255.f, blend);
@@ -125,7 +128,10 @@ void V_AddPlayerBlend (player_t *CPlayer, float blend[4], float maxinvalpha, int
 	if (painFlash.a != 0)
 	{
 		cnt = DamageToAlpha[MIN (113, CPlayer->damagecount * painFlash.a / 255)];
-			
+
+		// [BC] Allow users to tone down the intensity of the blood on the screen.
+		cnt = (int)( cnt * blood_fade_scalar );
+
 		if (cnt)
 		{
 			if (cnt > maxpainblend)

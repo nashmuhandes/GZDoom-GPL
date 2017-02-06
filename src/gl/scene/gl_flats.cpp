@@ -1,40 +1,27 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2000-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_flat.cpp
 ** Flat rendering
-**
-**---------------------------------------------------------------------------
-** Copyright 2000-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -47,6 +34,8 @@
 #include "doomstat.h"
 #include "d_player.h"
 #include "portal.h"
+#include "templates.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_cvars.h"
@@ -64,6 +53,7 @@
 #include "gl/utility/gl_clock.h"
 #include "gl/utility/gl_convert.h"
 #include "gl/utility/gl_templates.h"
+#include "gl/renderer/gl_quaddrawer.h"
 
 #ifdef _DEBUG
 CVAR(Int, gl_breaksec, -1, 0)
@@ -120,7 +110,7 @@ void GLFlat::SetupSubsectorLights(int pass, subsector_t * sub, int *dli)
 {
 	Plane p;
 
-	if (renderstyle == STYLE_Add) return;	// no lights on additively blended surfaces.
+	if (renderstyle == STYLE_Add && !glset.lightadditivesurfaces) return;	// no lights on additively blended surfaces.
 
 	if (dli != NULL && *dli != -1)
 	{
@@ -152,7 +142,7 @@ void GLFlat::SetupSubsectorLights(int pass, subsector_t * sub, int *dli)
 		}
 
 		p.Set(plane.plane);
-		gl_GetLight(sub->sector->PortalGroup, p, light, false, false, lightdata);
+		gl_GetLight(sub->sector->PortalGroup, p, light, false, lightdata);
 		node = node->nextLight;
 	}
 
@@ -175,18 +165,43 @@ void GLFlat::SetupSubsectorLights(int pass, subsector_t * sub, int *dli)
 
 void GLFlat::DrawSubsector(subsector_t * sub)
 {
-	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-	for (unsigned int k = 0; k < sub->numlines; k++)
+	if (gl.buffermethod != BM_DEFERRED)
 	{
-		vertex_t *vt = sub->firstline[k].v1;
-		ptr->x = vt->fX();
-		ptr->z = plane.plane.ZatPoint(vt) + dz;
-		ptr->y = vt->fY();
-		ptr->u = vt->fX() / 64.f;
-		ptr->v = -vt->fY() / 64.f;
-		ptr++;
+		FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
+		for (unsigned int k = 0; k < sub->numlines; k++)
+		{
+			vertex_t *vt = sub->firstline[k].v1;
+			ptr->x = vt->fX();
+			ptr->z = plane.plane.ZatPoint(vt) + dz;
+			ptr->y = vt->fY();
+			ptr->u = vt->fX() / 64.f;
+			ptr->v = -vt->fY() / 64.f;
+			ptr++;
+		}
+		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_FAN);
 	}
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_FAN);
+	else
+	{
+		// if we cannot access the buffer, use the quad drawer as fallback by splitting the subsector into quads.
+		// Trying to get this into the vertex buffer in the processing pass is too costly and this is only used for render hacks.
+		FQuadDrawer qd;
+		unsigned int vi[4];
+
+		vi[0] = 0;
+		for (unsigned int i = 0; i < sub->numlines - 2; i += 2)
+		{
+			for (unsigned int j = 1; j < 4; j++)
+			{
+				vi[j] = MIN(i + j, sub->numlines - 1);
+			}
+			for (unsigned int x = 0; x < 4; x++)
+			{
+				vertex_t *vt = sub->firstline[vi[x]].v1;
+				qd.Set(x, vt->fX(), plane.plane.ZatPoint(vt) + dz, vt->fY(), vt->fX() / 64.f, -vt->fY() / 64.f);
+			}
+			qd.Render(GL_TRIANGLE_FAN);
+		}
+	}
 
 	flatvertices += sub->numlines;
 	flatprimitives++;
@@ -203,35 +218,27 @@ void GLFlat::ProcessLights(bool istrans)
 {
 	dynlightindex = GLRenderer->mLights->GetIndexPtr();
 
-	if (sub)
+	// Draw the subsectors belonging to this sector
+	for (int i=0; i<sector->subsectorcount; i++)
 	{
-		// This represents a single subsector
-		SetupSubsectorLights(GLPASS_LIGHTSONLY, sub);
-	}
-	else
-	{
-		// Draw the subsectors belonging to this sector
-		for (int i=0; i<sector->subsectorcount; i++)
+		subsector_t * sub = sector->subsectors[i];
+		if (gl_drawinfo->ss_renderflags[sub-subsectors]&renderflags || istrans)
 		{
-			subsector_t * sub = sector->subsectors[i];
-			if (gl_drawinfo->ss_renderflags[sub-subsectors]&renderflags || istrans)
-			{
-				SetupSubsectorLights(GLPASS_LIGHTSONLY, sub);
-			}
+			SetupSubsectorLights(GLPASS_LIGHTSONLY, sub);
 		}
+	}
 
-		// Draw the subsectors assigned to it due to missing textures
-		if (!(renderflags&SSRF_RENDER3DPLANES))
+	// Draw the subsectors assigned to it due to missing textures
+	if (!(renderflags&SSRF_RENDER3DPLANES))
+	{
+		gl_subsectorrendernode * node = (renderflags&SSRF_RENDERFLOOR)?
+			gl_drawinfo->GetOtherFloorPlanes(sector->sectornum) :
+			gl_drawinfo->GetOtherCeilingPlanes(sector->sectornum);
+
+		while (node)
 		{
-			gl_subsectorrendernode * node = (renderflags&SSRF_RENDERFLOOR)?
-				gl_drawinfo->GetOtherFloorPlanes(sector->sectornum) :
-				gl_drawinfo->GetOtherCeilingPlanes(sector->sectornum);
-
-			while (node)
-			{
-				SetupSubsectorLights(GLPASS_LIGHTSONLY, node->sub);
-				node = node->next;
-			}
+			SetupSubsectorLights(GLPASS_LIGHTSONLY, node->sub);
+			node = node->next;
 		}
 	}
 }
@@ -248,60 +255,52 @@ void GLFlat::DrawSubsectors(int pass, bool processlights, bool istrans)
 	int dli = dynlightindex;
 
 	gl_RenderState.Apply();
-	if (sub)
+	if (vboindex >= 0)
 	{
-		// This represents a single subsector
-		if (processlights) SetupSubsectorLights(GLPASS_ALL, sub, &dli);
-		DrawSubsector(sub);
-	}
-	else 
-	{
-		if (vboindex >= 0)
+		int index = vboindex;
+		for (int i=0; i<sector->subsectorcount; i++)
 		{
-			int index = vboindex;
-			for (int i=0; i<sector->subsectorcount; i++)
-			{
-				subsector_t * sub = sector->subsectors[i];
+			subsector_t * sub = sector->subsectors[i];
 				
-				if (gl_drawinfo->ss_renderflags[sub-subsectors]&renderflags || istrans)
-				{
-					if (processlights) SetupSubsectorLights(GLPASS_ALL, sub, &dli);
-					drawcalls.Clock();
-					glDrawArrays(GL_TRIANGLE_FAN, index, sub->numlines);
-					drawcalls.Unclock();
-					flatvertices += sub->numlines;
-					flatprimitives++;
-				}
-				index += sub->numlines;
+			if (gl_drawinfo->ss_renderflags[sub-subsectors]&renderflags || istrans)
+			{
+				if (processlights) SetupSubsectorLights(GLPASS_ALL, sub, &dli);
+				drawcalls.Clock();
+				glDrawArrays(GL_TRIANGLE_FAN, index, sub->numlines);
+				drawcalls.Unclock();
+				flatvertices += sub->numlines;
+				flatprimitives++;
+			}
+			index += sub->numlines;
+		}
+	}
+	else
+	{
+		// Draw the subsectors belonging to this sector
+		// (can this case even happen?)
+		for (int i=0; i<sector->subsectorcount; i++)
+		{
+			subsector_t * sub = sector->subsectors[i];
+			if (gl_drawinfo->ss_renderflags[sub-subsectors]&renderflags || istrans)
+			{
+				if (processlights) SetupSubsectorLights(GLPASS_ALL, sub, &dli);
+				DrawSubsector(sub);
 			}
 		}
-		else
-		{
-			// Draw the subsectors belonging to this sector
-			for (int i=0; i<sector->subsectorcount; i++)
-			{
-				subsector_t * sub = sector->subsectors[i];
-				if (gl_drawinfo->ss_renderflags[sub-subsectors]&renderflags || istrans)
-				{
-					if (processlights) SetupSubsectorLights(GLPASS_ALL, sub, &dli);
-					DrawSubsector(sub);
-				}
-			}
-		}
+	}
 
-		// Draw the subsectors assigned to it due to missing textures
-		if (!(renderflags&SSRF_RENDER3DPLANES))
-		{
-			gl_subsectorrendernode * node = (renderflags&SSRF_RENDERFLOOR)?
-				gl_drawinfo->GetOtherFloorPlanes(sector->sectornum) :
-				gl_drawinfo->GetOtherCeilingPlanes(sector->sectornum);
+	// Draw the subsectors assigned to it due to missing textures
+	if (!(renderflags&SSRF_RENDER3DPLANES))
+	{
+		gl_subsectorrendernode * node = (renderflags&SSRF_RENDERFLOOR)?
+			gl_drawinfo->GetOtherFloorPlanes(sector->sectornum) :
+			gl_drawinfo->GetOtherCeilingPlanes(sector->sectornum);
 
-			while (node)
-			{
-				if (processlights) SetupSubsectorLights(GLPASS_ALL, node->sub, &dli);
-				DrawSubsector(node->sub);
-				node = node->next;
-			}
+		while (node)
+		{
+			if (processlights) SetupSubsectorLights(GLPASS_ALL, node->sub, &dli);
+			DrawSubsector(node->sub);
+			node = node->next;
 		}
 	}
 }
@@ -318,14 +317,12 @@ void GLFlat::DrawSubsectors(int pass, bool processlights, bool istrans)
 
 void GLFlat::DrawSkyboxSector(int pass, bool processlights)
 {
-	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
 
 	float minx = FLT_MAX, miny = FLT_MAX;
 	float maxx = -FLT_MAX, maxy = -FLT_MAX;
 
-	for (int i = 0; i < sector->linecount; i++)
+	for (auto ln : sector->Lines)
 	{
-		line_t *ln = sector->lines[i];
 		float x = ln->v1->fX();
 		float y = ln->v1->fY();
 		if (x < minx) minx = x;
@@ -345,36 +342,13 @@ void GLFlat::DrawSkyboxSector(int pass, bool processlights)
 	static float vvals[] = { 1, 0, 0, 1 };
 	int rot = -xs_FloorToInt(plane.Angle / 90.f);
 
+	FQuadDrawer qd;
 
-	ptr->x = minx;
-	ptr->z = z;
-	ptr->y = miny;
-	ptr->u = uvals[rot & 3];
-	ptr->v = vvals[rot & 3];
-	ptr++;
-
-	ptr->x = minx;
-	ptr->z = z;
-	ptr->y = maxy;
-	ptr->u = uvals[(rot + 1) & 3];
-	ptr->v = vvals[(rot + 1) & 3];
-	ptr++;
-
-	ptr->x = maxx;
-	ptr->z = z;
-	ptr->y = maxy;
-	ptr->u = uvals[(rot + 2) & 3];
-	ptr->v = vvals[(rot + 2) & 3];
-	ptr++;
-
-	ptr->x = maxx;
-	ptr->z = z;
-	ptr->y = miny;
-	ptr->u = uvals[(rot + 3) & 3];
-	ptr->v = vvals[(rot + 3) & 3];
-	ptr++;
-
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_FAN);
+	qd.Set(0, minx, z, miny, uvals[rot & 3], vvals[rot & 3]);
+	qd.Set(1, minx, z, maxy, uvals[(rot + 1) & 3], vvals[(rot + 1) & 3]);
+	qd.Set(2, maxx, z, maxy, uvals[(rot + 2) & 3], vvals[(rot + 2) & 3]);
+	qd.Set(3, maxx, z, miny, uvals[(rot + 3) & 3], vvals[(rot + 3) & 3]);
+	qd.Render(GL_TRIANGLE_FAN);
 
 	flatvertices += 4;
 	flatprimitives++;
@@ -397,6 +371,7 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 	}
 #endif
 
+	gl_RenderState.SetNormal(plane.plane.Normal().X, plane.plane.Normal().Z, plane.plane.Normal().Y);
 
 	switch (pass)
 	{
@@ -404,6 +379,8 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 	case GLPASS_ALL:			// Same, but also creates the dynlight data.
 		gl_SetColor(lightlevel, rel, Colormap,1.0f);
 		gl_SetFog(lightlevel, rel, &Colormap, false);
+		if (!gltexture->tex->isFullbright())
+			gl_RenderState.SetObjectColor(FlatColor | 0xff000000);
 		if (sector->special != GLSector_Skybox)
 		{
 			gl_RenderState.SetMaterial(gltexture, CLAMP_NONE, 0, -1, false);
@@ -416,6 +393,7 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 			gl_RenderState.SetMaterial(gltexture, CLAMP_XY, 0, -1, false);
 			DrawSkyboxSector(pass, (pass == GLPASS_ALL || dynlightindex > -1));
 		}
+		gl_RenderState.SetObjectColor(0xffffffff);
 		break;
 
 	case GLPASS_LIGHTSONLY:
@@ -429,25 +407,31 @@ void GLFlat::Draw(int pass, bool trans)	// trans only has meaning for GLPASS_LIG
 		if (renderstyle==STYLE_Add) gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE);
 		gl_SetColor(lightlevel, rel, Colormap, alpha);
 		gl_SetFog(lightlevel, rel, &Colormap, false);
-		gl_RenderState.AlphaFunc(GL_GEQUAL, gl_mask_threshold);
-		if (!gltexture)	
+		if (!gltexture || !gltexture->tex->isFullbright())
+			gl_RenderState.SetObjectColor(FlatColor | 0xff000000);
+		if (!gltexture)
 		{
+			gl_RenderState.AlphaFunc(GL_GEQUAL, 0.f);
 			gl_RenderState.EnableTexture(false);
 			DrawSubsectors(pass, false, true);
 			gl_RenderState.EnableTexture(true);
 		}
 		else 
 		{
+			if (!gltexture->GetTransparent()) gl_RenderState.AlphaFunc(GL_GEQUAL, gl_mask_threshold);
+			else gl_RenderState.AlphaFunc(GL_GEQUAL, 0.f);
 			gl_RenderState.SetMaterial(gltexture, CLAMP_NONE, 0, -1, false);
 			gl_SetPlaneTextureRotation(&plane, gltexture);
-			DrawSubsectors(pass, gl.lightmethod != LM_SOFTWARE, true);
+			DrawSubsectors(pass, !gl.legacyMode, true);
 			gl_RenderState.EnableTextureMatrix(false);
 		}
 		if (renderstyle==STYLE_Add) gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		gl_RenderState.SetObjectColor(0xffffffff);
 		break;
 
 	case GLPASS_LIGHTTEX:
 	case GLPASS_LIGHTTEX_ADDITIVE:
+	case GLPASS_LIGHTTEX_FOGGY:
 		DrawLightsCompat(pass);
 		break;
 
@@ -477,7 +461,7 @@ inline void GLFlat::PutFlat(bool fog)
 	{
 		Colormap.Clear();
 	}
-	if (gl.lightmethod == LM_SOFTWARE)
+	if (gl.legacyMode)
 	{
 		if (PutFlatCompat(fog)) return;
 	}
@@ -485,6 +469,21 @@ inline void GLFlat::PutFlat(bool fog)
 	{
 		// translucent 3D floors go into the regular translucent list, translucent portals go into the translucent border list.
 		list = (renderflags&SSRF_RENDER3DPLANES) ? GLDL_TRANSLUCENT : GLDL_TRANSLUCENTBORDER;
+	}
+	else if (gltexture->GetTransparent())
+	{
+		if (stack)
+		{
+			list = GLDL_TRANSLUCENTBORDER;
+		}
+		else if ((renderflags&SSRF_RENDER3DPLANES) && !plane.plane.isSlope())
+		{
+			list = GLDL_TRANSLUCENT;
+		} 
+		else 
+		{
+			list = GLDL_PLAINFLATS;
+		}
 	}
 	else
 	{
@@ -507,6 +506,11 @@ inline void GLFlat::PutFlat(bool fog)
 void GLFlat::Process(sector_t * model, int whichplane, bool fog)
 {
 	plane.GetFromSector(model, whichplane);
+	if (whichplane != int(ceiling))
+	{
+		// Flip the normal if the source plane has a different orientation than what we are about to render.
+		plane.plane.FlipVert();
+	}
 
 	if (!fog)
 	{
@@ -548,8 +552,16 @@ void GLFlat::SetFrom3DFloor(F3DFloor *rover, bool top, bool underside)
 	lightlist_t *light = P_GetPlaneLight(sector, plane.plane, underside);
 	lightlevel = gl_ClampLight(*light->p_lightlevel);
 	
-	if (rover->flags & FF_FOG) Colormap.LightColor = (light->extra_colormap)->Fade;
-	else Colormap.CopyFrom3DLight(light);
+	if (rover->flags & FF_FOG)
+	{
+		Colormap.LightColor = (light->extra_colormap)->Fade;
+		FlatColor = 0xffffffff;
+	}
+	else
+	{
+		Colormap.CopyFrom3DLight(light);
+		FlatColor = *plane.flatcolor;
+	}
 
 
 	alpha = rover->alpha/255.0f;
@@ -585,9 +597,8 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 #endif
 
 	// Get the real sector for this one.
-	sector = &sectors[frontsector->sectornum];
+	sector = &level.sectors[frontsector->sectornum];
 	extsector_t::xfloor &x = sector->e->XFloor;
-	this->sub = NULL;
 	dynlightindex = -1;
 
 	byte &srf = gl_drawinfo->sectorrenderflags[sector->sectornum];
@@ -607,6 +618,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 
 		lightlevel = gl_ClampLight(frontsector->GetFloorLight());
 		Colormap = frontsector->ColorMap;
+		FlatColor = frontsector->SpecialColors[sector_t::floor];
 		port = frontsector->ValidatePortal(sector_t::floor);
 		if ((stack = (port != NULL)))
 		{
@@ -647,7 +659,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 				Colormap.CopyFrom3DLight(light);
 			}
 			renderstyle = STYLE_Translucent;
-			Process(frontsector, false, false);
+			Process(frontsector, sector_t::floor, false);
 		}
 	}
 
@@ -666,6 +678,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 
 		lightlevel = gl_ClampLight(frontsector->GetCeilingLight());
 		Colormap = frontsector->ColorMap;
+		FlatColor = frontsector->SpecialColors[sector_t::ceiling];
 		port = frontsector->ValidatePortal(sector_t::ceiling);
 		if ((stack = (port != NULL)))
 		{
@@ -706,7 +719,7 @@ void GLFlat::ProcessSector(sector_t * frontsector)
 				Colormap.CopyFrom3DLight(light);
 			}
 			renderstyle = STYLE_Translucent;
-			Process(frontsector, true, false);
+			Process(frontsector, sector_t::ceiling, false);
 		}
 	}
 

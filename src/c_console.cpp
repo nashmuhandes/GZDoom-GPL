@@ -65,7 +65,9 @@
 #include "g_level.h"
 #include "d_event.h"
 #include "d_player.h"
+#include "gstrings.h"
 #include "c_consolebuffer.h"
+#include "g_levellocals.h"
 
 #include "gi.h"
 
@@ -100,7 +102,7 @@ extern bool		advancedemo;
 extern FBaseCVar *CVars;
 extern FConsoleCommand *Commands[FConsoleCommand::HASH_SIZE];
 
-int			ConCols, PhysRows;
+unsigned	ConCols;
 int			ConWidth;
 bool		vidactive = false;
 bool		cursoron = false;
@@ -112,12 +114,13 @@ constate_e	ConsoleState = c_up;
 static int TopLine, InsertLine;
 
 static void ClearConsole ();
-static void C_PasteText(FString clip, BYTE *buffer, int len);
 
 struct GameAtExit
 {
+	GameAtExit(FString str) : Command(str) {}
+
 	GameAtExit *Next;
-	char Command[1];
+	FString Command;
 };
 
 static GameAtExit *ExitCmdList;
@@ -139,30 +142,43 @@ static bool ConsoleDrawing;
 static char *work = NULL;
 static int worklen = 0;
 
-
-struct History
-{
-	struct History *Older;
-	struct History *Newer;
-	char String[1];
-};
-
-// CmdLine[0]  = # of chars on command line
-// CmdLine[1]  = cursor position
-// CmdLine[2+] = command line (max 255 chars + NULL)
-// CmdLine[259]= offset from beginning of cmdline to display
-static BYTE CmdLine[260];
-
-#define MAXHISTSIZE 50
-static struct History *HistHead = NULL, *HistTail = NULL, *HistPos = NULL;
-static int HistSize;
-
-CVAR (Float, con_notifytime, 3.f, CVAR_ARCHIVE)
-CVAR (Bool, con_centernotify, false, CVAR_ARCHIVE)
-CUSTOM_CVAR (Int, con_scaletext, 0, CVAR_ARCHIVE)		// Scale notify text at high resolutions?
+CVAR(Float, con_notifytime, 3.f, CVAR_ARCHIVE)
+CVAR(Bool, con_centernotify, false, CVAR_ARCHIVE)
+CUSTOM_CVAR(Int, con_scaletext, 1, CVAR_ARCHIVE)		// Scale notify text at high resolutions?
 {
 	if (self < 0) self = 0;
-	if (self > 2) self = 2;
+	if (self > 3) self = 3;
+}
+
+CUSTOM_CVAR(Int, con_scale, 0, CVAR_ARCHIVE)
+{
+	if (self < 0) self = 0;
+}
+
+int active_con_scale()
+{
+	int scale = con_scale;
+	if (scale <= 0)
+	{
+		scale = CleanXfac - 1;
+		if (scale <= 0)
+		{
+			scale = 1;
+		}
+	}
+	return scale;
+}
+
+int active_con_scaletext()
+{
+	switch (con_scaletext)
+	{
+	default:
+	case 0: return 1;
+	case 1: return uiscale;
+	case 2: return 2;
+	case 3: return 4;
+	}
 }
 
 CUSTOM_CVAR(Float, con_alpha, 0.75f, CVAR_ARCHIVE)
@@ -172,27 +188,235 @@ CUSTOM_CVAR(Float, con_alpha, 0.75f, CVAR_ARCHIVE)
 }
 
 // Command to run when Ctrl-D is pressed at start of line
-CVAR (String, con_ctrl_d, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR(String, con_ctrl_d, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+
+struct History
+{
+	struct History *Older;
+	struct History *Newer;
+	FString String;
+};
+
+struct FCommandBuffer
+{
+	FString Text;	// The actual command line text
+	unsigned CursorPos;
+	unsigned StartPos;	// First character to display
+
+	FCommandBuffer()
+	{
+		CursorPos = StartPos = 0;
+	}
+
+	FCommandBuffer(const FCommandBuffer &o)
+	{
+		Text = o.Text;
+		CursorPos = o.CursorPos;
+		StartPos = o.StartPos;
+	}
+
+	void Draw(int x, int y, int scale, bool cursor)
+	{
+		if (scale == 1)
+		{
+			screen->DrawChar(ConFont, CR_ORANGE, x, y, '\x1c', TAG_DONE);
+			screen->DrawText(ConFont, CR_ORANGE, x + ConFont->GetCharWidth(0x1c), y,
+				&Text[StartPos], TAG_DONE);
+
+			if (cursor)
+			{
+				screen->DrawChar(ConFont, CR_YELLOW,
+					x + ConFont->GetCharWidth(0x1c) + (CursorPos - StartPos) * ConFont->GetCharWidth(0xb),
+					y, '\xb', TAG_DONE);
+			}
+		}
+		else
+		{
+			screen->DrawChar(ConFont, CR_ORANGE, x, y, '\x1c',
+				DTA_VirtualWidth, screen->GetWidth() / scale,
+				DTA_VirtualHeight, screen->GetHeight() / scale,
+				DTA_KeepRatio, true, TAG_DONE);
+
+			screen->DrawText(ConFont, CR_ORANGE, x + ConFont->GetCharWidth(0x1c), y,
+				&Text[StartPos],
+				DTA_VirtualWidth, screen->GetWidth() / scale,
+				DTA_VirtualHeight, screen->GetHeight() / scale,
+				DTA_KeepRatio, true, TAG_DONE);
+
+			if (cursor)
+			{
+				screen->DrawChar(ConFont, CR_YELLOW,
+					x + ConFont->GetCharWidth(0x1c) + (CursorPos - StartPos) * ConFont->GetCharWidth(0xb),
+					y, '\xb',
+					DTA_VirtualWidth, screen->GetWidth() / scale,
+					DTA_VirtualHeight, screen->GetHeight() / scale,
+					DTA_KeepRatio, true, TAG_DONE);
+			}
+		}
+	}
+
+	void MakeStartPosGood()
+	{
+		int n = StartPos;
+		unsigned cols = ConCols / active_con_scale();
+
+		if (StartPos >= Text.Len())
+		{ // Start of visible line is beyond end of line
+			n = CursorPos - cols + 2;
+		}
+		if ((CursorPos - StartPos) >= cols - 2)
+		{ // The cursor is beyond the visible part of the line
+			n = CursorPos - cols + 2;
+		}
+		if (StartPos > CursorPos)
+		{ // The cursor is in front of the visible part of the line
+			n = CursorPos;
+		}
+		StartPos = MAX(0, n);
+	}
+
+	void CursorStart()
+	{
+		CursorPos = 0;
+		StartPos = 0;
+	}
+
+	void CursorEnd()
+	{
+		CursorPos = (unsigned)Text.Len();
+		StartPos = 0;
+		MakeStartPosGood();
+	}
+
+	void CursorLeft()
+	{
+		if (CursorPos > 0)
+		{
+			CursorPos--;
+			MakeStartPosGood();
+		}
+	}
+
+	void CursorRight()
+	{
+		if (CursorPos < Text.Len())
+		{
+			CursorPos++;
+			MakeStartPosGood();
+		}
+	}
+
+	void DeleteLeft()
+	{
+		if (CursorPos > 0)
+		{
+			Text.Remove(CursorPos - 1, 1);
+			CursorPos--;
+			MakeStartPosGood();
+		}
+	}
+
+	void DeleteRight()
+	{
+		if (CursorPos < Text.Len())
+		{
+			Text.Remove(CursorPos, 1);
+			MakeStartPosGood();
+		}
+	}
+
+	void AddChar(int character)
+	{
+		///FIXME: Not Unicode-aware
+		if (CursorPos == Text.Len())
+		{
+			Text += char(character);
+		}
+		else
+		{
+			char foo = char(character);
+			Text.Insert(CursorPos, &foo, 1);
+		}
+		CursorPos++;
+		MakeStartPosGood();
+	}
+
+	void AddString(FString clip)
+	{
+		if (clip.IsNotEmpty())
+		{
+			// Only paste the first line.
+			long brk = clip.IndexOfAny("\r\n\b");
+			if (brk >= 0)
+			{
+				clip.Truncate(brk);
+			}
+			if (Text.IsEmpty())
+			{
+				Text = clip;
+			}
+			else
+			{
+				Text.Insert(CursorPos, clip);
+			}
+			CursorPos += (unsigned)clip.Len();
+			MakeStartPosGood();
+		}
+	}
+
+	void SetString(FString str)
+	{
+		Text = str;
+		CursorPos = (unsigned)Text.Len();
+		MakeStartPosGood();
+	}
+};
+static FCommandBuffer CmdLine;
+
+#define MAXHISTSIZE 50
+static struct History *HistHead = NULL, *HistTail = NULL, *HistPos = NULL;
+static int HistSize;
 
 #define NUMNOTIFIES 4
 #define NOTIFYFADETIME 6
 
-static struct NotifyText
+struct FNotifyText
 {
 	int TimeOut;
 	int PrintLevel;
 	FString Text;
-} NotifyStrings[NUMNOTIFIES];
+};
 
-static int NotifyTop, NotifyTopGoal;
+struct FNotifyBuffer
+{
+public:
+	FNotifyBuffer();
+	void AddString(int printlevel, FString source);
+	void Shift(int maxlines);
+	void Clear() { Text.Clear(); }
+	void Tick();
+	void Draw();
+
+private:
+	TArray<FNotifyText> Text;
+	int Top;
+	int TopGoal;
+	enum { NEWLINE, APPENDLINE, REPLACELINE } AddType;
+};
+static FNotifyBuffer NotifyStrings;
+
+CUSTOM_CVAR(Int, con_notifylines, NUMNOTIFIES, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
+{
+	NotifyStrings.Shift(self);
+}
+
 
 int PrintColors[PRINTLEVELS+2] = { CR_RED, CR_GOLD, CR_GRAY, CR_GREEN, CR_GREEN, CR_GOLD };
 
 static void setmsgcolor (int index, int color);
 
 FILE *Logfile = NULL;
-
-void C_AddNotifyString (int printlevel, const char *source);
 
 
 FIntCVar msglevel ("msg", 0, CVAR_ARCHIVE);
@@ -287,7 +511,7 @@ void DequeueConsoleText ()
 		TextQueue *next = queued->Next;
 		if (queued->bNotify)
 		{
-			C_AddNotifyString (queued->PrintLevel, queued->Text);
+			NotifyStrings.AddString(queued->PrintLevel, queued->Text);
 		}
 		else
 		{
@@ -333,7 +557,6 @@ void C_InitConsole (int width, int height, bool ingame)
 	}
 	ConWidth = (width - LEFTMARGIN - RIGHTMARGIN);
 	ConCols = ConWidth / cwidth;
-	PhysRows = height / cheight;
 
 	if (conbuffer == NULL) conbuffer = new FConsoleBuffer;
 }
@@ -352,16 +575,14 @@ CCMD (atexit)
 		GameAtExit *record = ExitCmdList;
 		while (record != NULL)
 		{
-			Printf ("%s\n", record->Command);
+			Printf ("%s\n", record->Command.GetChars());
 			record = record->Next;
 		}
 		return;
 	}
 	for (int i = 1; i < argv.argc(); ++i)
 	{
-		GameAtExit *record = (GameAtExit *)M_Malloc (
-			sizeof(GameAtExit)+strlen(argv[i]));
-		strcpy (record->Command, argv[i]);
+		GameAtExit *record = new GameAtExit(argv[i]);
 		record->Next = ExitCmdList;
 		ExitCmdList = record;
 	}
@@ -383,8 +604,8 @@ void C_DeinitConsole ()
 	while (cmd != NULL)
 	{
 		GameAtExit *next = cmd->Next;
-		AddCommandString (cmd->Command);
-		M_Free (cmd);
+		AddCommandString (cmd->Command.LockBuffer());
+		delete cmd;
 		cmd = next;
 	}
 
@@ -394,7 +615,7 @@ void C_DeinitConsole ()
 	while (hist != NULL)
 	{
 		History *next = hist->Newer;
-		free (hist);
+		delete hist;
 		hist = next;
 	}
 	HistTail = HistHead = HistPos = NULL;
@@ -469,22 +690,30 @@ static void setmsgcolor (int index, int color)
 
 extern int DisplayWidth;
 
-void C_AddNotifyString (int printlevel, const char *source)
+FNotifyBuffer::FNotifyBuffer()
 {
-	static enum
-	{
-		NEWLINE,
-		APPENDLINE,
-		REPLACELINE
-	} addtype = NEWLINE;
+	Top = TopGoal = 0;
+	AddType = NEWLINE;
+}
 
+void FNotifyBuffer::Shift(int maxlines)
+{
+	if (maxlines >= 0 && Text.Size() > (unsigned)maxlines)
+	{
+		Text.Delete(0, Text.Size() - maxlines);
+	}
+}
+
+void FNotifyBuffer::AddString(int printlevel, FString source)
+{
 	FBrokenLines *lines;
-	int i, len, width;
+	int i, width;
 
 	if ((printlevel != 128 && !show_messages) ||
-		!(len = (int)strlen (source)) ||
+		source.IsEmpty() ||
 		gamestate == GS_FULLCONSOLE ||
-		gamestate == GS_DEMOSCREEN)
+		gamestate == GS_DEMOSCREEN ||
+		con_notifylines == 0)
 		return;
 
 	if (ConsoleDrawing)
@@ -493,17 +722,27 @@ void C_AddNotifyString (int printlevel, const char *source)
 		return;
 	}
 
-	width = con_scaletext > 1 ? DisplayWidth/2 : con_scaletext == 1 ? DisplayWidth / CleanXfac : DisplayWidth;
-
-	if (addtype == APPENDLINE && NotifyStrings[NUMNOTIFIES-1].PrintLevel == printlevel)
+	if (active_con_scaletext() == 0)
 	{
-		FString str = NotifyStrings[NUMNOTIFIES-1].Text + source;
+		width = DisplayWidth / CleanXfac;
+	}
+	else
+	{
+		width = DisplayWidth / active_con_scaletext();
+	}
+
+	if (AddType == APPENDLINE && Text.Size() > 0 && Text[Text.Size() - 1].PrintLevel == printlevel)
+	{
+		FString str = Text[Text.Size() - 1].Text + source;
 		lines = V_BreakLines (SmallFont, width, str);
 	}
 	else
 	{
 		lines = V_BreakLines (SmallFont, width, source);
-		addtype = (addtype == APPENDLINE) ? NEWLINE : addtype;
+		if (AddType == APPENDLINE)
+		{
+			AddType = NEWLINE;
+		}
 	}
 
 	if (lines == NULL)
@@ -511,30 +750,37 @@ void C_AddNotifyString (int printlevel, const char *source)
 
 	for (i = 0; lines[i].Width >= 0; i++)
 	{
-		if (addtype == NEWLINE)
+		FNotifyText newline;
+
+		newline.Text = lines[i].Text;
+		newline.TimeOut = gametic + int(con_notifytime * TICRATE);
+		newline.PrintLevel = printlevel;
+		if (AddType == NEWLINE || Text.Size() == 0)
 		{
-			for (int j = 0; j < NUMNOTIFIES-1; ++j)
+			if (con_notifylines > 0)
 			{
-				NotifyStrings[j] = NotifyStrings[j+1];
+				Shift(con_notifylines - 1);
 			}
+			Text.Push(newline);
 		}
-		NotifyStrings[NUMNOTIFIES-1].Text = lines[i].Text;
-		NotifyStrings[NUMNOTIFIES-1].TimeOut = gametic + (int)(con_notifytime * TICRATE);
-		NotifyStrings[NUMNOTIFIES-1].PrintLevel = printlevel;
-		addtype = NEWLINE;
+		else
+		{
+			Text[Text.Size() - 1] = newline;
+		}
+		AddType = NEWLINE;
 	}
 
 	V_FreeBrokenLines (lines);
 	lines = NULL;
 
-	switch (source[len-1])
+	switch (source[source.Len()-1])
 	{
-	case '\r':	addtype = REPLACELINE;	break;
-	case '\n':	addtype = NEWLINE;		break;
-	default:	addtype = APPENDLINE;	break;
+	case '\r':	AddType = REPLACELINE;	break;
+	case '\n':	AddType = NEWLINE;		break;
+	default:	AddType = APPENDLINE;	break;
 	}
 
-	NotifyTopGoal = 0;
+	TopGoal = 0;
 }
 
 void AddToConsole (int printlevel, const char *text)
@@ -557,7 +803,7 @@ int PrintString (int printlevel, const char *outline)
 		AddToConsole (printlevel, outline);
 		if (vidactive && screen && SmallFont)
 		{
-			C_AddNotifyString (printlevel, outline);
+			NotifyStrings.AddString(printlevel, outline);
 			maybedrawnow (false, false);
 		}
 	}
@@ -605,12 +851,12 @@ int Printf (const char *format, ...)
 	return count;
 }
 
-int DPrintf (const char *format, ...)
+int DPrintf (int level, const char *format, ...)
 {
 	va_list argptr;
 	int count;
 
-	if (developer)
+	if (developer >= level)
 	{
 		va_start (argptr, format);
 		count = VPrintf (PRINT_HIGH, format, argptr);
@@ -625,10 +871,7 @@ int DPrintf (const char *format, ...)
 
 void C_FlushDisplay ()
 {
-	int i;
-
-	for (i = 0; i < NUMNOTIFIES; i++)
-		NotifyStrings[i].TimeOut = 0;
+	NotifyStrings.Clear();
 }
 
 void C_AdjustBottom ()
@@ -647,7 +890,7 @@ void C_NewModeAdjust ()
 }
 
 int consoletic = 0;
-void C_Ticker ()
+void C_Ticker()
 {
 	static int lasttic = 0;
 	consoletic++;
@@ -689,103 +932,111 @@ void C_Ticker ()
 	}
 
 	lasttic = consoletic;
+	NotifyStrings.Tick();
+}
 
-	if (NotifyTopGoal > NotifyTop)
+void FNotifyBuffer::Tick()
+{
+	if (TopGoal > Top)
 	{
-		NotifyTop++;
+		Top++;
 	}
-	else if (NotifyTopGoal < NotifyTop)
+	else if (TopGoal < Top)
 	{
-		NotifyTop--;
+		Top--;
+	}
+
+	// Remove lines from the beginning that have expired.
+	unsigned i;
+	for (i = 0; i < Text.Size(); ++i)
+	{
+		if (Text[i].TimeOut != 0 && Text[i].TimeOut > gametic)
+			break;
+	}
+	if (i > 0)
+	{
+		Text.Delete(0, i);
 	}
 }
 
-static void C_DrawNotifyText ()
+void FNotifyBuffer::Draw()
 {
 	bool center = (con_centernotify != 0.f);
-	int i, line, lineadv, color, j, skip;
+	int line, lineadv, color, j;
 	bool canskip;
 	
 	if (gamestate == GS_FULLCONSOLE || gamestate == GS_DEMOSCREEN/* || menuactive != MENU_Off*/)
 		return;
 
-	line = NotifyTop;
-	skip = 0;
+	line = Top;
 	canskip = true;
 
 	lineadv = SmallFont->GetHeight ();
-	if (con_scaletext == 1)
+	if (active_con_scaletext() == 0)
 	{
 		lineadv *= CleanYfac;
 	}
 
 	BorderTopRefresh = screen->GetPageCount ();
 
-	for (i = 0; i < NUMNOTIFIES; i++)
+	for (unsigned i = 0; i < Text.Size(); ++ i)
 	{
-		if (NotifyStrings[i].TimeOut == 0)
+		FNotifyText &notify = Text[i];
+
+		if (notify.TimeOut == 0)
 			continue;
 
-		j = NotifyStrings[i].TimeOut - gametic;
+		j = notify.TimeOut - gametic;
 		if (j > 0)
 		{
-			if (!show_messages && NotifyStrings[i].PrintLevel != 128)
+			if (!show_messages && notify.PrintLevel != 128)
 				continue;
 
-			double alpha;
+			double alpha = (j < NOTIFYFADETIME) ? 1. * j / NOTIFYFADETIME : 1;
 
-			if (j < NOTIFYFADETIME)
-			{
-				alpha = 1. * j / NOTIFYFADETIME;
-			}
-			else
-			{
-				alpha = 1;
-			}
-
-			if (NotifyStrings[i].PrintLevel >= PRINTLEVELS)
+			if (notify.PrintLevel >= PRINTLEVELS)
 				color = CR_UNTRANSLATED;
 			else
-				color = PrintColors[NotifyStrings[i].PrintLevel];
+				color = PrintColors[notify.PrintLevel];
 
-			if (con_scaletext == 1)
+			if (active_con_scaletext() == 0)
 			{
 				if (!center)
-					screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
-						DTA_CleanNoMove, true, DTA_AlphaF, alpha, TAG_DONE);
+					screen->DrawText (SmallFont, color, 0, line, notify.Text,
+						DTA_CleanNoMove, true, DTA_Alpha, alpha, TAG_DONE);
 				else
 					screen->DrawText (SmallFont, color, (SCREENWIDTH -
-						SmallFont->StringWidth (NotifyStrings[i].Text)*CleanXfac)/2,
-						line, NotifyStrings[i].Text, DTA_CleanNoMove, true,
-						DTA_AlphaF, alpha, TAG_DONE);
+						SmallFont->StringWidth (notify.Text)*CleanXfac)/2,
+						line, notify.Text, DTA_CleanNoMove, true,
+						DTA_Alpha, alpha, TAG_DONE);
 			}
-			else if (con_scaletext == 0)
+			else if (active_con_scaletext() == 1)
 			{
 				if (!center)
-					screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
-						DTA_AlphaF, alpha, TAG_DONE);
+					screen->DrawText (SmallFont, color, 0, line, notify.Text,
+						DTA_Alpha, alpha, TAG_DONE);
 				else
 					screen->DrawText (SmallFont, color, (SCREENWIDTH -
-						SmallFont->StringWidth (NotifyStrings[i].Text))/2,
-						line, NotifyStrings[i].Text,
-						DTA_AlphaF, alpha, TAG_DONE);
+						SmallFont->StringWidth (notify.Text))/2,
+						line, notify.Text,
+						DTA_Alpha, alpha, TAG_DONE);
 			}
 			else
 			{
 				if (!center)
-					screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
-						DTA_VirtualWidth, screen->GetWidth() / 2, 
-						DTA_VirtualHeight, screen->GetHeight() / 2,
+					screen->DrawText (SmallFont, color, 0, line, notify.Text,
+						DTA_VirtualWidth, screen->GetWidth() / active_con_scaletext(),
+						DTA_VirtualHeight, screen->GetHeight() / active_con_scaletext(),
 						DTA_KeepRatio, true,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 				else
-					screen->DrawText (SmallFont, color, (screen->GetWidth() / 2 -
-						SmallFont->StringWidth (NotifyStrings[i].Text))/2,
-						line, NotifyStrings[i].Text,
-						DTA_VirtualWidth, screen->GetWidth() / 2, 
-						DTA_VirtualHeight, screen->GetHeight() / 2,
+					screen->DrawText (SmallFont, color, (screen->GetWidth() -
+						SmallFont->StringWidth (notify.Text) * active_con_scaletext()) / 2 / active_con_scaletext(),
+						line, notify.Text,
+						DTA_VirtualWidth, screen->GetWidth() / active_con_scaletext(),
+						DTA_VirtualHeight, screen->GetHeight() / active_con_scaletext(),
 						DTA_KeepRatio, true,
-						DTA_AlphaF, alpha, TAG_DONE);
+						DTA_Alpha, alpha, TAG_DONE);
 			}
 			line += lineadv;
 			canskip = false;
@@ -794,16 +1045,15 @@ static void C_DrawNotifyText ()
 		{
 			if (canskip)
 			{
-				NotifyTop += lineadv;
+				Top += lineadv;
 				line += lineadv;
-				skip++;
 			}
-			NotifyStrings[i].TimeOut = 0;
+			notify.TimeOut = 0;
 		}
 	}
 	if (canskip)
 	{
-		NotifyTop = NotifyTopGoal;
+		Top = TopGoal;
 	}
 }
 
@@ -827,9 +1077,11 @@ void C_DrawConsole (bool hw2d)
 	static int oldbottom = 0;
 	int lines, left, offset;
 
+	int textScale = active_con_scale();
+
 	left = LEFTMARGIN;
-	lines = (ConBottom-ConFont->GetHeight()*2)/ConFont->GetHeight();
-	if (-ConFont->GetHeight() + lines*ConFont->GetHeight() > ConBottom - ConFont->GetHeight()*7/2)
+	lines = (ConBottom/textScale-ConFont->GetHeight()*2)/ConFont->GetHeight();
+	if (-ConFont->GetHeight() + lines*ConFont->GetHeight() > ConBottom/textScale - ConFont->GetHeight()*7/2)
 	{
 		offset = -ConFont->GetHeight()/2;
 		lines--;
@@ -851,7 +1103,7 @@ void C_DrawConsole (bool hw2d)
 
 	if (ConsoleState == c_up)
 	{
-		C_DrawNotifyText ();
+		NotifyStrings.Draw();
 		return;
 	}
 	else if (ConBottom)
@@ -865,7 +1117,7 @@ void C_DrawConsole (bool hw2d)
 			DTA_DestWidth, screen->GetWidth(),
 			DTA_DestHeight, screen->GetHeight(),
 			DTA_ColorOverlay, conshade,
-			DTA_AlphaF, (hw2d && gamestate != GS_FULLCONSOLE) ? (double)con_alpha : 1.,
+			DTA_Alpha, (hw2d && gamestate != GS_FULLCONSOLE) ? (double)con_alpha : 1.,
 			DTA_Masked, false,
 			TAG_DONE);
 		if (conline && visheight < screen->GetHeight())
@@ -875,16 +1127,26 @@ void C_DrawConsole (bool hw2d)
 
 		if (ConBottom >= 12)
 		{
-			screen->DrawText (ConFont, CR_ORANGE, SCREENWIDTH - 8 -
-				ConFont->StringWidth (GetVersionString()),
-				ConBottom - ConFont->GetHeight() - 4,
-				GetVersionString(), TAG_DONE);
+			if (textScale == 1)
+				screen->DrawText (ConFont, CR_ORANGE, SCREENWIDTH - 8 -
+					ConFont->StringWidth (GetVersionString()),
+					ConBottom / textScale - ConFont->GetHeight() - 4,
+					GetVersionString(), TAG_DONE);
+			else
+				screen->DrawText(ConFont, CR_ORANGE, SCREENWIDTH / textScale - 8 -
+					ConFont->StringWidth(GetVersionString()),
+					ConBottom / textScale - ConFont->GetHeight() - 4,
+					GetVersionString(),
+					DTA_VirtualWidth, screen->GetWidth() / textScale,
+					DTA_VirtualHeight, screen->GetHeight() / textScale,
+					DTA_KeepRatio, true, TAG_DONE);
+
 			if (TickerMax)
 			{
 				char tickstr[256];
-				const int tickerY = ConBottom - ConFont->GetHeight() - 4;
+				const int tickerY = ConBottom / textScale - ConFont->GetHeight() - 4;
 				size_t i;
-				int tickend = ConCols - SCREENWIDTH / 90 - 6;
+				int tickend = ConCols / textScale - SCREENWIDTH / textScale / 90 - 6;
 				int tickbegin = 0;
 
 				if (TickerLabel)
@@ -907,11 +1169,23 @@ void C_DrawConsole (bool hw2d)
 				{
 					tickstr[tickend+3] = 0;
 				}
-				screen->DrawText (ConFont, CR_BROWN, LEFTMARGIN, tickerY, tickstr, TAG_DONE);
+				if (textScale == 1)
+					screen->DrawText (ConFont, CR_BROWN, LEFTMARGIN, tickerY, tickstr, TAG_DONE);
+				else
+					screen->DrawText (ConFont, CR_BROWN, LEFTMARGIN, tickerY, tickstr,
+						DTA_VirtualWidth, screen->GetWidth() / textScale,
+						DTA_VirtualHeight, screen->GetHeight() / textScale,
+						DTA_KeepRatio, true, TAG_DONE);
 
 				// Draw the marker
 				i = LEFTMARGIN+5+tickbegin*8 + Scale (TickerAt, (SDWORD)(tickend - tickbegin)*8, TickerMax);
-				screen->DrawChar (ConFont, CR_ORANGE, (int)i, tickerY, 0x13, TAG_DONE);
+				if (textScale == 1)
+					screen->DrawChar (ConFont, CR_ORANGE, (int)i, tickerY, 0x13, TAG_DONE);
+				else
+					screen->DrawChar(ConFont, CR_ORANGE, (int)i, tickerY, 0x13,
+						DTA_VirtualWidth, screen->GetWidth() / textScale,
+						DTA_VirtualHeight, screen->GetHeight() / textScale,
+						DTA_KeepRatio, true, TAG_DONE);
 
 				TickerVisible = true;
 			}
@@ -947,18 +1221,28 @@ void C_DrawConsole (bool hw2d)
 	if (lines > 0)
 	{
 		// No more enqueuing because adding new text to the console won't touch the actual print data.
-		conbuffer->FormatText(ConFont, ConWidth);
+		conbuffer->FormatText(ConFont, ConWidth / textScale);
 		unsigned int consolelines = conbuffer->GetFormattedLineCount();
 		FBrokenLines **blines = conbuffer->GetLines();
 		FBrokenLines **printline = blines + consolelines - 1 - RowAdjust;
 
-		int bottomline = ConBottom - ConFont->GetHeight()*2 - 4;
+		int bottomline = ConBottom / textScale - ConFont->GetHeight()*2 - 4;
 
 		ConsoleDrawing = true;
 
 		for(FBrokenLines **p = printline; p >= blines && lines > 0; p--, lines--)
 		{
-			screen->DrawText(ConFont, CR_TAN, LEFTMARGIN, offset + lines * ConFont->GetHeight(), (*p)->Text, TAG_DONE);
+			if (textScale == 1)
+			{
+				screen->DrawText(ConFont, CR_TAN, LEFTMARGIN, offset + lines * ConFont->GetHeight(), (*p)->Text, TAG_DONE);
+			}
+			else
+			{
+				screen->DrawText(ConFont, CR_TAN, LEFTMARGIN, offset + lines * ConFont->GetHeight(), (*p)->Text,
+					DTA_VirtualWidth, screen->GetWidth() / textScale,
+					DTA_VirtualHeight, screen->GetHeight() / textScale,
+					DTA_KeepRatio, true, TAG_DONE);
+			}
 		}
 
 		ConsoleDrawing = false;
@@ -969,25 +1253,20 @@ void C_DrawConsole (bool hw2d)
 			{
 				// Make a copy of the command line, in case an input event is handled
 				// while we draw the console and it changes.
-				CmdLine[2+CmdLine[0]] = 0;
-				FString command((char *)&CmdLine[2+CmdLine[259]]);
-				int cursorpos = CmdLine[1] - CmdLine[259];
-
-				screen->DrawChar (ConFont, CR_ORANGE, left, bottomline, '\x1c', TAG_DONE);
-				screen->DrawText (ConFont, CR_ORANGE, left + ConFont->GetCharWidth(0x1c), bottomline,
-					command, TAG_DONE);
-
-				if (cursoron)
-				{
-					screen->DrawChar (ConFont, CR_YELLOW, left + ConFont->GetCharWidth(0x1c) + cursorpos * ConFont->GetCharWidth(0xb),
-						bottomline, '\xb', TAG_DONE);
-				}
+				FCommandBuffer command(CmdLine);
+				command.Draw(left, bottomline, textScale, cursoron);
 			}
 			if (RowAdjust && ConBottom >= ConFont->GetHeight()*7/2)
 			{
 				// Indicate that the view has been scrolled up (10)
 				// and if we can scroll no further (12)
-				screen->DrawChar (ConFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10, TAG_DONE);
+				if (textScale == 1)
+					screen->DrawChar (ConFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10, TAG_DONE);
+				else
+					screen->DrawChar(ConFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10,
+						DTA_VirtualWidth, screen->GetWidth() / textScale,
+						DTA_VirtualHeight, screen->GetHeight() / textScale,
+						DTA_KeepRatio, true, TAG_DONE);
 			}
 		}
 	}
@@ -1047,35 +1326,14 @@ void C_HideConsole ()
 	}
 }
 
-static void makestartposgood ()
+DEFINE_ACTION_FUNCTION(_Console, HideConsole)
 {
-	int n;
-	int pos = CmdLine[259];
-	int curs = CmdLine[1];
-	int len = CmdLine[0];
-
-	n = pos;
-
-	if (pos >= len)
-	{ // Start of visible line is beyond end of line
-		n = curs - ConCols + 2;
-	}
-	if ((curs - pos) >= ConCols - 2)
-	{ // The cursor is beyond the visible part of the line
-		n = curs - ConCols + 2;
-	}
-	if (pos > curs)
-	{ // The cursor is in front of the visible part of the line
-		n = curs;
-	}
-	if (n < 0)
-		n = 0;
-	CmdLine[259] = n;
+	C_HideConsole();
+	return 0;
 }
 
-static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
+static bool C_HandleKey (event_t *ev, FCommandBuffer &buffer)
 {
-	int i;
 	int data1 = ev->data1;
 
 	switch (ev->subtype)
@@ -1085,29 +1343,8 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 
 	case EV_GUI_Char:
 		// Add keypress to command line
-		if (buffer[0] < len)
-		{
-			if (buffer[1] == buffer[0])
-			{
-				buffer[buffer[0] + 2] = BYTE(ev->data1);
-			}
-			else
-			{
-				char *c, *e;
-
-				e = (char *)&buffer[buffer[0] + 1];
-				c = (char *)&buffer[buffer[1] + 2];
-
-				for (; e >= c; e--)
-					*(e + 1) = *e;
-
-				*c = char(ev->data1);
-			}
-			buffer[0]++;
-			buffer[1]++;
-			makestartposgood ();
-			HistPos = NULL;
-		}
+		buffer.AddChar(ev->data1);
+		HistPos = NULL;
 		TabbedLast = false;
 		TabbedList = false;
 		break;
@@ -1136,7 +1373,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 		case GK_PGUP:
 			if (ev->data3 & (GKM_SHIFT|GKM_CTRL))
 			{ // Scroll console buffer up one page
-				RowAdjust += (SCREENHEIGHT-4) /
+				RowAdjust += (SCREENHEIGHT-4)/active_con_scale() /
 					((gamestate == GS_FULLCONSOLE || gamestate == GS_STARTUP) ? ConFont->GetHeight() : ConFont->GetHeight()*2) - 3;
 			}
 			else if (RowAdjust < conbuffer->GetFormattedLineCount())
@@ -1159,7 +1396,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 		case GK_PGDN:
 			if (ev->data3 & (GKM_SHIFT|GKM_CTRL))
 			{ // Scroll console buffer down one page
-				const int scrollamt = (SCREENHEIGHT-4) /
+				const int scrollamt = (SCREENHEIGHT-4)/active_con_scale() /
 					((gamestate == GS_FULLCONSOLE || gamestate == GS_STARTUP) ? ConFont->GetHeight() : ConFont->GetHeight()*2) - 3;
 				if (RowAdjust < scrollamt)
 				{
@@ -1190,7 +1427,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			}
 			else
 			{ // Move cursor to start of line
-				buffer[1] = buffer[len+4] = 0;
+				buffer.CursorStart();
 			}
 			break;
 
@@ -1201,66 +1438,30 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			}
 			else
 			{ // Move cursor to end of line
-				buffer[1] = buffer[0];
-				makestartposgood ();
+				buffer.CursorEnd();
 			}
 			break;
 
 		case GK_LEFT:
 			// Move cursor left one character
-			if (buffer[1])
-			{
-				buffer[1]--;
-				makestartposgood ();
-			}
+			buffer.CursorLeft();
 			break;
 
 		case GK_RIGHT:
 			// Move cursor right one character
-			if (buffer[1] < buffer[0])
-			{
-				buffer[1]++;
-				makestartposgood ();
-			}
+			buffer.CursorRight();
 			break;
 
 		case '\b':
 			// Erase character to left of cursor
-			if (buffer[0] && buffer[1])
-			{
-				char *c, *e;
-
-				e = (char *)&buffer[buffer[0] + 2];
-				c = (char *)&buffer[buffer[1] + 2];
-
-				for (; c < e; c++)
-					*(c - 1) = *c;
-				
-				buffer[0]--;
-				buffer[1]--;
-				if (buffer[len+4])
-					buffer[len+4]--;
-				makestartposgood ();
-			}
+			buffer.DeleteLeft();
 			TabbedLast = false;
 			TabbedList = false;
 			break;
 
 		case GK_DEL:
 			// Erase character under cursor
-			if (buffer[1] < buffer[0])
-			{
-				char *c, *e;
-
-				e = (char *)&buffer[buffer[0] + 2];
-				c = (char *)&buffer[buffer[1] + 3];
-
-				for (; c < e; c++)
-					*(c - 1) = *c;
-
-				buffer[0]--;
-				makestartposgood ();
-			}
+			buffer.DeleteRight();
 			TabbedLast = false;
 			TabbedList = false;
 			break;
@@ -1278,10 +1479,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 
 			if (HistPos)
 			{
-				strcpy ((char *)&buffer[2], HistPos->String);
-				buffer[0] = buffer[1] = (BYTE)strlen ((char *)&buffer[2]);
-				buffer[len+4] = 0;
-				makestartposgood();
+				buffer.SetString(HistPos->String);
 			}
 
 			TabbedLast = false;
@@ -1293,17 +1491,13 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			if (HistPos && HistPos->Newer)
 			{
 				HistPos = HistPos->Newer;
-			
-				strcpy ((char *)&buffer[2], HistPos->String);
-				buffer[0] = buffer[1] = (BYTE)strlen ((char *)&buffer[2]);
+				buffer.SetString(HistPos->String);
 			}
 			else
 			{
 				HistPos = NULL;
-				buffer[0] = buffer[1] = 0;
+				buffer.SetString("");
 			}
-			buffer[len+4] = 0;
-			makestartposgood();
 			TabbedLast = false;
 			TabbedList = false;
 			break;
@@ -1311,24 +1505,19 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 		case 'X':
 			if (ev->data3 & GKM_CTRL)
 			{
-				buffer[1] = buffer[0] = 0;
+				buffer.SetString("");
 				TabbedLast = TabbedList = false;
 			}
 			break;
 
 		case 'D':
-			if (ev->data3 & GKM_CTRL && buffer[0] == 0)
+			if (ev->data3 & GKM_CTRL && buffer.Text.Len() == 0)
 			{ // Control-D pressed on an empty line
-				int replen = (int)strlen (con_ctrl_d);
-
-				if (replen == 0)
+				if (strlen(con_ctrl_d) == 0)
+				{
 					break;	// Replacement is empty, so do nothing
-
-				if (replen > len)
-					replen = len;
-
-				memcpy (&buffer[2], con_ctrl_d, replen);
-				buffer[0] = buffer[1] = replen;
+				}
+				buffer.SetString(*con_ctrl_d);
 			}
 			else
 			{
@@ -1339,16 +1528,14 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 		case '\r':
 			// Execute command line (ENTER)
 
-			buffer[2 + buffer[0]] = 0;
+			buffer.Text.StripLeftRight();
+			Printf(127, TEXTCOLOR_WHITE "]%s\n", buffer.Text.GetChars());
 
-			for (i = 0; i < buffer[0] && isspace(buffer[2+i]); ++i)
-			{
-			}
-			if (i == buffer[0])
+			if (buffer.Text.Len() == 0)
 			{
 				 // Command line is empty, so do nothing to the history
 			}
-			else if (HistHead && stricmp (HistHead->String, (char *)&buffer[2]) == 0)
+			else if (HistHead && HistHead->String.CompareNoCase(buffer.Text) == 0)
 			{
 				// Command line was the same as the previous one,
 				// so leave the history list alone
@@ -1359,9 +1546,8 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 				// or there is nothing in the history list,
 				// so add it to the history list.
 
-				History *temp = (History *)M_Malloc (sizeof(struct History) + buffer[0]);
-
-				strcpy (temp->String, (char *)&buffer[2]);
+				History *temp = new History;
+				temp->String = buffer.Text;
 				temp->Older = HistHead;
 				if (HistHead)
 				{
@@ -1378,7 +1564,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 				if (HistSize == MAXHISTSIZE)
 				{
 					HistTail = HistTail->Newer;
-					M_Free (HistTail->Older);
+					delete HistTail->Older;
 					HistTail->Older = NULL;
 				}
 				else
@@ -1387,9 +1573,21 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 				}
 			}
 			HistPos = NULL;
-			Printf (127, TEXTCOLOR_WHITE "]%s\n", &buffer[2]);
-			buffer[0] = buffer[1] = buffer[len+4] = 0;
-			AddCommandString ((char *)&buffer[2]);
+			{
+				// Work with a copy of command to avoid side effects caused by
+				// exception raised during execution, like with 'error' CCMD.
+				// It's problematic to maintain FString's lock symmetry.
+				static TArray<char> command;
+				const size_t length = buffer.Text.Len();
+
+				command.Resize(unsigned(length + 1));
+				memcpy(&command[0], buffer.Text.GetChars(), length);
+				command[length] = '\0';
+
+				buffer.SetString("");
+
+				AddCommandString(&command[0]);
+			}
 			TabbedLast = false;
 			TabbedList = false;
 			break;
@@ -1415,7 +1613,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			}
 			else
 			{
-				buffer[0] = buffer[1] = buffer[len+4] = 0;
+				buffer.SetString("");
 				HistPos = NULL;
 				C_ToggleConsole ();
 			}
@@ -1433,15 +1631,15 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			{
 				if (data1 == 'C')
 				{ // copy to clipboard
-					if (buffer[0] > 0)
+					if (buffer.Text.IsNotEmpty())
 					{
-						buffer[2 + buffer[0]] = 0;
-						I_PutInClipboard ((char *)&buffer[2]);
+						I_PutInClipboard(buffer.Text);
 					}
 				}
 				else
 				{ // paste from clipboard
-					C_PasteText(I_GetFromClipboard(false), buffer, len);
+					buffer.AddString(I_GetFromClipboard(false));
+					HistPos = NULL;
 				}
 				break;
 			}
@@ -1451,7 +1649,8 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 
 #ifdef __unix__
 	case EV_GUI_MButtonDown:
-		C_PasteText(I_GetFromClipboard(true), buffer, len);
+		buffer.AddString(I_GetFromClipboard(true));
+		HistPos = NULL;
 		break;
 #endif
 	}
@@ -1459,36 +1658,6 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 	CursorTicker = C_BLINKRATE;
 	cursoron = 1;
 	return true;
-}
-
-static void C_PasteText(FString clip, BYTE *buffer, int len)
-{
-	if (clip.IsNotEmpty())
-	{
-		// Only paste the first line.
-		long brk = clip.IndexOfAny("\r\n\b");
-		int cliplen = brk >= 0 ? brk : (int)clip.Len();
-
-		// Make sure there's room for the whole thing.
-		if (buffer[0] + cliplen > len)
-		{
-			cliplen = len - buffer[0];
-		}
-
-		if (cliplen > 0)
-		{
-			if (buffer[1] < buffer[0])
-			{
-				memmove (&buffer[2 + buffer[1] + cliplen],
-						 &buffer[2 + buffer[1]], buffer[0] - buffer[1]);
-			}
-			memcpy (&buffer[2 + buffer[1]], clip, cliplen);
-			buffer[0] += cliplen;
-			buffer[1] += cliplen;
-			makestartposgood ();
-			HistPos = NULL;
-		}
-	}
 }
 
 bool C_Responder (event_t *ev)
@@ -1501,7 +1670,7 @@ bool C_Responder (event_t *ev)
 		return false;
 	}
 
-	return C_HandleKey (ev, CmdLine, 255);
+	return C_HandleKey(ev, CmdLine);
 }
 
 CCMD (history)
@@ -1510,7 +1679,7 @@ CCMD (history)
 
 	while (hist)
 	{
-		Printf ("   %s\n", hist->String);
+		Printf ("   %s\n", hist->String.GetChars());
 		hist = hist->Newer;
 	}
 }
@@ -1578,6 +1747,20 @@ void C_MidPrintBold (FFont *font, const char *msg)
 	{
 		StatusBar->DetachMessage (MAKE_ID('C','N','T','R'));
 	}
+}
+
+DEFINE_ACTION_FUNCTION(_Console, MidPrint)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(font);
+	PARAM_STRING(text);
+	PARAM_BOOL_DEF(bold);
+
+	FFont *fnt = FFont::FindFont(font);
+	const char *txt = text[0] == '$'? GStrings(&text[1]) : text.GetChars();
+	if (!bold) C_MidPrint(fnt, txt);
+	else C_MidPrintBold(fnt, txt);
+	return 0;
 }
 
 /****** Tab completion code ******/
@@ -1648,6 +1831,14 @@ void C_AddTabCommand (const char *name)
 
 void C_RemoveTabCommand (const char *name)
 {
+	if (TabCommands.Size() == 0)
+	{
+		// There are no tab commands that can be removed.
+		// This is important to skip construction of aname 
+		// in case the NameManager has already been destroyed.
+		return;
+	}
+
 	FName aname(name, true);
 
 	if (aname == NAME_None)
@@ -1686,7 +1877,7 @@ static int FindDiffPoint (FName name1, const char *str2)
 
 static void C_TabComplete (bool goForward)
 {
-	int i;
+	unsigned i;
 	int diffpoint;
 
 	if (!TabbedLast)
@@ -1694,25 +1885,20 @@ static void C_TabComplete (bool goForward)
 		bool cancomplete;
 
 		// Skip any spaces at beginning of command line
-		if (CmdLine[2] == ' ')
+		for (i = 0; i < CmdLine.Text.Len(); ++i)
 		{
-			for (i = 0; i < CmdLine[0]; i++)
-				if (CmdLine[2+i] != ' ')
-					break;
-
-			TabStart = i + 2;
+			if (CmdLine.Text[i] != ' ')
+				break;
 		}
-		else
-		{
-			TabStart = 2;
+		if (i == CmdLine.Text.Len())
+		{ // Line was nothing but spaces
+			return;
 		}
+		TabStart = i;
 
-		if (TabStart == CmdLine[0] + 2)
-			return;		// Line was nothing but spaces
+		TabSize = (int)CmdLine.Text.Len() - TabStart;
 
-		TabSize = CmdLine[0] - TabStart + 2;
-
-		if (!FindTabCommand ((char *)(CmdLine + TabStart), &TabPos, TabSize))
+		if (!FindTabCommand(&CmdLine.Text[TabStart], &TabPos, TabSize))
 			return;		// No initial matches
 
 		// Show a list of possible completions, if more than one.
@@ -1735,7 +1921,7 @@ static void C_TabComplete (bool goForward)
 		{ // Find the last matching tab, then go one past it.
 			while (++TabPos < (int)TabCommands.Size())
 			{
-				if (FindDiffPoint (TabCommands[TabPos].TabName, (char *)(CmdLine + TabStart)) < TabSize)
+				if (FindDiffPoint(TabCommands[TabPos].TabName, &CmdLine.Text[TabStart]) < TabSize)
 				{
 					break;
 				}
@@ -1752,27 +1938,26 @@ static void C_TabComplete (bool goForward)
 		(!goForward && --TabPos < 0))
 	{
 		TabbedLast = false;
-		CmdLine[0] = CmdLine[1] = TabSize;
+		CmdLine.Text.Truncate(TabSize);
 	}
 	else
 	{
-		diffpoint = FindDiffPoint (TabCommands[TabPos].TabName, (char *)(CmdLine + TabStart));
+		diffpoint = FindDiffPoint(TabCommands[TabPos].TabName, &CmdLine.Text[TabStart]);
 
 		if (diffpoint < TabSize)
 		{
 			// No more matches
 			TabbedLast = false;
-			CmdLine[0] = CmdLine[1] = TabSize + TabStart - 2;
+			CmdLine.Text.Truncate(TabSize - TabStart);
 		}
 		else
-		{		
-			strcpy ((char *)(CmdLine + TabStart), TabCommands[TabPos].TabName.GetChars());
-			CmdLine[0] = CmdLine[1] = (BYTE)strlen ((char *)(CmdLine + 2)) + 1;
-			CmdLine[CmdLine[0] + 1] = ' ';
+		{
+			CmdLine.Text.Truncate(TabStart);
+			CmdLine.Text << TabCommands[TabPos].TabName << ' ';
 		}
 	}
-
-	makestartposgood ();
+	CmdLine.CursorPos = (unsigned)CmdLine.Text.Len();
+	CmdLine.MakeStartPosGood();
 }
 
 static bool C_TabCompleteList ()
@@ -1786,7 +1971,7 @@ static bool C_TabCompleteList ()
 
 	for (i = TabPos; i < (int)TabCommands.Size(); ++i)
 	{
-		if (FindDiffPoint (TabCommands[i].TabName, (char *)(CmdLine + TabStart)) < TabSize)
+		if (FindDiffPoint (TabCommands[i].TabName, &CmdLine.Text[TabStart]) < TabSize)
 		{
 			break;
 		}
@@ -1811,7 +1996,7 @@ static bool C_TabCompleteList ()
 	{
 		size_t x = 0;
 		maxwidth += 3;
-		Printf (TEXTCOLOR_BLUE "Completions for %s:\n", CmdLine+2);
+		Printf (TEXTCOLOR_BLUE "Completions for %s:\n", CmdLine.Text.GetChars());
 		for (i = TabPos; nummatches > 0; ++i, --nummatches)
 		{
 			// [Dusk] Print console commands blue, CVars green, aliases red.
@@ -1829,7 +2014,7 @@ static bool C_TabCompleteList ()
 
 			Printf ("%s%-*s", colorcode, int(maxwidth), TabCommands[i].TabName.GetChars());
 			x += maxwidth;
-			if (x > ConCols - maxwidth)
+			if (x > ConCols / active_con_scale() - maxwidth)
 			{
 				x = 0;
 				Printf ("\n");
@@ -1843,9 +2028,9 @@ static bool C_TabCompleteList ()
 		if (TabSize != commonsize)
 		{
 			TabSize = commonsize;
-			strncpy ((char *)CmdLine + TabStart, TabCommands[TabPos].TabName.GetChars(), commonsize);
-			CmdLine[0] = TabStart + commonsize - 2;
-			CmdLine[1] = CmdLine[0];
+			CmdLine.Text.Truncate(TabStart);
+			CmdLine.Text.AppendCStrPart(TabCommands[TabPos].TabName.GetChars(), commonsize);
+			CmdLine.CursorPos = (unsigned)CmdLine.Text.Len();
 		}
 		return false;
 	}

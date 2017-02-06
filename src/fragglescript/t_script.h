@@ -41,11 +41,21 @@
 #include "p_lnspec.h"
 #include "m_fixed.h"
 #include "actor.h"
+#include "doomerrors.h"
 
 #ifdef _MSC_VER
 // This pragma saves 8kb of wasted code.
 #pragma pointers_to_members( full_generality, single_inheritance )
 #endif
+
+
+class CFraggleScriptError : public CDoomError
+{
+public:
+	CFraggleScriptError() : CDoomError() {}
+	CFraggleScriptError(const char *message) : CDoomError(message) {}
+};
+
 
 class DRunningScript;
 
@@ -189,7 +199,7 @@ public:
 
 	void GetValue(svalue_t &result);
 	void SetValue(const svalue_t &newvalue);
-	void Serialize(FArchive &ar);
+	void Serialize(FSerializer &ar);
 };
 
 //==========================================================================
@@ -238,7 +248,7 @@ public:
 		next = NULL;
 	}
 
-	void Serialize(FArchive &ar);
+	void Serialize(FSerializer &ar);
 };
 
 
@@ -336,8 +346,9 @@ public:
 	// true or false
 
 	DFsScript();
-	void Destroy();
-	void Serialize(FArchive &ar);
+	~DFsScript();
+	void OnDestroy() override;
+	void Serialize(FSerializer &ar);
 
 	DFsVariable *NewVariable(const char *name, int vtype);
 	void NewFunction(const char *name, void (FParser::*handler)());
@@ -651,8 +662,8 @@ class DRunningScript : public DObject
 
 public:
 	DRunningScript(AActor *trigger=NULL, DFsScript *owner = NULL, int index = 0) ;
-	void Destroy();
-	void Serialize(FArchive &arc);
+	void OnDestroy() override;
+	void Serialize(FSerializer &arc);
 
 	TObjPtr<DFsScript> script;
 	
@@ -684,12 +695,13 @@ public:
 	TObjPtr<DRunningScript> RunningScripts;
 	TArray<TObjPtr<AActor> > SpawnedThings;
 	bool nocheckposition;
+	bool setcolormaterial;
 
 	DFraggleThinker();
-	void Destroy();
+	void OnDestroy() override;
 
 
-	void Serialize(FArchive & arc);
+	void Serialize(FSerializer & arc);
 	void Tick();
 	size_t PropagateMark();
 	size_t PointerSubstitution (DObject *old, DObject *notOld);
@@ -707,7 +719,7 @@ public:
 
 #include "t_fs.h"
 
-void script_error(const char *s, ...);
+void script_error(const char *s, ...) GCCPRINTF(1,2);
 void FS_EmulateCmd(char * string);
 
 extern AActor *trigger_obj;

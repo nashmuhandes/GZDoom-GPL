@@ -422,7 +422,7 @@ void
 VSMatrix::computeNormalMatrix(const FLOATTYPE *aMatrix) 
 {
 
-	FLOATTYPE mMat3x3[9];
+	double mMat3x3[9];
 
 	mMat3x3[0] = aMatrix[0];
 	mMat3x3[1] = aMatrix[1];
@@ -436,13 +436,13 @@ VSMatrix::computeNormalMatrix(const FLOATTYPE *aMatrix)
 	mMat3x3[7] = aMatrix[9];
 	mMat3x3[8] = aMatrix[10];
 
-	FLOATTYPE det, invDet;
+	double det, invDet;
 
 	det = mMat3x3[0] * (mMat3x3[4] * mMat3x3[8] - mMat3x3[5] * mMat3x3[7]) +
 		  mMat3x3[1] * (mMat3x3[5] * mMat3x3[6] - mMat3x3[8] * mMat3x3[3]) +
 		  mMat3x3[2] * (mMat3x3[3] * mMat3x3[7] - mMat3x3[4] * mMat3x3[6]);
 
-	invDet = 1.0f/det;
+	invDet = 1.0/det;
 
 	mMatrix[0] = (mMat3x3[4] * mMat3x3[8] - mMat3x3[5] * mMat3x3[7]) * invDet;
 	mMatrix[1] = (mMat3x3[5] * mMat3x3[6] - mMat3x3[8] * mMat3x3[3]) * invDet;

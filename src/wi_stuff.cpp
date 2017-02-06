@@ -52,6 +52,8 @@
 #include "r_data/r_translate.h"
 #include "templates.h"
 #include "gstrings.h"
+#include "cmdlib.h"
+#include "g_levellocals.h"
 
 // States for the intermission
 typedef enum
@@ -721,10 +723,10 @@ void WI_drawBackground()
 static int WI_DrawCharPatch (FFont *font, int charcode, int x, int y, EColorRange translation=CR_UNTRANSLATED, bool nomove=false)
 {
 	int width;
-	screen->DrawTexture(font->GetChar(charcode, &width), x, y,
+	font->GetChar(charcode, &width);
+	screen->DrawChar(font, translation, x, y, charcode,
 		nomove ? DTA_CleanNoMove : DTA_Clean, true,
-		DTA_ShadowAlpha, (gameinfo.gametype & GAME_DoomChex) ? 0 : OPAQUE/2,
-		DTA_Translation, font->GetColorTranslation(translation),
+		DTA_ShadowAlpha, (gameinfo.gametype & GAME_DoomChex) ? 0 : 0.5,
 		TAG_DONE);
 	return x - width;
 }

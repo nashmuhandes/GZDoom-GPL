@@ -3,6 +3,8 @@
 
 #include "r_state.h"
 #include "vectors.h"
+
+class FSerializer;
 //
 // Stuff from r_main.h that's needed outside the rendering code.
 
@@ -13,6 +15,7 @@
 extern DCanvas			*RenderTarget;
 
 extern DVector3			ViewPos;
+extern DVector3			ViewActorPos;
 extern DAngle			ViewAngle;
 extern DAngle			ViewPitch;
 extern DAngle			ViewRoll;
@@ -33,7 +36,7 @@ extern int				validcount;
 extern angle_t			LocalViewAngle;			// [RH] Added to consoleplayer's angle
 extern int				LocalViewPitch;			// [RH] Used directly instead of consoleplayer's pitch
 extern bool				LocalKeyboardTurner;	// [RH] The local player used the keyboard to turn, so interpolate
-extern int				WidescreenRatio;
+extern float			WidescreenRatio;
 
 extern double			r_TicFracF;
 extern DWORD			r_FrameTime;
@@ -95,7 +98,7 @@ void R_ExecuteSetViewSize (void);
 
 // Called by M_Responder.
 void R_SetViewSize (int blocks);
-void R_SetWindow (int windowSize, int fullWidth, int fullHeight, int stHeight);
+void R_SetWindow (int windowSize, int fullWidth, int fullHeight, int stHeight, bool renderingToCanvas = false);
 
 
 extern void R_FreePastViewers ();
@@ -113,7 +116,7 @@ struct FCanvasTextureInfo
 	static void Add (AActor *viewpoint, FTextureID picnum, int fov);
 	static void UpdateAll ();
 	static void EmptyList ();
-	static void Serialize (FArchive &arc);
+	static void Serialize(FSerializer &arc);
 	static void Mark();
 
 private:

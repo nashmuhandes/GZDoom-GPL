@@ -1,42 +1,29 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2005-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
-** glc_vertexbuffer.cpp
+** gl_vertexbuffer.cpp
 ** Vertex buffer handling.
 **
-**---------------------------------------------------------------------------
-** Copyright 2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
-*/
+**/
 
 #include "gl/system/gl_system.h"
 #include "doomtype.h"
@@ -44,6 +31,7 @@
 #include "r_state.h"
 #include "m_argv.h"
 #include "c_cvars.h"
+#include "g_levellocals.h"
 #include "gl/system/gl_interface.h"
 #include "gl/renderer/gl_renderer.h"
 #include "gl/shaders/gl_shader.h"
@@ -71,102 +59,218 @@ FVertexBuffer::~FVertexBuffer()
 	}
 }
 
+
+void FSimpleVertexBuffer::BindVBO()
+{
+	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+	if (!gl.legacyMode)
+	{
+		glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FSimpleVertex), &VSiO->x);
+		glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FSimpleVertex), &VSiO->u);
+		glVertexAttribPointer(VATTR_COLOR, 4, GL_UNSIGNED_BYTE, true, sizeof(FSimpleVertex), &VSiO->color);
+		glEnableVertexAttribArray(VATTR_VERTEX);
+		glEnableVertexAttribArray(VATTR_TEXCOORD);
+		glEnableVertexAttribArray(VATTR_COLOR);
+		glDisableVertexAttribArray(VATTR_VERTEX2);
+		glDisableVertexAttribArray(VATTR_NORMAL);
+	}
+	else
+	{
+		glVertexPointer(3, GL_FLOAT, sizeof(FSimpleVertex), &VSiO->x);
+		glTexCoordPointer(2, GL_FLOAT, sizeof(FSimpleVertex), &VSiO->u);
+		glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(FSimpleVertex), &VSiO->color);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+	}
+}
+
+void FSimpleVertexBuffer::EnableColorArray(bool on)
+{
+	if (on)
+	{
+		if (!gl.legacyMode)
+		{
+			glEnableVertexAttribArray(VATTR_COLOR);
+		}
+		else
+		{
+			glEnableClientState(GL_COLOR_ARRAY);
+		}
+	}
+	else
+	{
+		if (!gl.legacyMode)
+		{
+			glDisableVertexAttribArray(VATTR_COLOR);
+		}
+		else
+		{
+			glDisableClientState(GL_COLOR_ARRAY);
+		}
+	}
+}
+
+
+void FSimpleVertexBuffer::set(FSimpleVertex *verts, int count)
+{
+	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+	gl_RenderState.ResetVertexBuffer();
+	gl_RenderState.SetVertexBuffer(this);
+	glBufferData(GL_ARRAY_BUFFER, count * sizeof(*verts), verts, GL_STREAM_DRAW);
+}
+
 //==========================================================================
 //
 //
 //
 //==========================================================================
 
-FFlatVertexBuffer::FFlatVertexBuffer()
-: FVertexBuffer(!!(gl.flags & RFL_BUFFER_STORAGE))
+FFlatVertexBuffer::FFlatVertexBuffer(int width, int height)
+: FVertexBuffer(!gl.legacyMode)
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
+	switch (gl.buffermethod)
+	{
+	case BM_PERSISTENT:
 	{
 		unsigned int bytesize = BUFFER_SIZE * sizeof(FFlatVertex);
 		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
 		glBufferStorage(GL_ARRAY_BUFFER, bytesize, NULL, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
 		map = (FFlatVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, bytesize, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+		DPrintf(DMSG_NOTIFY, "Using persistent buffer\n");
+		break;
 	}
-	else
+
+	case BM_DEFERRED:
 	{
-		// The fallback path uses immediate mode rendering and does not set up an actual vertex buffer
-		vbo_shadowdata.Reserve(BUFFER_SIZE);
-		map = &vbo_shadowdata[0];
+		unsigned int bytesize = BUFFER_SIZE * sizeof(FFlatVertex);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+		glBufferData(GL_ARRAY_BUFFER, bytesize, NULL, GL_STREAM_DRAW);
+		map = nullptr;
+		DPrintf(DMSG_NOTIFY, "Using deferred buffer\n");
+		break;
 	}
-	mNumReserved = mIndex = mCurIndex = 0;
+
+	default:
+	{
+		map = new FFlatVertex[BUFFER_SIZE];
+		DPrintf(DMSG_NOTIFY, "Using client array buffer\n");
+		break;
+	}
+	}
+	mIndex = mCurIndex = 0;
+	mNumReserved = NUM_RESERVED;
+	vbo_shadowdata.Resize(mNumReserved);
+
+	// the first quad is reserved for handling coordinates through uniforms.
+	vbo_shadowdata[0].Set(0, 0, 0, 0, 0);
+	vbo_shadowdata[1].Set(1, 0, 0, 0, 0);
+	vbo_shadowdata[2].Set(2, 0, 0, 0, 0);
+	vbo_shadowdata[3].Set(3, 0, 0, 0, 0);
+
+	// and the second one for the fullscreen quad used for blend overlays.
+	vbo_shadowdata[4].Set(0, 0, 0, 0, 0);
+	vbo_shadowdata[5].Set(0, (float)height, 0, 0, 0);
+	vbo_shadowdata[6].Set((float)width, 0, 0, 0, 0);
+	vbo_shadowdata[7].Set((float)width, (float)height, 0, 0, 0);
+
+	// and this is for the postprocessing copy operation
+	vbo_shadowdata[8].Set(-1.0f, -1.0f, 0, 0.0f, 0.0f);
+	vbo_shadowdata[9].Set(-1.0f, 1.0f, 0, 0.0f, 1.f);
+	vbo_shadowdata[10].Set(1.0f, -1.0f, 0, 1.f, 0.0f);
+	vbo_shadowdata[11].Set(1.0f, 1.0f, 0, 1.f, 1.f);
+
+	// The next two are the stencil caps.
+	vbo_shadowdata[12].Set(-32767.0f, 32767.0f, -32767.0f, 0, 0);
+	vbo_shadowdata[13].Set(-32767.0f, 32767.0f, 32767.0f, 0, 0);
+	vbo_shadowdata[14].Set(32767.0f, 32767.0f, 32767.0f, 0, 0);
+	vbo_shadowdata[15].Set(32767.0f, 32767.0f, -32767.0f, 0, 0);
+
+	vbo_shadowdata[16].Set(-32767.0f, -32767.0f, -32767.0f, 0, 0);
+	vbo_shadowdata[17].Set(-32767.0f, -32767.0f, 32767.0f, 0, 0);
+	vbo_shadowdata[18].Set(32767.0f, -32767.0f, 32767.0f, 0, 0);
+	vbo_shadowdata[19].Set(32767.0f, -32767.0f, -32767.0f, 0, 0);
+
+	if (gl.buffermethod == BM_DEFERRED)
+	{
+		Map();
+		memcpy(map, &vbo_shadowdata[0], mNumReserved * sizeof(FFlatVertex));
+		Unmap();
+	}
+
 }
 
 FFlatVertexBuffer::~FFlatVertexBuffer()
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
+	if (vbo_id != 0)
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
 		glUnmapBuffer(GL_ARRAY_BUFFER);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
+	if (gl.legacyMode)
+	{
+		delete[] map;
+	}
+	map = nullptr;
 }
 
+void FFlatVertexBuffer::OutputResized(int width, int height)
+{
+	vbo_shadowdata[4].Set(0, 0, 0, 0, 0);
+	vbo_shadowdata[5].Set(0, (float)height, 0, 0, 0);
+	vbo_shadowdata[6].Set((float)width, 0, 0, 0, 0);
+	vbo_shadowdata[7].Set((float)width, (float)height, 0, 0, 0);
+	
+	Map();
+	memcpy(&map[4], &vbo_shadowdata[4], 4 * sizeof(FFlatVertex));
+	Unmap();
+}
 
 void FFlatVertexBuffer::BindVBO()
 {
 	glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
-	if (gl.glslversion > 0)
+	if (!gl.legacyMode)
 	{
-		if (vbo_id != 0)	// set this up only if there is an actual buffer.
-		{
-			glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FFlatVertex), &VTO->x);
-			glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FFlatVertex), &VTO->u);
-			glEnableVertexAttribArray(VATTR_VERTEX);
-			glEnableVertexAttribArray(VATTR_TEXCOORD);
-		}
-		else
-		{
-			glDisableVertexAttribArray(VATTR_VERTEX);
-			glDisableVertexAttribArray(VATTR_TEXCOORD);
-		}
+		glVertexAttribPointer(VATTR_VERTEX, 3, GL_FLOAT, false, sizeof(FFlatVertex), &VTO->x);
+		glVertexAttribPointer(VATTR_TEXCOORD, 2, GL_FLOAT, false, sizeof(FFlatVertex), &VTO->u);
+		glEnableVertexAttribArray(VATTR_VERTEX);
+		glEnableVertexAttribArray(VATTR_TEXCOORD);
 		glDisableVertexAttribArray(VATTR_COLOR);
 		glDisableVertexAttribArray(VATTR_VERTEX2);
+		glDisableVertexAttribArray(VATTR_NORMAL);
 	}
 	else
 	{
-		glDisableClientState(GL_VERTEX_ARRAY);
-		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glVertexPointer(3, GL_FLOAT, sizeof(FFlatVertex), &map->x);
+		glTexCoordPointer(2, GL_FLOAT, sizeof(FFlatVertex), &map->u);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 		glDisableClientState(GL_COLOR_ARRAY);
 	}
 }
 
-//==========================================================================
-//
-// immediate mode fallback for drivers without GL_ARB_buffer_storage
-//
-// No single core method is performant enough  to handle this adequately
-// so we have to resort to immediate mode instead...
-//
-//==========================================================================
-
-void FFlatVertexBuffer::ImmRenderBuffer(unsigned int primtype, unsigned int offset, unsigned int count)
+void FFlatVertexBuffer::Map()
 {
-	// this will only get called if we can't acquire a persistently mapped buffer.
-#ifndef CORE_PROFILE
-	glBegin(primtype);
-	if (gl.glslversion > 0)
+	if (gl.buffermethod == BM_DEFERRED)
 	{
-		for (unsigned int i = 0; i < count; i++)
-		{
-			glVertexAttrib2fv(VATTR_TEXCOORD, &map[offset + i].u);
-			glVertexAttrib3fv(VATTR_VERTEX, &map[offset + i].x);
-		}
+		unsigned int bytesize = BUFFER_SIZE * sizeof(FFlatVertex);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+		gl_RenderState.ResetVertexBuffer();
+		map = (FFlatVertex*)glMapBufferRange(GL_ARRAY_BUFFER, 0, bytesize, GL_MAP_WRITE_BIT|GL_MAP_UNSYNCHRONIZED_BIT);
 	}
-	else	// no shader means no vertex attributes, so use the old stuff instead.
+}
+
+void FFlatVertexBuffer::Unmap()
+{
+	if (gl.buffermethod == BM_DEFERRED)
 	{
-		for (unsigned int i = 0; i < count; i++)
-		{
-			glTexCoord2fv(&map[offset + i].u);
-			glVertex3fv(&map[offset + i].x);
-		}
+		unsigned int bytesize = BUFFER_SIZE * sizeof(FFlatVertex);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+		gl_RenderState.ResetVertexBuffer();
+		glUnmapBuffer(GL_ARRAY_BUFFER);
+		map = nullptr;
 	}
-	glEnd();
-#endif
 }
 
 //==========================================================================
@@ -291,27 +395,25 @@ void FFlatVertexBuffer::CreateFlatVBO()
 {
 	for (int h = sector_t::floor; h <= sector_t::ceiling; h++)
 	{
-		for(int i=0; i<numsectors;i++)
+		for(auto &sec : level.sectors)
 		{
-			CreateVertices(h, &sectors[i], sectors[i].GetSecPlane(h), h == sector_t::floor);
+			CreateVertices(h, &sec, sec.GetSecPlane(h), h == sector_t::floor);
 		}
 	}
 
 	// We need to do a final check for Vavoom water and FF_FIX sectors.
 	// No new vertices are needed here. The planes come from the actual sector
-	for(int i=0; i<numsectors;i++)
+	for (auto &sec : level.sectors)
 	{
-		for(unsigned j=0;j<sectors[i].e->XFloor.ffloors.Size(); j++)
+		for(auto ff : sec.e->XFloor.ffloors)
 		{
-			F3DFloor *ff = sectors[i].e->XFloor.ffloors[j];
-
-			if (ff->top.model == &sectors[i])
+			if (ff->top.model == &sec)
 			{
-				ff->top.vindex = sectors[i].vboindex[ff->top.isceiling];
+				ff->top.vindex = sec.vboindex[ff->top.isceiling];
 			}
-			if (ff->bottom.model == &sectors[i])
+			if (ff->bottom.model == &sec)
 			{
-				ff->bottom.vindex = sectors[i].vboindex[ff->top.isceiling];
+				ff->bottom.vindex = sec.vboindex[ff->top.isceiling];
 			}
 		}
 	}
@@ -346,24 +448,12 @@ void FFlatVertexBuffer::UpdatePlaneVertices(sector_t *sec, int plane)
 
 void FFlatVertexBuffer::CreateVBO()
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
-	{
-		vbo_shadowdata.Resize(mNumReserved);
-		CreateFlatVBO();
-		mCurIndex = mIndex = vbo_shadowdata.Size();
-		memcpy(map, &vbo_shadowdata[0], vbo_shadowdata.Size() * sizeof(FFlatVertex));
-	}
-	else if (sectors)
-	{
-		// set all VBO info to invalid values so that we can save some checks in the rendering code
-		for(int i=0;i<numsectors;i++)
-		{
-			sectors[i].vboindex[3] = sectors[i].vboindex[2] = 
-			sectors[i].vboindex[1] = sectors[i].vboindex[0] = -1;
-			sectors[i].vboheight[1] = sectors[i].vboheight[0] = FLT_MIN;
-		}
-	}
-
+	vbo_shadowdata.Resize(mNumReserved);
+	CreateFlatVBO();
+	mCurIndex = mIndex = vbo_shadowdata.Size();
+	Map();
+	memcpy(map, &vbo_shadowdata[0], vbo_shadowdata.Size() * sizeof(FFlatVertex));
+	Unmap();
 }
 
 //==========================================================================
@@ -395,12 +485,9 @@ void FFlatVertexBuffer::CheckPlanes(sector_t *sector)
 
 void FFlatVertexBuffer::CheckUpdate(sector_t *sector)
 {
-	if (gl.flags & RFL_BUFFER_STORAGE)
-	{
-		CheckPlanes(sector);
-		sector_t *hs = sector->GetHeightSec();
-		if (hs != NULL) CheckPlanes(hs);
-		for (unsigned i = 0; i < sector->e->XFloor.ffloors.Size(); i++)
-			CheckPlanes(sector->e->XFloor.ffloors[i]->model);
-	}
+	CheckPlanes(sector);
+	sector_t *hs = sector->GetHeightSec();
+	if (hs != NULL) CheckPlanes(hs);
+	for (unsigned i = 0; i < sector->e->XFloor.ffloors.Size(); i++)
+		CheckPlanes(sector->e->XFloor.ffloors[i]->model);
 }

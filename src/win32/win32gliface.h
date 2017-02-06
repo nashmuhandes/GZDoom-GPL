@@ -86,7 +86,6 @@ protected:
 	void MakeModesList();
 	void AddMode(int x, int y, int bits, int baseHeight, int refreshHz);
 	void FreeModes();
-	bool checkCoreUsability();
 public:
 	int GetTrueHeight() { return m_trueHeight; }
 
@@ -149,6 +148,7 @@ protected:
 	int m_Lock;
 	char m_displayDeviceNameBuffer[CCHDEVICENAME];
 	char *m_displayDeviceName;
+	int SwapInterval;
 
 	friend class Win32GLVideo;
 

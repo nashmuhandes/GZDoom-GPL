@@ -54,10 +54,11 @@
 #include "v_font.h"
 #include "r_renderer.h"
 #include "r_data/colormaps.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "r_utility.h"
 #include "d_player.h"
 #include "p_local.h"
+#include "g_levellocals.h"
 #include "p_maputl.h"
 #include "math/cmath.h"
 
@@ -107,6 +108,7 @@ int 			viewwindowx;
 int 			viewwindowy;
 
 DVector3		ViewPos;
+DVector3		ViewActorPos;	// the actual position of the viewing actor, without interpolation and quake offsets.
 DAngle			ViewAngle;
 DAngle			ViewPitch;
 DAngle			ViewRoll;
@@ -139,7 +141,7 @@ angle_t			LocalViewAngle;
 int				LocalViewPitch;
 bool			LocalKeyboardTurner;
 
-int				WidescreenRatio;
+float			WidescreenRatio;
 int				setblocks;
 int				extralight;
 bool			setsizeneeded;
@@ -199,9 +201,9 @@ void R_SetViewSize (int blocks)
 //
 //==========================================================================
 
-void R_SetWindow (int windowSize, int fullWidth, int fullHeight, int stHeight)
+void R_SetWindow (int windowSize, int fullWidth, int fullHeight, int stHeight, bool renderingToCanvas)
 {
-	int trueratio;
+	float trueratio;
 
 	if (windowSize >= 11)
 	{
@@ -221,8 +223,15 @@ void R_SetWindow (int windowSize, int fullWidth, int fullHeight, int stHeight)
 		freelookviewheight = ((setblocks*fullHeight)/10)&~7;
 	}
 
-	// If the screen is approximately 16:9 or 16:10, consider it widescreen.
-	WidescreenRatio = CheckRatio (fullWidth, fullHeight, &trueratio);
+	if (renderingToCanvas)
+	{
+		WidescreenRatio = fullWidth / (float)fullHeight;
+		trueratio = WidescreenRatio;
+	}
+	else
+	{
+		WidescreenRatio = ActiveRatio(fullWidth, fullHeight, &trueratio);
+	}
 
 	DrawFSHUD = (windowSize == 11);
 	
@@ -231,13 +240,13 @@ void R_SetWindow (int windowSize, int fullWidth, int fullHeight, int stHeight)
 
 	centery = viewheight/2;
 	centerx = viewwidth/2;
-	if (Is54Aspect(WidescreenRatio))
+	if (AspectTallerThanWide(WidescreenRatio))
 	{
 		centerxwide = centerx;
 	}
 	else
 	{
-		centerxwide = centerx * BaseRatioSizes[WidescreenRatio][3] / 48;
+		centerxwide = centerx * AspectMultiplier(WidescreenRatio) / 48;
 	}
 
 
@@ -265,13 +274,13 @@ void R_ExecuteSetViewSize ()
 	setsizeneeded = false;
 	V_SetBorderNeedRefresh();
 
-	R_SetWindow (setblocks, SCREENWIDTH, SCREENHEIGHT, ST_Y);
+	R_SetWindow (setblocks, SCREENWIDTH, SCREENHEIGHT, gST_Y);
 
 	// Handle resize, e.g. smaller view windows with border and/or status bar.
 	viewwindowx = (screen->GetWidth() - viewwidth) >> 1;
 
 	// Same with base row offset.
-	viewwindowy = (viewwidth == screen->GetWidth()) ? 0 : (ST_Y - viewheight) >> 1;
+	viewwindowy = (viewwidth == screen->GetWidth()) ? 0 : (gST_Y - viewheight) >> 1;
 }
 
 //==========================================================================
@@ -484,6 +493,7 @@ void R_InterpolateView (player_t *player, double Frac, InterpolationViewer *ivie
 		if (ViewPos.Z > viewsector->GetPortalPlaneZ(sector_t::ceiling))
 		{
 			ViewPos += viewsector->GetPortalDisplacement(sector_t::ceiling);
+			ViewActorPos += viewsector->GetPortalDisplacement(sector_t::ceiling);
 			viewsector = R_PointInSubsector(ViewPos)->sector;
 			moved = true;
 		}
@@ -496,6 +506,7 @@ void R_InterpolateView (player_t *player, double Frac, InterpolationViewer *ivie
 			if (ViewPos.Z < viewsector->GetPortalPlaneZ(sector_t::floor))
 			{
 				ViewPos += viewsector->GetPortalDisplacement(sector_t::floor);
+				ViewActorPos += viewsector->GetPortalDisplacement(sector_t::floor);
 				viewsector = R_PointInSubsector(ViewPos)->sector;
 				moved = true;
 			}
@@ -657,7 +668,7 @@ void R_AddInterpolationPoint(const DVector3a &vec)
 //
 //==========================================================================
 
-static double QuakePower(double factor, double intensity, double offset, double falloff, double wfalloff)
+static double QuakePower(double factor, double intensity, double offset)
 { 
 	double randumb;
 	if (intensity == 0)
@@ -668,7 +679,7 @@ static double QuakePower(double factor, double intensity, double offset, double 
 	{
 		randumb = pr_torchflicker.GenRand_Real2() * (intensity * 2) - intensity;
 	}
-	return factor * (wfalloff * offset + falloff * randumb);
+	return factor * (offset + randumb);
 }
 
 //==========================================================================
@@ -737,10 +748,11 @@ void R_SetupFrame (AActor *actor)
 			iview->Old = iview->New;
 			r_NoInterpolate = true;
 		}
+		ViewActorPos = campos;
 	}
 	else
 	{
-		iview->New.Pos = { camera->Pos().XY(), camera->player ? camera->player->viewz : camera->Z() + camera->GetCameraHeight() };
+		ViewActorPos = iview->New.Pos = { camera->Pos().XY(), camera->player ? camera->player->viewz : camera->Z() + camera->GetCameraHeight() };
 		viewsector = camera->Sector;
 		r_showviewer = false;
 	}
@@ -798,36 +810,36 @@ void R_SetupFrame (AActor *actor)
 
 			if (jiggers.RollIntensity != 0 || jiggers.RollWave != 0)
 			{
-				ViewRoll += QuakePower(quakefactor, jiggers.RollIntensity, jiggers.RollWave, jiggers.RFalloff, jiggers.RWFalloff);
+				ViewRoll += QuakePower(quakefactor, jiggers.RollIntensity, jiggers.RollWave);
 			}
 			if (jiggers.RelIntensity.X != 0 || jiggers.RelOffset.X != 0)
 			{
 				an = camera->Angles.Yaw;
-				double power = QuakePower(quakefactor, jiggers.RelIntensity.X, jiggers.RelOffset.X, jiggers.Falloff, jiggers.WFalloff);
+				double power = QuakePower(quakefactor, jiggers.RelIntensity.X, jiggers.RelOffset.X);
 				ViewPos += an.ToVector(power);
 			}
 			if (jiggers.RelIntensity.Y != 0 || jiggers.RelOffset.Y != 0)
 			{
 				an = camera->Angles.Yaw + 90;
-				double power = QuakePower(quakefactor, jiggers.RelIntensity.Y, jiggers.RelOffset.Y, jiggers.Falloff, jiggers.WFalloff);
+				double power = QuakePower(quakefactor, jiggers.RelIntensity.Y, jiggers.RelOffset.Y);
 				ViewPos += an.ToVector(power);
 			}
 			// FIXME: Relative Z is not relative
 			if (jiggers.RelIntensity.Z != 0 || jiggers.RelOffset.Z != 0)
 			{
-				ViewPos.Z += QuakePower(quakefactor, jiggers.RelIntensity.Z, jiggers.RelOffset.Z, jiggers.Falloff, jiggers.WFalloff);
+				ViewPos.Z += QuakePower(quakefactor, jiggers.RelIntensity.Z, jiggers.RelOffset.Z);
 			}
 			if (jiggers.Intensity.X != 0 || jiggers.Offset.X != 0)
 			{
-				ViewPos.X += QuakePower(quakefactor, jiggers.Intensity.X, jiggers.Offset.X, jiggers.Falloff, jiggers.WFalloff);
+				ViewPos.X += QuakePower(quakefactor, jiggers.Intensity.X, jiggers.Offset.X);
 			}
 			if (jiggers.Intensity.Y != 0 || jiggers.Offset.Y != 0)
 			{
-				ViewPos.Y += QuakePower(quakefactor, jiggers.Intensity.Y, jiggers.Offset.Y, jiggers.Falloff, jiggers.WFalloff);
+				ViewPos.Y += QuakePower(quakefactor, jiggers.Intensity.Y, jiggers.Offset.Y);
 			}
 			if (jiggers.Intensity.Z != 0 || jiggers.Offset.Z != 0)
 			{
-				ViewPos.Z += QuakePower(quakefactor, jiggers.Intensity.Z, jiggers.Offset.Z, jiggers.Falloff, jiggers.WFalloff);
+				ViewPos.Z += QuakePower(quakefactor, jiggers.Intensity.Z, jiggers.Offset.Z);
 			}
 		}
 	}
@@ -1035,33 +1047,49 @@ void FCanvasTextureInfo::EmptyList ()
 //
 //==========================================================================
 
-void FCanvasTextureInfo::Serialize (FArchive &arc)
+void FCanvasTextureInfo::Serialize(FSerializer &arc)
 {
-	if (arc.IsStoring ())
+	if (arc.isWriting())
 	{
-		FCanvasTextureInfo *probe;
-
-		for (probe = List; probe != NULL; probe = probe->Next)
+		if (List != nullptr)
 		{
-			if (probe->Texture != NULL && probe->Viewpoint != NULL)
+			if (arc.BeginArray("canvastextures"))
 			{
-				arc << probe->Viewpoint << probe->FOV << probe->PicNum;
+				FCanvasTextureInfo *probe;
+
+				for (probe = List; probe != nullptr; probe = probe->Next)
+				{
+					if (probe->Texture != nullptr && probe->Viewpoint != nullptr)
+					{
+						if (arc.BeginObject(nullptr))
+						{
+							arc("viewpoint", probe->Viewpoint)
+								("fov", probe->FOV)
+								("texture", probe->PicNum)
+								.EndObject();
+						}
+					}
+				}
+				arc.EndArray();
 			}
 		}
-		AActor *nullactor = NULL;
-		arc << nullactor;
 	}
 	else
 	{
-		AActor *viewpoint;
-		int fov;
-		FTextureID picnum;
-		
-		EmptyList ();
-		while (arc << viewpoint, viewpoint != NULL)
+		if (arc.BeginArray("canvastextures"))
 		{
-			arc << fov << picnum;
-			Add (viewpoint, picnum, fov);
+			AActor *viewpoint;
+			int fov;
+			FTextureID picnum;
+			while (arc.BeginObject(nullptr))
+			{
+				arc("viewpoint", viewpoint)
+					("fov", fov)
+					("texture", picnum)
+					.EndObject();
+				Add(viewpoint, picnum, fov);
+			}
+			arc.EndArray();
 		}
 	}
 }
@@ -1082,3 +1110,27 @@ void FCanvasTextureInfo::Mark()
 	}
 }
 
+
+//==========================================================================
+//
+// CVAR transsouls
+//
+// How translucent things drawn with STYLE_SoulTrans are. Normally, only
+// Lost Souls have this render style.
+// Values less than 0.25 will automatically be set to
+// 0.25 to ensure some degree of visibility. Likewise, values above 1.0 will
+// be set to 1.0, because anything higher doesn't make sense.
+//
+//==========================================================================
+
+CUSTOM_CVAR(Float, transsouls, 0.75f, CVAR_ARCHIVE)
+{
+	if (self < 0.25f)
+	{
+		self = 0.25f;
+	}
+	else if (self > 1.f)
+	{
+		self = 1.f;
+	}
+}

@@ -12,11 +12,15 @@ struct GLRenderSettings
 	bool nocoloredspritelighting;
 	bool notexturefill;
 	bool brightfog;
+	bool lightadditivesurfaces;
+	bool attenuate;
 
-	SBYTE map_lightmode;
-	SBYTE map_nocoloredspritelighting;
-	SBYTE map_notexturefill;
-	SBYTE map_brightfog;
+	int8_t map_lightmode;
+	int8_t map_nocoloredspritelighting;
+	int8_t map_notexturefill;
+	int8_t map_brightfog;
+	int8_t map_lightadditivesurfaces;
+	int8_t map_attenuate;
 
 	FVector3 skyrotatevector;
 	FVector3 skyrotatevector2;
@@ -42,7 +46,6 @@ inline	int getExtraLight()
 void gl_RecalcVertexHeights(vertex_t * v);
 FTextureID gl_GetSpriteFrame(unsigned sprite, int frame, int rot, angle_t ang, bool *mirror);
 
-class AStackPoint;
 struct GLSectorStackPortal;
 
 struct FPortal

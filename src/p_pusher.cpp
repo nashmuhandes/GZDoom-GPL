@@ -27,12 +27,13 @@
 #include <stdlib.h>
 #include "actor.h"
 #include "p_spec.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "p_lnspec.h"
 #include "c_cvars.h"
 #include "p_maputl.h"
 #include "p_local.h"
 #include "d_player.h"
+#include "g_levellocals.h"
 
 CVAR(Bool, var_pushers, true, CVAR_SERVERINFO);
 
@@ -53,7 +54,7 @@ public:
 
 	DPusher ();
 	DPusher (EPusher type, line_t *l, int magnitude, int angle, AActor *source, int affectee);
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	int CheckForSectorMatch (EPusher type, int tag);
 	void ChangeValues (int magnitude, int angle)
 	{
@@ -75,32 +76,25 @@ protected:
 	friend bool PIT_PushThing (AActor *thing);
 };
 
+IMPLEMENT_CLASS(DPusher, false, true)
 
-IMPLEMENT_POINTY_CLASS (DPusher)
- DECLARE_POINTER (m_Source)
-END_POINTERS
+IMPLEMENT_POINTERS_START(DPusher)
+	IMPLEMENT_POINTER(m_Source)
+IMPLEMENT_POINTERS_END
 
 DPusher::DPusher ()
 {
 }
 
-inline FArchive &operator<< (FArchive &arc, DPusher::EPusher &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DPusher::EPusher)val;
-	return arc;
-}
-
-void DPusher::Serialize (FArchive &arc)
+void DPusher::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Type
-		<< m_Source
-		<< m_PushVec
-		<< m_Magnitude
-		<< m_Radius
-		<< m_Affectee;
+	arc.Enum("type", m_Type)
+		("source", m_Source)
+		("pushvec", m_PushVec)
+		("magnitude", m_Magnitude)
+		("radius", m_Radius)
+		("affectee", m_Affectee);
 }
 
 
@@ -200,7 +194,7 @@ void DPusher::Tick ()
 	if (!var_pushers)
 		return;
 
-	sec = sectors + m_Affectee;
+	sec = &level.sectors[m_Affectee];
 
 	// Be sure the special sector type is still turned on. If so, proceed.
 	// Else, bail out; the sector type has been changed on us.
@@ -347,7 +341,7 @@ AActor *P_GetPushThing (int s)
 	AActor* thing;
 	sector_t* sec;
 
-	sec = sectors + s;
+	sec = &level.sectors[s];
 	thing = sec->thinglist;
 
 	while (thing &&
@@ -366,11 +360,10 @@ AActor *P_GetPushThing (int s)
 
 void P_SpawnPushers ()
 {
-	int i;
-	line_t *l = lines;
+	line_t *l = &level.lines[0];
 	int s;
 
-	for (i = 0; i < numlines; i++, l++)
+	for (unsigned i = 0; i < level.lines.Size(); i++, l++)
 	{
 		switch (l->special)
 		{
@@ -414,8 +407,7 @@ void P_SpawnPushers ()
 					if (thing->GetClass()->TypeName == NAME_PointPusher ||
 						thing->GetClass()->TypeName == NAME_PointPuller)
 					{
-						new DPusher (DPusher::p_push, l->args[3] ? l : NULL, l->args[2],
-									 0, thing, int(thing->Sector - sectors));
+						new DPusher (DPusher::p_push, l->args[3] ? l : NULL, l->args[2], 0, thing, thing->Sector->Index());
 					}
 				}
 			}
@@ -455,7 +447,7 @@ void AdjustPusher (int tag, int magnitude, int angle, bool wind)
 		unsigned int i;
 		for (i = 0; i < numcollected; i++)
 		{
-			if (Collection[i].RefNum == sectors[secnum].sectornum)
+			if (Collection[i].RefNum == secnum)
 				break;
 		}
 		if (i == numcollected)

@@ -39,6 +39,7 @@
 #include "p_maputl.h"
 #include "r_utility.h"
 #include "p_spec.h"
+#include "g_levellocals.h"
 
 #define FUDGEFACTOR		10
 
@@ -47,28 +48,6 @@ static FRandom pr_teleport ("Teleport");
 extern void P_CalcHeight (player_t *player);
 
 CVAR (Bool, telezoom, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
-
-IMPLEMENT_CLASS (ATeleportFog)
-
-void ATeleportFog::PostBeginPlay ()
-{
-	Super::PostBeginPlay ();
-	S_Sound (this, CHAN_BODY, "misc/teleport", 1, ATTN_NORM);
-	switch (gameinfo.gametype)
-	{
-	case GAME_Hexen:
-	case GAME_Heretic:
-		SetState(FindState(NAME_Raven));
-		break;
-
-	case GAME_Strife:
-		SetState(FindState(NAME_Strife));
-		break;
-		
-	default:
-		break;
-	}
-}
 
 //==========================================================================
 //
@@ -95,6 +74,18 @@ void P_SpawnTeleportFog(AActor *mobj, const DVector3 &pos, bool beforeTele, bool
 
 	if (mo != NULL && setTarget)
 		mo->target = mobj;
+}
+
+DEFINE_ACTION_FUNCTION(AActor, SpawnTeleportFog)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT(x);
+	PARAM_FLOAT(y);
+	PARAM_FLOAT(z);
+	PARAM_BOOL(before);
+	PARAM_BOOL(settarget);
+	P_SpawnTeleportFog(self, DVector3(x, y, z), before, settarget);
+	return 0;
 }
 
 //
@@ -227,6 +218,17 @@ bool P_Teleport (AActor *thing, DVector3 pos, DAngle angle, int flags)
 	return true;
 }
 
+DEFINE_ACTION_FUNCTION(AActor, Teleport)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT(x);
+	PARAM_FLOAT(y);
+	PARAM_FLOAT(z);
+	PARAM_ANGLE(an);
+	PARAM_INT(flags);
+	ACTION_RETURN_BOOL(P_Teleport(self, DVector3(x, y, z), an, flags));
+}
+
 static AActor *SelectTeleDest (int tid, int tag, bool norandom)
 {
 	AActor *searcher;
@@ -311,7 +313,7 @@ static AActor *SelectTeleDest (int tid, int tag, bool norandom)
 			TThinkerIterator<AActor> it2(NAME_TeleportDest);
 			while ((searcher = it2.Next()) != NULL)
 			{
-				if (searcher->Sector == sectors + secnum)
+				if (searcher->Sector == &level.sectors[secnum])
 				{
 					return searcher;
 				}
@@ -425,10 +427,10 @@ bool EV_SilentLineTeleport (line_t *line, int side, AActor *thing, int id, INTBO
 	FLineIdIterator itr(id);
 	while ((i = itr.Next()) >= 0)
 	{
-		if (line-lines == i)
+		if (line->Index() == i)
 			continue;
 
-		if ((l=lines+i) != line && l->backsector)
+		if ((l=&level.lines[i]) != line && l->backsector)
 		{
 			// Get the thing's position along the source linedef
 			double pos;
@@ -707,7 +709,7 @@ bool EV_TeleportSector (int tag, int source_tid, int dest_tid, bool fog, int gro
 	while ((secnum = itr.Next()) >= 0)
 	{
 		msecnode_t *node;
-		const sector_t * const sec = &sectors[secnum];
+		const sector_t * const sec = &level.sectors[secnum];
 
 		for (node = sec->touching_thinglist; node; )
 		{

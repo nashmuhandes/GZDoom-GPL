@@ -64,8 +64,11 @@ void M_DrawConText (int color, int x, int y, const char *str)
 		TAG_DONE);
 }
 
+IMPLEMENT_CLASS(DOptionMenu, false, false)
 
-IMPLEMENT_CLASS(DOptionMenu)
+IMPLEMENT_POINTERS_START(DOptionMenu)
+IMPLEMENT_POINTER(mFocusControl)
+IMPLEMENT_POINTERS_END
 
 //=============================================================================
 //
@@ -125,8 +128,10 @@ int DOptionMenu::FirstSelectable()
 //
 //
 //=============================================================================
+IMPLEMENT_CLASS(DOptionMenuItem, true, false)
 
-FOptionMenuItem *DOptionMenu::GetItem(FName name)
+
+DOptionMenuItem *DOptionMenu::GetItem(FName name)
 {
 	for(unsigned i=0;i<mDesc->mItems.Size(); i++)
 	{
@@ -477,22 +482,17 @@ void DOptionMenu::Drawer ()
 //
 //=============================================================================
 
-FOptionMenuItem::~FOptionMenuItem()
-{
-	if (mLabel != NULL) delete [] mLabel;
-}
-
-int FOptionMenuItem::Draw(FOptionMenuDescriptor *desc, int y, int indent, bool selected)
+int DOptionMenuItem::Draw(FOptionMenuDescriptor *desc, int y, int indent, bool selected)
 {
 	return indent;
 }
 
-bool FOptionMenuItem::Selectable()
+bool DOptionMenuItem::Selectable()
 {
 	return true;
 }
 
-bool FOptionMenuItem::MouseEvent(int type, int x, int y)
+bool DOptionMenuItem::MouseEvent(int type, int x, int y)
 {
 	if (Selectable() && type == DMenu::MOUSE_Release)
 	{
@@ -501,20 +501,20 @@ bool FOptionMenuItem::MouseEvent(int type, int x, int y)
 	return false;
 }
 
-int  FOptionMenuItem::GetIndent()
+int  DOptionMenuItem::GetIndent()
 {
 	if (mCentered)
 	{
 		return 0;
 	}
-	const char *label = mLabel;
+	const char *label = mLabel.GetChars();
 	if (*label == '$') label = GStrings(label+1);
 	return SmallFont->StringWidth(label);
 }
 
-void FOptionMenuItem::drawLabel(int indent, int y, EColorRange color, bool grayed)
+void DOptionMenuItem::drawLabel(int indent, int y, EColorRange color, bool grayed)
 {
-	const char *label = mLabel;
+	const char *label = mLabel.GetChars();
 	if (*label == '$') label = GStrings(label+1);
 
 	int overlay = grayed? MAKEARGB(96,48,0,0) : 0;
@@ -547,7 +547,7 @@ void FOptionMenuDescriptor::CalcIndent()
 //
 //=============================================================================
 
-FOptionMenuItem *FOptionMenuDescriptor::GetItem(FName name)
+DOptionMenuItem *FOptionMenuDescriptor::GetItem(FName name)
 {
 	for(unsigned i=0;i<mItems.Size(); i++)
 	{
@@ -580,7 +580,7 @@ public:
 	}
 };
 
-IMPLEMENT_CLASS(DGameplayMenu)
+IMPLEMENT_CLASS(DGameplayMenu, false, false)
 
 class DCompatibilityMenu : public DOptionMenu
 {
@@ -602,4 +602,4 @@ public:
 	}
 };
 
-IMPLEMENT_CLASS(DCompatibilityMenu)
+IMPLEMENT_CLASS(DCompatibilityMenu, false, false)

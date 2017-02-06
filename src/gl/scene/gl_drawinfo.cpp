@@ -1,49 +1,38 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2002-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_drawinfo.cpp
 ** Implements the draw info structure which contains most of the
 ** data in a scene and the draw lists - including a very thorough BSP 
 ** style sorting algorithm for translucent objects.
 **
-**---------------------------------------------------------------------------
-** Copyright 2002-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
 */
+
 #include "gl/system/gl_system.h"
 #include "r_sky.h"
 #include "r_utility.h"
 #include "r_state.h"
 #include "doomstat.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_cvars.h"
 #include "gl/data/gl_data.h"
@@ -57,6 +46,7 @@
 #include "gl/utility/gl_templates.h"
 #include "gl/shaders/gl_shader.h"
 #include "gl/stereo3d/scoped_color_mask.h"
+#include "gl/renderer/gl_quaddrawer.h"
 
 FDrawInfo * gl_drawinfo;
 
@@ -321,9 +311,10 @@ void GLDrawList::SortWallIntoPlane(SortNode * head,SortNode * sort)
 		AddWall(&w);
 	
 		// Splitting is done in the shader with clip planes, if available
-		if (gl.glslversion < 1.3f)
+		if (gl.flags & RFL_NO_CLIP_PLANES)
 		{
 			GLWall * ws1;
+			ws->vertcount = 0;	// invalidate current vertices.
 			ws1=&walls[walls.Size()-1];
 			ws=&walls[drawitems[sort->itemindex].index];	// may have been reallocated!
 			float newtexv = ws->tcs[GLWall::UPLFT].v + ((ws->tcs[GLWall::LOLFT].v - ws->tcs[GLWall::UPLFT].v) / (ws->zbottom[0] - ws->ztop[0])) * (fh->z - ws->ztop[0]);
@@ -380,7 +371,7 @@ void GLDrawList::SortSpriteIntoPlane(SortNode * head,SortNode * sort)
 		AddSprite(&s);	// add a copy to avoid reallocation issues.
 	
 		// Splitting is done in the shader with clip planes, if available
-		if (gl.glslversion < 1.3f)
+		if (gl.flags & RFL_NO_CLIP_PLANES)
 		{
 			GLSprite * ss1;
 			ss1=&sprites[sprites.Size()-1];
@@ -466,6 +457,7 @@ void GLDrawList::SortWallIntoWall(SortNode * head,SortNode * sort)
 		float izt=(float)(ws->ztop[0]+r*(ws->ztop[1]-ws->ztop[0]));
 		float izb=(float)(ws->zbottom[0]+r*(ws->zbottom[1]-ws->zbottom[0]));
 
+		ws->vertcount = 0;	// invalidate current vertices.
 		GLWall w=*ws;
 		AddWall(&w);
 		ws1=&walls[walls.Size()-1];
@@ -473,9 +465,15 @@ void GLDrawList::SortWallIntoWall(SortNode * head,SortNode * sort)
 
 		ws1->glseg.x1=ws->glseg.x2=ix;
 		ws1->glseg.y1=ws->glseg.y2=iy;
+		ws1->glseg.fracleft = ws->glseg.fracright = ws->glseg.fracleft + r*(ws->glseg.fracright - ws->glseg.fracleft);
 		ws1->ztop[0]=ws->ztop[1]=izt;
 		ws1->zbottom[0]=ws->zbottom[1]=izb;
 		ws1->tcs[GLWall::LOLFT].u = ws1->tcs[GLWall::UPLFT].u = ws->tcs[GLWall::LORGT].u = ws->tcs[GLWall::UPRGT].u = iu;
+		if (gl.buffermethod == BM_DEFERRED)
+		{
+			ws->MakeVertices(false);
+			ws1->MakeVertices(false);
+		}
 
 		SortNode * sort2=SortNodes.GetNew();
 		memset(sort2,0,sizeof(SortNode));
@@ -500,6 +498,10 @@ void GLDrawList::SortWallIntoWall(SortNode * head,SortNode * sort)
 // 
 //
 //==========================================================================
+EXTERN_CVAR(Int, gl_billboard_mode)
+EXTERN_CVAR(Bool, gl_billboard_faces_camera)
+EXTERN_CVAR(Bool, gl_billboard_particles)
+
 void GLDrawList::SortSpriteIntoWall(SortNode * head,SortNode * sort)
 {
 	GLWall * wh=&walls[drawitems[head->itemindex].index];
@@ -530,6 +532,27 @@ void GLDrawList::SortSpriteIntoWall(SortNode * head,SortNode * sort)
 	}
 	else
 	{
+		const bool drawWithXYBillboard = ((ss->particle && gl_billboard_particles) || (!(ss->actor && ss->actor->renderflags & RF_FORCEYBILLBOARD)
+			&& (gl_billboard_mode == 1 || (ss->actor && ss->actor->renderflags & RF_FORCEXYBILLBOARD))));
+
+		const bool drawBillboardFacingCamera = gl_billboard_faces_camera;
+		// [Nash] has +ROLLSPRITE
+		const bool rotated = (ss->actor != nullptr && ss->actor->renderflags & (RF_ROLLSPRITE | RF_WALLSPRITE | RF_FLATSPRITE));
+
+		// cannot sort them at the moment. This requires more complex splitting.
+		if (drawWithXYBillboard || drawBillboardFacingCamera || rotated)
+		{
+			float v1 = wh->PointOnSide(ss->x, ss->y);
+			if (v1 < 0)
+			{
+				head->AddToLeft(sort);
+			}
+			else
+			{
+				head->AddToRight(sort);
+			}
+			return;
+		}
 		double r=ss->CalcIntersectionVertex(wh);
 
 		float ix=(float)(ss->x1 + r * (ss->x2-ss->x1));
@@ -802,17 +825,19 @@ void GLDrawList::DrawSorted()
 
 	if (!sorted)
 	{
+		GLRenderer->mVBO->Map();
 		MakeSortList();
 		sorted=DoSort(SortNodes[SortNodeStart]);
+		GLRenderer->mVBO->Unmap();
 	}
 	gl_RenderState.ClearClipSplit();
-	if (gl.glslversion >= 1.3f)
+	if (!(gl.flags & RFL_NO_CLIP_PLANES))
 	{
 		glEnable(GL_CLIP_DISTANCE1);
 		glEnable(GL_CLIP_DISTANCE2);
 	}
 	DoDrawSorted(sorted);
-	if (gl.glslversion >= 1.3f)
+	if (!(gl.flags & RFL_NO_CLIP_PLANES))
 	{
 		glDisable(GL_CLIP_DISTANCE1);
 		glDisable(GL_CLIP_DISTANCE2);
@@ -991,7 +1016,7 @@ static FDrawInfoList di_list;
 FDrawInfo::FDrawInfo()
 {
 	next = NULL;
-	if (gl.lightmethod == LM_SOFTWARE)
+	if (gl.legacyMode)
 	{
 		dldrawlists = new GLDrawList[GLLDL_TYPES];
 	}
@@ -1019,11 +1044,11 @@ void FDrawInfo::StartScene()
 {
 	ClearBuffers();
 
-	sectorrenderflags.Resize(numsectors);
+	sectorrenderflags.Resize(level.sectors.Size());
 	ss_renderflags.Resize(numsubsectors);
 	no_renderflags.Resize(numsubsectors);
 
-	memset(&sectorrenderflags[0], 0, numsectors * sizeof(sectorrenderflags[0]));
+	memset(&sectorrenderflags[0], 0, level.sectors.Size() * sizeof(sectorrenderflags[0]));
 	memset(&ss_renderflags[0], 0, numsubsectors * sizeof(ss_renderflags[0]));
 	memset(&no_renderflags[0], 0, numnodes * sizeof(no_renderflags[0]));
 
@@ -1079,17 +1104,12 @@ void FDrawInfo::SetupFloodStencil(wallseg * ws)
 		glDepthMask(true);
 
 		gl_RenderState.Apply();
-		FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(ws->x1, ws->z1, ws->y1, 0, 0);
-		ptr++;
-		ptr->Set(ws->x1, ws->z2, ws->y1, 0, 0);
-		ptr++;
-		ptr->Set(ws->x2, ws->z2, ws->y2, 0, 0);
-		ptr++;
-		ptr->Set(ws->x2, ws->z1, ws->y2, 0, 0);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_FAN);
-
+		FQuadDrawer qd;
+		qd.Set(0, ws->x1, ws->z1, ws->y1, 0, 0);
+		qd.Set(1, ws->x1, ws->z2, ws->y1, 0, 0);
+		qd.Set(2, ws->x2, ws->z2, ws->y2, 0, 0);
+		qd.Set(3, ws->x2, ws->z1, ws->y2, 0, 0);
+		qd.Render(GL_TRIANGLE_FAN);
 
 		glStencilFunc(GL_EQUAL, recursion + 1, ~0);		// draw sky into stencil
 		glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);		// this stage doesn't modify the stencil
@@ -1112,16 +1132,12 @@ void FDrawInfo::ClearFloodStencil(wallseg * ws)
 		gl_RenderState.ResetColor();
 
 		gl_RenderState.Apply();
-		FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(ws->x1, ws->z1, ws->y1, 0, 0);
-		ptr++;
-		ptr->Set(ws->x1, ws->z2, ws->y1, 0, 0);
-		ptr++;
-		ptr->Set(ws->x2, ws->z2, ws->y2, 0, 0);
-		ptr++;
-		ptr->Set(ws->x2, ws->z1, ws->y2, 0, 0);
-		ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_FAN);
+		FQuadDrawer qd;
+		qd.Set(0, ws->x1, ws->z1, ws->y1, 0, 0);
+		qd.Set(1, ws->x1, ws->z2, ws->y1, 0, 0);
+		qd.Set(2, ws->x2, ws->z2, ws->y2, 0, 0);
+		qd.Set(3, ws->x2, ws->z1, ws->y2, 0, 0);
+		qd.Render(GL_TRIANGLE_FAN);
 
 		// restore old stencil op.
 		glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
@@ -1192,16 +1208,12 @@ void FDrawInfo::DrawFloodedPlane(wallseg * ws, float planez, sector_t * sec, boo
 	float px4 = fviewx + prj_fac1 * (ws->x2-fviewx);
 	float py4 = fviewy + prj_fac1 * (ws->y2-fviewy);
 
-	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-	ptr->Set(px1, planez, py1, px1 / 64, -py1 / 64);
-	ptr++;
-	ptr->Set(px2, planez, py2, px2 / 64, -py2 / 64);
-	ptr++;
-	ptr->Set(px3, planez, py3, px3 / 64, -py3 / 64);
-	ptr++;
-	ptr->Set(px4, planez, py4, px4 / 64, -py4 / 64);
-	ptr++;
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_FAN);
+	FQuadDrawer qd;
+	qd.Set(0, px1, planez, py1, px1 / 64, -py1 / 64);
+	qd.Set(1, px2, planez, py2, px2 / 64, -py2 / 64);
+	qd.Set(2, px3, planez, py3, px3 / 64, -py3 / 64);
+	qd.Set(3, px4, planez, py4, px4 / 64, -py4 / 64);
+	qd.Render(GL_TRIANGLE_FAN);
 
 	gl_RenderState.EnableTextureMatrix(false);
 }

@@ -30,6 +30,7 @@
 #include "i_system.h"
 #include "g_level.h"
 #include "p_local.h"
+#include "g_levellocals.h"
 
 int SaveVersion;
 
@@ -40,7 +41,7 @@ FStringTable	GStrings;
 EGameSpeed		GameSpeed = SPEED_Normal;
 
 // Show developer messages if true.
-CVAR (Bool, developer, false, 0)
+CVAR (Int, developer, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 // [RH] Feature control cvars
 CVAR (Bool, var_friction, true, CVAR_SERVERINFO);

@@ -19,7 +19,27 @@ class FLightBuffer;
 class FSamplerManager;
 class DPSprite;
 class FGLRenderBuffers;
+class FLinearDepthShader;
+class FDepthBlurShader;
+class FSSAOShader;
+class FSSAOCombineShader;
+class FBloomExtractShader;
+class FBloomCombineShader;
+class FExposureExtractShader;
+class FExposureAverageShader;
+class FExposureCombineShader;
+class FBlurShader;
+class FTonemapShader;
+class FColormapShader;
+class FLensShader;
+class FFXAALumaShader;
+class FFXAAShader;
 class FPresentShader;
+class FPresent3DCheckerShader;
+class FPresent3DColumnShader; 
+class FPresent3DRowShader;
+class F2DDrawer;
+class FHardwareTexture;
 
 inline float DEG2RAD(float deg)
 {
@@ -82,7 +102,26 @@ public:
 	int mOldFBID;
 
 	FGLRenderBuffers *mBuffers;
+	FLinearDepthShader *mLinearDepthShader;
+	FSSAOShader *mSSAOShader;
+	FDepthBlurShader *mDepthBlurShader;
+	FSSAOCombineShader *mSSAOCombineShader;
+	FBloomExtractShader *mBloomExtractShader;
+	FBloomCombineShader *mBloomCombineShader;
+	FExposureExtractShader *mExposureExtractShader;
+	FExposureAverageShader *mExposureAverageShader;
+	FExposureCombineShader *mExposureCombineShader;
+	FBlurShader *mBlurShader;
+	FTonemapShader *mTonemapShader;
+	FColormapShader *mColormapShader;
+	FHardwareTexture *mTonemapPalette;
+	FLensShader *mLensShader;
+	FFXAALumaShader *mFXAALumaShader;
+	FFXAAShader *mFXAAShader;
 	FPresentShader *mPresentShader;
+	FPresent3DCheckerShader *mPresent3dCheckerShader;
+	FPresent3DColumnShader *mPresent3dColumnShader;
+	FPresent3DRowShader *mPresent3dRowShader;
 
 	FTexture *gllight;
 	FTexture *glpart2;
@@ -97,24 +136,32 @@ public:
 	FFlatVertexBuffer *mVBO;
 	FSkyVertexBuffer *mSkyVBO;
 	FLightBuffer *mLights;
+	F2DDrawer *m2DDrawer;
 
-	GL_IRECT mOutputViewportLB;
-	GL_IRECT mOutputViewport;
+	GL_IRECT mScreenViewport;
+	GL_IRECT mSceneViewport;
+	GL_IRECT mOutputLetterbox;
+	bool mDrawingScene2D = false;
+
+	float mSceneClearColor[3];
 
 	FGLRenderer(OpenGLFrameBuffer *fb);
 	~FGLRenderer() ;
 
+	void SetOutputViewport(GL_IRECT *bounds);
+	int ScreenToWindowX(int x);
+	int ScreenToWindowY(int y);
+
 	angle_t FrustumAngle();
 	void SetViewArea();
-	void SetOutputViewport(GL_IRECT *bounds);
-	void Set3DViewport();
+	void Set3DViewport(bool mainview);
 	void Reset3DViewport();
 	sector_t *RenderViewpoint (AActor * camera, GL_IRECT * bounds, float fov, float ratio, float fovratio, bool mainview, bool toscreen);
 	void RenderView(player_t *player);
 	void SetViewAngle(DAngle viewangle);
 	void SetupView(float viewx, float viewy, float viewz, DAngle viewangle, bool mirror, bool planemirror);
 
-	void Initialize();
+	void Initialize(int width, int height);
 
 	void CreateScene();
 	void RenderMultipassStuff();
@@ -129,12 +176,6 @@ public:
 
 	void Begin2D();
 	void ClearBorders();
-	void DrawTexture(FTexture *img, DrawParms &parms);
-	void DrawLine(int x1, int y1, int x2, int y2, int palcolor, uint32 color);
-	void DrawPixel(int x1, int y1, int palcolor, uint32 color);
-	void Dim(PalEntry color, float damount, int x1, int y1, int w, int h);
-	void FlatFill (int left, int top, int right, int bottom, FTexture *src, bool local_origin);
-	void Clear(int left, int top, int right, int bottom, int palcolor, uint32 color);
 
 	void ProcessLowerMiniseg(seg_t *seg, sector_t * frontsector, sector_t * backsector);
 	void ProcessSprite(AActor *thing, sector_t *sector, bool thruportal);
@@ -144,9 +185,22 @@ public:
 	unsigned char *GetTextureBuffer(FTexture *tex, int &w, int &h);
 	void SetupLevel();
 
+	void RenderScreenQuad();
 	void SetFixedColormap (player_t *player);
-	void WriteSavePic (player_t *player, FILE *file, int width, int height);
+	void WriteSavePic (player_t *player, FileWriter *file, int width, int height);
 	void EndDrawScene(sector_t * viewsector);
+	void UpdateCameraExposure();
+	void PostProcessScene();
+	void AmbientOccludeScene();
+	void BloomScene();
+	void TonemapScene();
+	void ColormapScene();
+	void CreateTonemapPalette();
+	void ClearTonemapPalette();
+	void LensDistortScene();
+	void ApplyFXAA();
+	void CopyToBackbuffer(const GL_IRECT *bounds, bool applyGamma);
+	void DrawPresentTexture(const GL_IRECT &box, bool applyGamma);
 	void Flush();
 
 	void SetProjection(float fov, float ratio, float fovratio);
@@ -157,9 +211,17 @@ public:
 	bool StartOffscreen();
 	void EndOffscreen();
 
+	void StartSimplePolys();
+	void FinishSimplePolys();
+
 	void FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
 		double originx, double originy, double scalex, double scaley,
-		DAngle rotation, FDynamicColormap *colormap, int lightlevel);
+		DAngle rotation, FDynamicColormap *colormap, PalEntry flatcolor, int lightlevel, int bottomclip);
+
+	int PTM_BestColor (const uint32 *pal_in, int r, int g, int b, int first, int num);
+
+	static float GetZNear() { return 5.f; }
+	static float GetZFar() { return 65536.f; }
 };
 
 // Global functions. Make them members of GLRenderer later?

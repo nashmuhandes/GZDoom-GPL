@@ -30,7 +30,7 @@
 #include "d_ticcmd.h"
 #include "doomstat.h"
 
-#include "a_artifacts.h"
+#include "a_weapons.h"
 
 // The player data structure depends on a number
 // of other structs: items (internal inventory),
@@ -81,7 +81,6 @@ public:
 	FPlayerColorSet *GetColorSet(int setnum) { return ColorSets.CheckKey(setnum); }
 	void SetPainFlash(FName type, PalEntry color);
 	bool GetPainFlash(FName type, PalEntry *color) const;
-	virtual void ReplaceClassRef(PClass *oldclass, PClass *newclass);
 
 	FString DisplayName;	// Display name (used in menus, etc.)
 	FString SoundClass;		// Sound class
@@ -103,31 +102,39 @@ class APlayerPawn : public AActor
 	DECLARE_CLASS_WITH_META(APlayerPawn, AActor, PClassPlayerPawn)
 	HAS_OBJECT_POINTERS
 public:
-	virtual void Serialize (FArchive &arc);
+	
+	virtual void Serialize(FSerializer &arc);
 
-	virtual void PostBeginPlay();
-	virtual void Tick();
-	virtual void AddInventory (AInventory *item);
-	virtual void RemoveInventory (AInventory *item);
-	virtual bool UseInventory (AInventory *item);
-	virtual void MarkPrecacheSounds () const;
+	virtual void PostBeginPlay() override;
+	virtual void Tick() override;
+	virtual void AddInventory (AInventory *item) override;
+	virtual void RemoveInventory (AInventory *item) override;
+	virtual bool UseInventory (AInventory *item) override;
+	virtual void MarkPrecacheSounds () const override;
+	virtual void BeginPlay () override;
+	virtual void Die (AActor *source, AActor *inflictor, int dmgflags) override;
+	virtual bool UpdateWaterLevel (bool splash) override;
 
-	virtual void PlayIdle ();
-	virtual void PlayRunning ();
-	virtual void ThrowPoisonBag ();
-	virtual void TweakSpeeds (double &forwardmove, double &sidemove);
-	virtual void MorphPlayerThink ();
-	virtual void ActivateMorphWeapon ();
-	AWeapon *PickNewWeapon (PClassAmmo *ammotype);
-	AWeapon *BestWeapon (PClassAmmo *ammotype);
-	void CheckWeaponSwitch(PClassAmmo *ammotype);
-	virtual void GiveDeathmatchInventory ();
-	virtual void FilterCoopRespawnInventory (APlayerPawn *oldplayer);
+	bool ResetAirSupply (bool playgasp = true);
+	int GetMaxHealth() const;
+	void TweakSpeeds (double &forwardmove, double &sidemove);
+	void MorphPlayerThink ();
+	void ActivateMorphWeapon ();
+	AWeapon *PickNewWeapon (PClassInventory *ammotype);
+	AWeapon *BestWeapon (PClassInventory *ammotype);
+	void CheckWeaponSwitch(PClassInventory *ammotype);
+	void GiveDeathmatchInventory ();
+	void FilterCoopRespawnInventory (APlayerPawn *oldplayer);
 
 	void SetupWeaponSlots ();
 	void GiveDefaultInventory ();
+
+	// These are virtual on the script side only.
+	void PlayIdle();
+	void PlayRunning();
 	void PlayAttacking ();
 	void PlayAttacking2 ();
+
 	const char *GetSoundClass () const;
 
 	enum EInvulState
@@ -138,14 +145,13 @@ public:
 		INVUL_GetAlpha
 	};
 
-	void BeginPlay ();
-	void Die (AActor *source, AActor *inflictor, int dmgflags);
 
 	int			crouchsprite;
 	int			MaxHealth;
 	int			MugShotMaxHealth;
 	int			RunHealth;
 	int			PlayerFlags;
+	double		FullHeight;
 	TObjPtr<AInventory> InvFirst;		// first inventory item displayed on inventory bar
 	TObjPtr<AInventory> InvSel;			// selected inventory item
 
@@ -168,15 +174,9 @@ public:
 	// [CW] Fades for when you are being damaged.
 	PalEntry DamageFade;
 
-	bool UpdateWaterLevel (bool splash);
-	bool ResetAirSupply (bool playgasp = true);
+	// [SP] ViewBob Multiplier
+	double		ViewBob;
 
-	int GetMaxHealth() const;
-};
-
-class APlayerChunk : public APlayerPawn
-{
-	DECLARE_CLASS (APlayerChunk, APlayerPawn)
 };
 
 //
@@ -250,11 +250,10 @@ enum
 	WF_USER4OK			= 1 << 11,
 };
 
-#define WPIECE1		1
-#define WPIECE2		2
-#define WPIECE3		4
-
-#define WP_NOCHANGE ((AWeapon*)~0)
+// The VM cannot deal with this as an invalid pointer because it performs a read barrier on every object pointer read.
+// This doesn't have to point to a valid weapon, though, because WP_NOCHANGE is never dereferenced, but it must point to a valid object
+// and the class descriptor just works fine for that.
+#define WP_NOCHANGE ((AWeapon*)RUNTIME_CLASS_CASTLESS(AWeapon))
 
 
 #define MAXPLAYERNAME	15
@@ -338,6 +337,10 @@ struct userinfo_t : TMap<FName,FBaseCVar *>
 	{
 		return *static_cast<FFloatCVar *>(*CheckKey(NAME_StillBob));
 	}
+	float GetWBobSpeed() const
+	{
+		return *static_cast<FFloatCVar *>(*CheckKey(NAME_WBobSpeed));
+	}
 	int GetPlayerClassNum() const
 	{
 		return *static_cast<FIntCVar *>(*CheckKey(NAME_PlayerClass));
@@ -371,8 +374,8 @@ struct userinfo_t : TMap<FName,FBaseCVar *>
 	int ColorSetChanged(int setnum);
 };
 
-void ReadUserInfo(FArchive &arc, userinfo_t &info, FString &skin);
-void WriteUserInfo(FArchive &arc, userinfo_t &info);
+void ReadUserInfo(FSerializer &arc, userinfo_t &info, FString &skin);
+void WriteUserInfo(FSerializer &arc, userinfo_t &info);
 
 //
 // Extended player object info: player_t
@@ -384,7 +387,7 @@ public:
 	~player_t();
 	player_t &operator= (const player_t &p);
 
-	void Serialize (FArchive &arc);
+	void Serialize(FSerializer &arc);
 	size_t FixPointers (const DObject *obj, DObject *replacement);
 	size_t PropagateMark();
 
@@ -541,8 +544,6 @@ public:
 
 // Bookkeeping on players - state.
 extern player_t players[MAXPLAYERS];
-
-FArchive &operator<< (FArchive &arc, player_t *&p);
 
 void P_CheckPlayerSprite(AActor *mo, int &spritenum, DVector2 &scale);
 

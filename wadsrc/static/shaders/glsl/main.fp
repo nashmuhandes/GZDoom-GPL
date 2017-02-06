@@ -1,10 +1,16 @@
 in vec4 pixelpos;
-in vec2 glowdist;
+in vec3 glowdist;
 
+in vec4 vWorldNormal;
+in vec4 vEyeNormal;
 in vec4 vTexCoord;
 in vec4 vColor;
 
 out vec4 FragColor;
+#ifdef GBUFFER_PASS
+out vec4 FragFog;
+out vec4 FragNormal;
+#endif
 
 #ifdef SHADER_STORAGE_LIGHTS
 	layout(std430, binding = 1) buffer LightBufferSSO
@@ -51,32 +57,6 @@ vec4 desaturate(vec4 texel)
 //
 //===========================================================================
 
-#ifdef GLSL12_COMPATIBLE
-vec4 getTexel(vec2 st)
-{
-	vec4 texel = texture(tex, st);
-	
-	//
-	// Apply texture modes
-	//
-	if (uTextureMode != 0)
-	{
-		if (uTextureMode == 1) texel.rgb = vec3(1.0,1.0,1.0);
-		else if (uTextureMode == 2) texel.a = 1.0;
-		else if (uTextureMode == 3) texel = vec4(1.0-texel.r, 1.0-texel.b, 1.0-texel.g, texel.a);
-		else if (uTextureMode == 4) texel = vec4(1.0, 1.0, 1.0, texel.r*texel.a);
-		else if (uTextureMode == 5)
-		{
-			if (st.t < 0.0 || st.t > 1.0)
-			{
-				texel.a = 0.0;
-			}
-		}
-	}
-	texel *= uObjectColor;
-	return desaturate(texel);
-}
-#else
 vec4 getTexel(vec2 st)
 {
 	vec4 texel = texture(tex, st);
@@ -109,11 +89,11 @@ vec4 getTexel(vec2 st)
 			}
 			break;
 	}
-	texel *= uObjectColor;
+	if (uObjectColor2.a == 0) texel *= uObjectColor;
+	else texel *= mix(uObjectColor, uObjectColor2, glowdist.z);
 
 	return desaturate(texel);
 }
-#endif
 
 //===========================================================================
 //
@@ -142,10 +122,48 @@ float R_DoomLightingEquation(float light)
 	/* The zdoom light equation */
 	float vis = globVis / z;
 	float shade = 64.0 - (L + 12.0) * 32.0/128.0;
-	float lightscale = clamp((shade - min(24.0, vis)) / 32.0, 0.0, 31.0/32.0);
+	float lightscale;
+	if (uPalLightLevels != 0)
+		lightscale = clamp(float(int(shade - min(24.0, vis))) / 32.0, 0.0, 31.0/32.0);
+	else
+		lightscale = clamp((shade - min(24.0, vis)) / 32.0, 0.0, 31.0/32.0);
 
 	// Result is the normalized colormap index (0 bright .. 1 dark)
 	return lightscale;
+}
+
+//===========================================================================
+//
+// Standard lambertian diffuse light calculation
+//
+//===========================================================================
+
+float diffuseContribution(vec3 lightDirection, vec3 normal)
+{
+	return max(dot(normal, lightDirection), 0.0f);
+}
+
+//===========================================================================
+//
+// Calculates the brightness of a dynamic point light
+// Todo: Find a better way to define which lighting model to use.
+// (Specular mode has been removed for now.)
+//
+//===========================================================================
+
+float pointLightAttenuation(vec4 lightpos, float attenuate)
+{
+	float attenuation = max(lightpos.w - distance(pixelpos.xyz, lightpos.xyz),0.0) / lightpos.w;
+	if (attenuate == 0.0)
+	{
+		return attenuation;
+	}
+	else
+	{
+		vec3 lightDirection = normalize(lightpos.xyz - pixelpos.xyz);
+		float diffuseAmount = diffuseContribution(lightDirection, normalize(vWorldNormal.xyz));
+		return attenuation * diffuseAmount;
+	}
 }
 
 //===========================================================================
@@ -223,7 +241,7 @@ vec4 getLightColor(float fogdist, float fogfactor)
 				vec4 lightpos = lights[i];
 				vec4 lightcolor = lights[i+1];
 				
-				lightcolor.rgb *= max(lightpos.w - distance(pixelpos.xyz, lightpos.xyz),0.0) / lightpos.w;
+				lightcolor.rgb *= pointLightAttenuation(lightpos, lightcolor.a);
 				dynlight.rgb += lightcolor.rgb;
 			}
 			//
@@ -234,7 +252,7 @@ vec4 getLightColor(float fogdist, float fogfactor)
 				vec4 lightpos = lights[i];
 				vec4 lightcolor = lights[i+1];
 				
-				lightcolor.rgb *= max(lightpos.w - distance(pixelpos.xyz, lightpos.xyz),0.0) / lightpos.w;
+				lightcolor.rgb *= pointLightAttenuation(lightpos, lightcolor.a);
 				dynlight.rgb -= lightcolor.rgb;
 			}
 		}
@@ -257,6 +275,32 @@ vec4 applyFog(vec4 frag, float fogfactor)
 	return vec4(mix(uFogColor.rgb, frag.rgb, fogfactor), frag.a);
 }
 
+//===========================================================================
+//
+// The color of the fragment if it is fully occluded by ambient lighting
+//
+//===========================================================================
+
+vec3 AmbientOcclusionColor()
+{
+	float fogdist;
+	float fogfactor;
+			
+	//
+	// calculate fog factor
+	//
+	if (uFogEnabled == -1) 
+	{
+		fogdist = pixelpos.w;
+	}
+	else 
+	{
+		fogdist = max(16.0, distance(pixelpos.xyz, uCameraPos.xyz));
+	}
+	fogfactor = exp2 (uFogDensity * fogdist);
+			
+	return mix(uFogColor.rgb, vec3(0.0), fogfactor);
+}
 
 //===========================================================================
 //
@@ -316,7 +360,7 @@ void main()
 						vec4 lightpos = lights[i];
 						vec4 lightcolor = lights[i+1];
 						
-						lightcolor.rgb *= max(lightpos.w - distance(pixelpos.xyz, lightpos.xyz),0.0) / lightpos.w;
+						lightcolor.rgb *= pointLightAttenuation(lightpos, lightcolor.a);
 						addlight.rgb += lightcolor.rgb;
 					}
 					frag.rgb = clamp(frag.rgb + desaturate(addlight).rgb, 0.0, 1.0);
@@ -372,5 +416,9 @@ void main()
 		}
 	}
 	FragColor = frag;
+#ifdef GBUFFER_PASS
+	FragFog = vec4(AmbientOcclusionColor(), 1.0);
+	FragNormal = vec4(vEyeNormal.xyz * 0.5 + 0.5, 1.0);
+#endif
 }
 

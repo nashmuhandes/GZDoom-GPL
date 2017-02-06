@@ -554,12 +554,12 @@ bool FScanner::GetToken ()
 				String[StringLen - 2] == 'u' || String[StringLen - 2] == 'U')
 			{
 				TokenType = TK_UIntConst;
-				Number = strtoul(String, &stopper, 0);
+				Number = (int)strtoull(String, &stopper, 0);
 				Float = (unsigned)Number;
 			}
 			else
 			{
-				Number = strtol(String, &stopper, 0);
+				Number = (int)strtoll(String, &stopper, 0);
 				Float = Number;
 			}
 		}
@@ -660,7 +660,7 @@ bool FScanner::GetNumber ()
 		}
 		else
 		{
-			Number = strtol (String, &stopper, 0);
+			Number = (int)strtoll (String, &stopper, 0);
 			if (*stopper != 0)
 			{
 				ScriptError ("SC_GetNumber: Bad numeric constant \"%s\".", String);
@@ -715,7 +715,7 @@ bool FScanner::CheckNumber ()
 		}
 		else
 		{
-			Number = strtol (String, &stopper, 0);
+			Number = (int)strtoll (String, &stopper, 0);
 			if (*stopper != 0)
 			{
 				UnGet();
@@ -1006,6 +1006,9 @@ void FScanner::CheckOpen()
 //
 //==========================================================================
 int FScriptPosition::ErrorCounter;
+int FScriptPosition::WarnCounter;
+bool FScriptPosition::StrictErrors;	// makes all OPTERROR messages real errors.
+bool FScriptPosition::errorout;		// call I_Error instead of printing the error itself.
 
 FScriptPosition::FScriptPosition(const FScriptPosition &other)
 {
@@ -1044,11 +1047,16 @@ void FScriptPosition::Message (int severity, const char *message, ...) const
 {
 	FString composed;
 
-	if ((severity == MSG_DEBUG || severity == MSG_DEBUGLOG) && !developer) return;
+	if (severity == MSG_DEBUGLOG && developer < DMSG_NOTIFY) return;
+	if (severity == MSG_DEBUGERROR && developer < DMSG_ERROR) return;
+	if (severity == MSG_DEBUGWARN && developer < DMSG_WARNING) return;
+	if (severity == MSG_DEBUGMSG && developer < DMSG_NOTIFY) return;
 	if (severity == MSG_OPTERROR)
 	{
-		severity = strictdecorate ? MSG_ERROR : MSG_WARNING;
+		severity = StrictErrors || strictdecorate ? MSG_ERROR : MSG_WARNING;
 	}
+	// This is mainly for catching the error with an exception handler.
+	if (severity == MSG_ERROR && errorout) severity = MSG_FATAL;
 
 	if (message == NULL)
 	{
@@ -1071,8 +1079,11 @@ void FScriptPosition::Message (int severity, const char *message, ...) const
 		return;
 
 	case MSG_WARNING:
+	case MSG_DEBUGWARN:
+	case MSG_DEBUGERROR:	// This is intentionally not being printed as an 'error', the difference to MSG_DEBUGWARN is only the severity level at which it gets triggered.
+		WarnCounter++;
 		type = "warning";
-		color = TEXTCOLOR_YELLOW;
+		color = TEXTCOLOR_ORANGE;
 		break;
 
 	case MSG_ERROR:
@@ -1082,7 +1093,7 @@ void FScriptPosition::Message (int severity, const char *message, ...) const
 		break;
 
 	case MSG_MESSAGE:
-	case MSG_DEBUG:
+	case MSG_DEBUGMSG:
 		type = "message";
 		color = TEXTCOLOR_GREEN;
 		break;

@@ -32,11 +32,13 @@
 
 #include "p_lnspec.h"
 #include "doomstat.h"
+#include "p_maputl.h"
+#include "g_levellocals.h"
 
 // State.
 #include "r_state.h"
 #include "statnums.h"
-#include "farchive.h"
+#include "serializer.h"
 
 static FRandom pr_flicker ("Flicker");
 static FRandom pr_lightflash ("LightFlash");
@@ -50,7 +52,7 @@ class DFireFlicker : public DLighting
 public:
 	DFireFlicker(sector_t *sector);
 	DFireFlicker(sector_t *sector, int upper, int lower);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	int 		m_Count;
@@ -65,7 +67,7 @@ class DFlicker : public DLighting
 	DECLARE_CLASS(DFlicker, DLighting)
 public:
 	DFlicker(sector_t *sector, int upper, int lower);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	int 		m_Count;
@@ -81,7 +83,7 @@ class DLightFlash : public DLighting
 public:
 	DLightFlash(sector_t *sector);
 	DLightFlash(sector_t *sector, int min, int max);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	int 		m_Count;
@@ -99,7 +101,7 @@ class DStrobe : public DLighting
 public:
 	DStrobe(sector_t *sector, int utics, int ltics, bool inSync);
 	DStrobe(sector_t *sector, int upper, int lower, int utics, int ltics);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	int 		m_Count;
@@ -116,7 +118,7 @@ class DGlow : public DLighting
 	DECLARE_CLASS(DGlow, DLighting)
 public:
 	DGlow(sector_t *sector);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	int 		m_MinLight;
@@ -132,7 +134,7 @@ class DGlow2 : public DLighting
 	DECLARE_CLASS(DGlow2, DLighting)
 public:
 	DGlow2(sector_t *sector, int start, int end, int tics, bool oneshot);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	int			m_Start;
@@ -151,7 +153,7 @@ class DPhased : public DLighting
 public:
 	DPhased(sector_t *sector);
 	DPhased(sector_t *sector, int baselevel, int phase);
-	void		Serialize(FArchive &arc);
+	void		Serialize(FSerializer &arc);
 	void		Tick();
 protected:
 	BYTE		m_BaseLevel;
@@ -174,7 +176,7 @@ private:
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DLighting)
+IMPLEMENT_CLASS(DLighting, false, false)
 
 DLighting::DLighting ()
 {
@@ -192,16 +194,18 @@ DLighting::DLighting (sector_t *sector)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DFireFlicker)
+IMPLEMENT_CLASS(DFireFlicker, false, false)
 
 DFireFlicker::DFireFlicker ()
 {
 }
 
-void DFireFlicker::Serialize (FArchive &arc)
+void DFireFlicker::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Count << m_MaxLight << m_MinLight;
+	arc("count", m_Count)
+		("maxlight", m_MaxLight)
+		("minlight", m_MinLight);
 }
 
 
@@ -257,16 +261,18 @@ DFireFlicker::DFireFlicker (sector_t *sector, int upper, int lower)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DFlicker)
+IMPLEMENT_CLASS(DFlicker, false, false)
 
 DFlicker::DFlicker ()
 {
 }
 
-void DFlicker::Serialize (FArchive &arc)
+void DFlicker::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Count << m_MaxLight << m_MinLight;
+	arc("count", m_Count)
+		("maxlight", m_MaxLight)
+		("minlight", m_MinLight);
 }
 
 //-----------------------------------------------------------------------------
@@ -320,7 +326,7 @@ void EV_StartLightFlickering (int tag, int upper, int lower)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		new DFlicker (&sectors[secnum], upper, lower);
+		new DFlicker (&level.sectors[secnum], upper, lower);
 	}
 }
 
@@ -331,16 +337,20 @@ void EV_StartLightFlickering (int tag, int upper, int lower)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DLightFlash)
+IMPLEMENT_CLASS(DLightFlash, false, false)
 
 DLightFlash::DLightFlash ()
 {
 }
 
-void DLightFlash::Serialize (FArchive &arc)
+void DLightFlash::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Count << m_MaxLight << m_MaxTime << m_MinLight << m_MinTime;
+	arc("count", m_Count)
+		("maxlight", m_MaxLight)
+		("minlight", m_MinLight)
+		("maxtime", m_MaxTime)
+		("mintime", m_MinTime);
 }
 
 //-----------------------------------------------------------------------------
@@ -402,16 +412,20 @@ DLightFlash::DLightFlash (sector_t *sector, int min, int max)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DStrobe)
+IMPLEMENT_CLASS(DStrobe, false, false)
 
 DStrobe::DStrobe ()
 {
 }
 
-void DStrobe::Serialize (FArchive &arc)
+void DStrobe::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Count << m_MaxLight << m_MinLight << m_DarkTime << m_BrightTime;
+	arc("count", m_Count)
+		("maxlight", m_MaxLight)
+		("minlight", m_MinLight)
+		("darktime", m_DarkTime)
+		("brighttime", m_BrightTime);
 }
 
 //-----------------------------------------------------------------------------
@@ -489,7 +503,7 @@ void EV_StartLightStrobing (int tag, int upper, int lower, int utics, int ltics)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sec = &sectors[secnum];
+		sector_t *sec = &level.sectors[secnum];
 		if (sec->lightingdata)
 			continue;
 		
@@ -503,7 +517,7 @@ void EV_StartLightStrobing (int tag, int utics, int ltics)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sec = &sectors[secnum];
+		sector_t *sec = &level.sectors[secnum];
 		if (sec->lightingdata)
 			continue;
 		
@@ -525,12 +539,12 @@ void EV_TurnTagLightsOff (int tag)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sector = sectors + secnum;
+		sector_t *sector = &level.sectors[secnum];
 		int min = sector->lightlevel;
 
-		for (int i = 0; i < sector->linecount; i++)
+		for (auto ln : sector->Lines)
 		{
-			sector_t *tsec = getNextSector (sector->lines[i],sector);
+			sector_t *tsec = getNextSector (ln, sector);
 			if (!tsec)
 				continue;
 			if (tsec->lightlevel < min)
@@ -554,7 +568,7 @@ void EV_LightTurnOn (int tag, int bright)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sector = sectors + secnum;
+		sector_t *sector = &level.sectors[secnum];
 		int tbright = bright; //jff 5/17/98 search for maximum PER sector
 
 		// bright = -1 means to search ([RH] Not 0)
@@ -562,11 +576,9 @@ void EV_LightTurnOn (int tag, int bright)
 		// surrounding sector
 		if (bright < 0)
 		{
-			int j;
-
-			for (j = 0; j < sector->linecount; j++)
+			for (auto ln : sector->Lines)
 			{
-				sector_t *temp = getNextSector (sector->lines[j], sector);
+				sector_t *temp = getNextSector(ln, sector);
 
 				if (!temp)
 					continue;
@@ -609,12 +621,12 @@ void EV_LightTurnOnPartway (int tag, double frac)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *temp, *sector = &sectors[secnum];
-		int j, bright = 0, min = sector->lightlevel;
+		sector_t *temp, *sector = &level.sectors[secnum];
+		int bright = 0, min = sector->lightlevel;
 
-		for (j = 0; j < sector->linecount; ++j)
+		for (auto ln : sector->Lines)
 		{
-			if ((temp = getNextSector (sector->lines[j], sector)) != NULL)
+			if ((temp = getNextSector (ln, sector)) != nullptr)
 			{
 				if (temp->lightlevel > bright)
 				{
@@ -645,7 +657,7 @@ void EV_LightChange (int tag, int value)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sectors[secnum].SetLightLevel(sectors[secnum].lightlevel + value);
+		level.sectors[secnum].SetLightLevel(level.sectors[secnum].lightlevel + value);
 	}
 }
 
@@ -656,16 +668,18 @@ void EV_LightChange (int tag, int value)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DGlow)
+IMPLEMENT_CLASS(DGlow, false, false)
 
 DGlow::DGlow ()
 {
 }
 
-void DGlow::Serialize (FArchive &arc)
+void DGlow::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Direction << m_MaxLight << m_MinLight;
+	arc("direction", m_Direction)
+		("maxlight", m_MaxLight)
+		("minlight", m_MinLight);
 }
 
 //-----------------------------------------------------------------------------
@@ -723,16 +737,20 @@ DGlow::DGlow (sector_t *sector)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DGlow2)
+IMPLEMENT_CLASS(DGlow2, false, false)
 
 DGlow2::DGlow2 ()
 {
 }
 
-void DGlow2::Serialize (FArchive &arc)
+void DGlow2::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_End << m_MaxTics << m_OneShot << m_Start << m_Tics;
+	arc("end", m_End)
+		("maxtics", m_MaxTics)
+		("oneshot", m_OneShot)
+		("start", m_Start)
+		("tics", m_Tics);
 }
 
 //-----------------------------------------------------------------------------
@@ -805,7 +823,7 @@ void EV_StartLightGlowing (int tag, int upper, int lower, int tics)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sec = &sectors[secnum];
+		sector_t *sec = &level.sectors[secnum];
 		if (sec->lightingdata)
 			continue;
 		
@@ -825,7 +843,7 @@ void EV_StartLightFading (int tag, int value, int tics)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sec = &sectors[secnum];
+		sector_t *sec = &level.sectors[secnum];
 		if (sec->lightingdata)
 			continue;
 
@@ -852,16 +870,17 @@ void EV_StartLightFading (int tag, int value, int tics)
 //
 //-----------------------------------------------------------------------------
 
-IMPLEMENT_CLASS (DPhased)
+IMPLEMENT_CLASS(DPhased, false, false)
 
 DPhased::DPhased ()
 {
 }
 
-void DPhased::Serialize (FArchive &arc)
+void DPhased::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_BaseLevel << m_Phase;
+	arc("baselevel", m_BaseLevel)
+		("phase", m_Phase);
 }
 
 //-----------------------------------------------------------------------------
@@ -896,7 +915,7 @@ void DPhased::Tick ()
 
 int DPhased::PhaseHelper (sector_t *sector, int index, int light, sector_t *prev)
 {
-	if (!sector)
+	if (!sector || sector->validcount == validcount)
 	{
 		return index;
 	}
@@ -904,6 +923,7 @@ int DPhased::PhaseHelper (sector_t *sector, int index, int light, sector_t *prev
 	{
 		DPhased *l;
 		int baselevel = sector->lightlevel ? sector->lightlevel : light;
+		sector->validcount = validcount;
 
 		if (index == 0)
 		{
@@ -940,6 +960,7 @@ DPhased::DPhased (sector_t *sector, int baselevel)
 DPhased::DPhased (sector_t *sector)
 	: DLighting (sector)
 {
+	validcount++;
 	PhaseHelper (sector, 0, 0, NULL);
 }
 

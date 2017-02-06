@@ -29,24 +29,11 @@
 #include "s_sndseq.h"
 #include "doomstat.h"
 #include "r_state.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "p_3dmidtex.h"
 #include "p_spec.h"
 #include "r_data/r_interpolate.h"
-
-//==========================================================================
-//
-//
-//
-//==========================================================================
-
-inline FArchive &operator<< (FArchive &arc, DFloor::EFloor &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DFloor::EFloor)val;
-	return arc;
-}
+#include "g_levellocals.h"
 
 //==========================================================================
 //
@@ -79,29 +66,30 @@ static void StartFloorSound (sector_t *sec)
 //
 //==========================================================================
 
-IMPLEMENT_CLASS (DFloor)
+IMPLEMENT_CLASS(DFloor, false, false)
 
 DFloor::DFloor ()
 {
 }
 
-void DFloor::Serialize (FArchive &arc)
+void DFloor::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Type
-		<< m_Crush
-		<< m_Direction
-		<< m_NewSpecial
-		<< m_Texture
-		<< m_FloorDestDist
-		<< m_Speed
-		<< m_ResetCount
-		<< m_OrgDist
-		<< m_Delay
-		<< m_PauseTime
-		<< m_StepTime
-		<< m_PerStepTime
-		<< m_Hexencrush;
+	arc.Enum("type", m_Type)
+		("crush", m_Crush)
+		("direction", m_Direction)
+		("newspecial", m_NewSpecial)
+		("texture", m_Texture)
+		("floordestdist", m_FloorDestDist)
+		("speed", m_Speed)
+		("resetcount", m_ResetCount)
+		("orgdist", m_OrgDist)
+		("delay", m_Delay)
+		("pausetime", m_PauseTime)
+		("steptime", m_StepTime)
+		("persteptime", m_PerStepTime)
+		("crushmode", m_Hexencrush)
+		("instant", m_Instant);
 }
 
 //==========================================================================
@@ -144,7 +132,7 @@ void DFloor::Tick ()
 	if (m_Type == waitStair)
 		return;
 
-	res = m_Sector->MoveFloor (m_Speed, m_FloorDestDist, m_Crush, m_Direction, m_Hexencrush);
+	res = m_Sector->MoveFloor (m_Speed, m_FloorDestDist, m_Crush, m_Direction, m_Hexencrush, m_Instant);
 	
 	if (res == EMoveResult::pastdest)
 	{
@@ -199,19 +187,19 @@ void DFloor::Tick ()
 				sector_t *sec = m_Sector;
 				sec->stairlock = -1;				// thinker done, promote lock to -1
 
-				while (sec->prevsec != -1 && sectors[sec->prevsec].stairlock != -2)
-					sec = &sectors[sec->prevsec];	// search for a non-done thinker
+				while (sec->prevsec != -1 && level.sectors[sec->prevsec].stairlock != -2)
+					sec = &level.sectors[sec->prevsec];	// search for a non-done thinker
 				if (sec->prevsec == -1)				// if all thinkers previous are done
 				{
 					sec = m_Sector;			// search forward
-					while (sec->nextsec != -1 && sectors[sec->nextsec].stairlock != -2) 
-						sec = &sectors[sec->nextsec];
+					while (sec->nextsec != -1 && level.sectors[sec->nextsec].stairlock != -2)
+						sec = &level.sectors[sec->nextsec];
 					if (sec->nextsec == -1)			// if all thinkers ahead are done too
 					{
 						while (sec->prevsec != -1)	// clear all locks
 						{
 							sec->stairlock = 0;
-							sec = &sectors[sec->prevsec];
+							sec = &level.sectors[sec->prevsec];
 						}
 						sec->stairlock = 0;
 					}
@@ -301,6 +289,7 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 	floor->m_Speed = speed;
 	floor->m_ResetCount = 0;				// [RH]
 	floor->m_OrgDist = sec->floorplane.fD();	// [RH]
+	floor->m_Instant = false;
 
 	switch (floortype)
 	{
@@ -350,16 +339,14 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 		break;
 
 	case DFloor::floorRaiseAndCrushDoom:
+		height = 8;
 	case DFloor::floorRaiseToLowestCeiling:
 		floor->m_Direction = 1;
-		newheight = sec->FindLowestCeilingSurrounding(&spot);
-		if (floortype == DFloor::floorRaiseAndCrushDoom)
-			newheight -= 8;
+		newheight = sec->FindLowestCeilingSurrounding(&spot) - height;
 		ceilingheight = sec->FindLowestCeilingPoint(&spot2);
 		floor->m_FloorDestDist = sec->floorplane.PointToDist(spot, newheight);
 		if (sec->floorplane.ZatPointDist(spot2, floor->m_FloorDestDist) > ceilingheight)
-			floor->m_FloorDestDist = sec->floorplane.PointToDist(spot2,
-				floortype == DFloor::floorRaiseAndCrushDoom ? ceilingheight - 8 : ceilingheight);
+			floor->m_FloorDestDist = sec->floorplane.PointToDist(spot2,	ceilingheight - height);
 		break;
 
 	case DFloor::floorRaiseToHighest:
@@ -388,7 +375,7 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 
 	case DFloor::floorRaiseToCeiling:
 		floor->m_Direction = 1;
-		newheight = sec->FindLowestCeilingPoint(&spot);
+		newheight = sec->FindLowestCeilingPoint(&spot) - height;
 		floor->m_FloorDestDist = sec->floorplane.PointToDist(spot, newheight);
 		break;
 
@@ -407,7 +394,7 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 	case DFloor::floorLowerToCeiling:
 		// [RH] Essentially instantly raises the floor to the ceiling
 		floor->m_Direction = -1;
-		newheight = sec->FindLowestCeilingPoint(&spot);
+		newheight = sec->FindLowestCeilingPoint(&spot) - height;
 		floor->m_FloorDestDist = sec->floorplane.PointToDist(spot, newheight);
 		break;
 
@@ -468,6 +455,7 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 		(floor->m_Speed >= fabs(sec->floorplane.fD() - floor->m_FloorDestDist)))	// moving in one step
 	{
 		floor->StopInterpolation(true);
+		floor->m_Instant = true;
 
 		// [Graf Zahl]
 		// Don't make sounds for instant movement hacks but make an exception for
@@ -509,6 +497,21 @@ bool P_CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *line,
 	return true;
 }
 
+DEFINE_ACTION_FUNCTION(DFloor, CreateFloor)
+{
+	PARAM_PROLOGUE;
+	PARAM_POINTER_NOT_NULL(sec, sector_t);
+	PARAM_INT(floortype);
+	PARAM_POINTER(ln, line_t);
+	PARAM_FLOAT(speed);
+	PARAM_FLOAT_DEF(height);
+	PARAM_INT_DEF(crush);
+	PARAM_INT_DEF(change);
+	PARAM_BOOL_DEF(hereticlower);
+	PARAM_BOOL_DEF(hexencrush);
+	ACTION_RETURN_BOOL(P_CreateFloor(sec, (DFloor::EFloor)floortype, ln, speed, height, crush, change, hexencrush, hereticlower));
+}
+
 //==========================================================================
 //
 // HANDLE FLOOR TYPES
@@ -527,7 +530,7 @@ bool EV_DoFloor (DFloor::EFloor floortype, line_t *line, int tag,
 	FSectorTagIterator it(tag, line);
 	while ((secnum = it.Next()) >= 0)
 	{
-		rtn |= P_CreateFloor(&sectors[secnum], floortype, line, speed, height, crush, change, hexencrush, hereticlower);
+		rtn |= P_CreateFloor(&level.sectors[secnum], floortype, line, speed, height, crush, change, hexencrush, hereticlower);
 	}
 	return rtn;
 }
@@ -546,7 +549,7 @@ bool EV_FloorCrushStop (int tag)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sector_t *sec = sectors + secnum;
+		sector_t *sec = &level.sectors[secnum];
 
 		if (sec->floordata && sec->floordata->IsKindOf (RUNTIME_CLASS(DFloor)) &&
 			barrier_cast<DFloor *>(sec->floordata)->m_Type == DFloor::floorRaiseAndCrush)
@@ -577,7 +580,6 @@ bool EV_BuildStairs (int tag, DFloor::EStair type, line_t *line,
 	int					osecnum;	//jff 3/4/98 save old loop index
 	double 				height;
 	double				stairstep;
-	int 				i;
 	int 				newsecnum = -1;
 	FTextureID			texture;
 	int 				ok;
@@ -602,7 +604,7 @@ bool EV_BuildStairs (int tag, DFloor::EStair type, line_t *line,
 	bool compatible = tag != 0 && (i_compatflags & COMPATF_STAIRINDEX);
 	while ((secnum = itr.NextCompat(compatible, secnum)) >= 0)
 	{
-		sec = &sectors[secnum];
+		sec = &level.sectors[secnum];
 
 		// ALREADY MOVING?	IF SO, KEEP GOING...
 		//jff 2/26/98 add special lockout condition to wait for entire
@@ -625,7 +627,7 @@ bool EV_BuildStairs (int tag, DFloor::EStair type, line_t *line,
 		floor->m_PauseTime = 0;
 		floor->m_StepTime = floor->m_PerStepTime = persteptime;
 
-		floor->m_Crush = (!(usespecials & DFloor::stairUseSpecials) && speed == 4) ? 10 : -1; //jff 2/27/98 fix uninitialized crush field
+		floor->m_Crush = (usespecials & DFloor::stairCrush) ? 10 : -1; //jff 2/27/98 fix uninitialized crush field
 		floor->m_Hexencrush = false;
 
 		floor->m_Speed = speed;
@@ -662,26 +664,25 @@ bool EV_BuildStairs (int tag, DFloor::EStair type, line_t *line,
 						sec = tsec;
 						continue;
 					}
-					
+					newsecnum = tsec->Index();
 				}
-				newsecnum = (int)(tsec - sectors);
 			}
 			else
 			{
-				for (i = 0; i < sec->linecount; i++)
+				for (auto line : sec->Lines)
 				{
-					if ( !((sec->lines[i])->flags & ML_TWOSIDED) )
+					if ( !(line->flags & ML_TWOSIDED) )
 						continue;
 
-					tsec = (sec->lines[i])->frontsector;
-					newsecnum = (int)(tsec-sectors);
+					tsec = line->frontsector;
+					newsecnum = tsec->sectornum;
 
 					if (secnum != newsecnum)
 						continue;
 
-					tsec = (sec->lines[i])->backsector;
+					tsec = line->backsector;
 					if (!tsec) continue;	//jff 5/7/98 if no backside, continue
-					newsecnum = (int)(tsec - sectors);
+					newsecnum = tsec->sectornum;
 
 					if (!igntxt && tsec->GetTexture(sector_t::floor) != texture)
 						continue;
@@ -746,7 +747,7 @@ bool EV_BuildStairs (int tag, DFloor::EStair type, line_t *line,
 		} while (ok);
 		// [RH] make sure the first sector doesn't point to a previous one, otherwise
 		// it can infinite loop when the first sector stops moving.
-		sectors[osecnum].prevsec = -1;	
+		level.sectors[osecnum].prevsec = -1;
 	}
 	return rtn;
 }
@@ -764,7 +765,6 @@ bool EV_DoDonut (int tag, line_t *line, double pillarspeed, double slimespeed)
 	sector_t*			s3;
 	int 				secnum;
 	bool 				rtn;
-	int 				i;
 	DFloor*				floor;
 	vertex_t*			spot;
 	double				height;
@@ -774,26 +774,26 @@ bool EV_DoDonut (int tag, line_t *line, double pillarspeed, double slimespeed)
 	FSectorTagIterator itr(tag, line);
 	while ((secnum = itr.Next()) >= 0)
 	{
-		s1 = &sectors[secnum];					// s1 is pillar's sector
+		s1 = &level.sectors[secnum];					// s1 is pillar's sector
 
 		// ALREADY MOVING?	IF SO, KEEP GOING...
 		if (s1->PlaneMoving(sector_t::floor))
 			continue; // safe now, because we check that tag is non-0 in the looping condition [fdari]
 						
 		rtn = true;
-		s2 = getNextSector (s1->lines[0], s1);	// s2 is pool's sector
+		s2 = getNextSector (s1->Lines[0], s1);	// s2 is pool's sector
 		if (!s2)								// note lowest numbered line around
 			continue;							// pillar must be two-sided
 
 		if (s2->PlaneMoving(sector_t::floor))
 			continue;
 
-		for (i = 0; i < s2->linecount; i++)
+		for (auto ln : s2->Lines)
 		{
-			if (!(s2->lines[i]->flags & ML_TWOSIDED) ||
-				(s2->lines[i]->backsector == s1))
+			if (!(ln->flags & ML_TWOSIDED) ||
+				(ln->backsector == s1))
 				continue;
-			s3 = s2->lines[i]->backsector;
+			s3 = ln->backsector;
 			
 			//	Spawn rising slime
 			floor = new DFloor (s2);
@@ -832,18 +832,12 @@ bool EV_DoDonut (int tag, line_t *line, double pillarspeed, double slimespeed)
 //
 //==========================================================================
 
-IMPLEMENT_POINTY_CLASS (DElevator)
-	DECLARE_POINTER(m_Interp_Floor)
-	DECLARE_POINTER(m_Interp_Ceiling)
-END_POINTERS
+IMPLEMENT_CLASS(DElevator, false, true)
 
-inline FArchive &operator<< (FArchive &arc, DElevator::EElevator &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DElevator::EElevator)val;
-	return arc;
-}
+IMPLEMENT_POINTERS_START(DElevator)
+	IMPLEMENT_POINTER(m_Interp_Floor)
+	IMPLEMENT_POINTER(m_Interp_Ceiling)
+IMPLEMENT_POINTERS_END
 
 DElevator::DElevator ()
 {
@@ -858,16 +852,16 @@ DElevator::DElevator (sector_t *sec)
 	m_Interp_Ceiling = sec->SetInterpolation(sector_t::CeilingMove, true);
 }
 
-void DElevator::Serialize (FArchive &arc)
+void DElevator::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Type
-		<< m_Direction
-		<< m_FloorDestDist
-		<< m_CeilingDestDist
-		<< m_Speed
-		<< m_Interp_Floor
-		<< m_Interp_Ceiling;
+	arc.Enum("type", m_Type)
+		("direction", m_Direction)
+		("floordestdist", m_FloorDestDist)
+		("ceilingdestdist", m_CeilingDestDist)
+		("speed", m_Speed)
+		("interp_floor", m_Interp_Floor)
+		("interp_ceiling", m_Interp_Ceiling);
 }
 
 //==========================================================================
@@ -876,7 +870,7 @@ void DElevator::Serialize (FArchive &arc)
 //
 //==========================================================================
 
-void DElevator::Destroy()
+void DElevator::OnDestroy()
 {
 	if (m_Interp_Ceiling != NULL)
 	{
@@ -888,7 +882,7 @@ void DElevator::Destroy()
 		m_Interp_Floor->DelRef();
 		m_Interp_Floor = NULL;
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -997,7 +991,7 @@ bool EV_DoElevator (line_t *line, DElevator::EElevator elevtype,
 	// act on all sectors with the same tag as the triggering linedef
 	while ((secnum = itr.Next()) >= 0)
 	{
-		sec = &sectors[secnum];
+		sec = &level.sectors[secnum];
 		// If either floor or ceiling is already activated, skip it
 		if (sec->PlaneMoving(sector_t::floor) || sec->ceilingdata) //jff 2/22/98
 			continue; // the loop used to break at the end if tag were 0, but would miss that step if "continue" occured [FDARI]
@@ -1090,7 +1084,7 @@ bool EV_DoChange (line_t *line, EChange changetype, int tag)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sec = &sectors[secnum];
+		sec = &level.sectors[secnum];
               
 		rtn = true;
 
@@ -1128,29 +1122,25 @@ bool EV_DoChange (line_t *line, EChange changetype, int tag)
 //
 //==========================================================================
 
-IMPLEMENT_POINTY_CLASS (DWaggleBase)
-	DECLARE_POINTER(m_Interpolation)
-END_POINTERS
-
-IMPLEMENT_CLASS (DFloorWaggle)
-IMPLEMENT_CLASS (DCeilingWaggle)
+IMPLEMENT_CLASS(DWaggleBase, false, false)
+IMPLEMENT_CLASS(DFloorWaggle, false, false)
+IMPLEMENT_CLASS(DCeilingWaggle, false, false)
 
 DWaggleBase::DWaggleBase ()
 {
 }
 
-void DWaggleBase::Serialize (FArchive &arc)
+void DWaggleBase::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_OriginalDist
-		<< m_Accumulator
-		<< m_AccDelta
-		<< m_TargetScale
-		<< m_Scale
-		<< m_ScaleDelta
-		<< m_Ticker
-		<< m_State
-		<< m_Interpolation;
+	arc("originaldist", m_OriginalDist)
+		("accumulator", m_Accumulator)
+		("accdelta", m_AccDelta)
+		("targetscale", m_TargetScale)
+		("scale", m_Scale)
+		("scaledelta", m_ScaleDelta)
+		("ticker", m_Ticker)
+		("state", m_State);
 }
 
 //==========================================================================
@@ -1166,16 +1156,6 @@ void DWaggleBase::Serialize (FArchive &arc)
 DWaggleBase::DWaggleBase (sector_t *sec)
 	: Super (sec)
 {
-}
-
-void DWaggleBase::Destroy()
-{
-	if (m_Interpolation != NULL)
-	{
-		m_Interpolation->DelRef();
-		m_Interpolation = NULL;
-	}
-	Super::Destroy();
 }
 
 //==========================================================================
@@ -1269,7 +1249,7 @@ DFloorWaggle::DFloorWaggle (sector_t *sec)
 	: Super (sec)
 {
 	sec->floordata = this;
-	m_Interpolation = sec->SetInterpolation(sector_t::FloorMove, true);
+	interpolation = sec->SetInterpolation(sector_t::FloorMove, true);
 }
 
 void DFloorWaggle::Tick ()
@@ -1291,7 +1271,7 @@ DCeilingWaggle::DCeilingWaggle (sector_t *sec)
 	: Super (sec)
 {
 	sec->ceilingdata = this;
-	m_Interpolation = sec->SetInterpolation(sector_t::CeilingMove, true);
+	interpolation = sec->SetInterpolation(sector_t::CeilingMove, true);
 }
 
 void DCeilingWaggle::Tick ()
@@ -1319,7 +1299,7 @@ bool EV_StartWaggle (int tag, line_t *line, int height, int speed, int offset,
 
 	while ((sectorIndex = itr.Next()) >= 0)
 	{
-		sector = &sectors[sectorIndex];
+		sector = &level.sectors[sectorIndex];
 		if ((!ceiling && sector->PlaneMoving(sector_t::floor)) || 
 			(ceiling && sector->PlaneMoving(sector_t::ceiling)))
 		{ // Already busy with another thinker

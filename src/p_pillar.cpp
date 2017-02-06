@@ -37,27 +37,22 @@
 #include "p_spec.h"
 #include "g_level.h"
 #include "s_sndseq.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "r_data/r_interpolate.h"
+#include "g_levellocals.h"
 
-IMPLEMENT_POINTY_CLASS (DPillar)
-	DECLARE_POINTER(m_Interp_Floor)
-	DECLARE_POINTER(m_Interp_Ceiling)
-END_POINTERS
+IMPLEMENT_CLASS(DPillar, false, true)
 
-inline FArchive &operator<< (FArchive &arc, DPillar::EPillar &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DPillar::EPillar)val;
-	return arc;
-}
+IMPLEMENT_POINTERS_START(DPillar)
+	IMPLEMENT_POINTER(m_Interp_Floor)
+	IMPLEMENT_POINTER(m_Interp_Ceiling)
+IMPLEMENT_POINTERS_END
 
 DPillar::DPillar ()
 {
 }
 
-void DPillar::Destroy()
+void DPillar::OnDestroy()
 {
 	if (m_Interp_Ceiling != NULL)
 	{
@@ -69,21 +64,21 @@ void DPillar::Destroy()
 		m_Interp_Floor->DelRef();
 		m_Interp_Floor = NULL;
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
-void DPillar::Serialize (FArchive &arc)
+void DPillar::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Type
-		<< m_FloorSpeed
-		<< m_CeilingSpeed
-		<< m_FloorTarget
-		<< m_CeilingTarget
-		<< m_Crush
-		<< m_Hexencrush
-		<< m_Interp_Floor
-		<< m_Interp_Ceiling;
+	arc.Enum("type", m_Type)
+		("floorspeed", m_FloorSpeed)
+		("ceilingspeed", m_CeilingSpeed)
+		("floortarget", m_FloorTarget)
+		("ceilingtarget", m_CeilingTarget)
+		("crush", m_Crush)
+		("hexencrush", m_Hexencrush)
+		("interp_floor", m_Interp_Floor)
+		("interp_ceiling", m_Interp_Ceiling);
 }
 
 void DPillar::Tick ()
@@ -226,7 +221,7 @@ bool EV_DoPillar (DPillar::EPillar type, line_t *line, int tag,
 	FSectorTagIterator itr(tag, line);
 	while ((secnum = itr.Next()) >= 0)
 	{
-		sec = &sectors[secnum];
+		sec = &level.sectors[secnum];
 
 		if (sec->PlaneMoving(sector_t::floor) || sec->PlaneMoving(sector_t::ceiling))
 			continue;

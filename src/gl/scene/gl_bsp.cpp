@@ -1,46 +1,34 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2000-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_bsp.cpp
 ** Main rendering loop / BSP traversal / visibility clipping
 **
-**---------------------------------------------------------------------------
-** Copyright 2000-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
-*/
+**/
 
 #include "p_lnspec.h"
 #include "p_local.h"
 #include "a_sharedglobal.h"
+#include "g_levellocals.h"
 #include "r_sky.h"
 #include "p_effect.h"
 #include "po_man.h"
@@ -100,7 +88,7 @@ static sector_t *currentsector;
 static void AddLine (seg_t *seg, bool portalclip)
 {
 #ifdef _DEBUG
-	if (seg->linedef - lines == 38)
+	if (seg->linedef->Index() == 38)
 	{
 		int a = 0;
 	}
@@ -153,12 +141,15 @@ static void AddLine (seg_t *seg, bool portalclip)
 	{
 		if (currentsector->sectornum == seg->backsector->sectornum)
 		{
-			FTexture * tex = TexMan(seg->sidedef->GetTexture(side_t::mid));
-			if (!tex || tex->UseType==FTexture::TEX_Null) 
+			if (!seg->linedef->isVisualPortal())
 			{
-				// nothing to do here!
-				seg->linedef->validcount=validcount;
-				return;
+				FTexture * tex = TexMan(seg->sidedef->GetTexture(side_t::mid));
+				if (!tex || tex->UseType==FTexture::TEX_Null) 
+				{
+					// nothing to do here!
+					seg->linedef->validcount=validcount;
+					return;
+				}
 			}
 			backsector=currentsector;
 		}
@@ -373,8 +364,12 @@ static inline void RenderThings(subsector_t * sub, sector_t * sector)
 	SetupSprite.Clock();
 	sector_t * sec=sub->sector;
 	// Handle all things in sector.
-	for (AActor * thing = sec->thinglist; thing; thing = thing->snext)
+	for (auto p = sec->touching_renderthings; p != nullptr; p = p->m_snext)
 	{
+		auto thing = p->m_thing;
+		if (thing->validcount == validcount) continue;
+		thing->validcount = validcount;
+
 		FIntCVar *cvar = thing->GetClass()->distancecheck;
 		if (cvar != NULL && *cvar >= 0)
 		{
@@ -388,7 +383,8 @@ static inline void RenderThings(subsector_t * sub, sector_t * sector)
 
 		GLRenderer->ProcessSprite(thing, sector, false);
 	}
-	for (msecnode_t *node = sec->render_thinglist; node; node = node->m_snext)
+	
+	for (msecnode_t *node = sec->sectorportal_thinglist; node; node = node->m_snext)
 	{
 		AActor *thing = node->m_thing;
 		FIntCVar *cvar = thing->GetClass()->distancecheck;
@@ -425,7 +421,7 @@ static void DoSubsector(subsector_t * sub)
 	sector_t fake;
 	
 #ifdef _DEBUG
-	if (sub->sector-sectors==931)
+	if (sub->sector->sectornum==931)
 	{
 		int a = 0;
 	}

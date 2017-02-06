@@ -36,9 +36,10 @@
 #include "i_system.h"
 #include "sc_man.h"
 #include "cmdlib.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "d_player.h"
 #include "p_spec.h"
+#include "g_levellocals.h"
 
 //============================================================================
 //
@@ -46,31 +47,25 @@
 //
 //============================================================================
 
-IMPLEMENT_CLASS (DDoor)
-
-inline FArchive &operator<< (FArchive &arc, DDoor::EVlDoor &type)
-{
-	BYTE val = (BYTE)type;
-	arc << val;
-	type = (DDoor::EVlDoor)val;
-	return arc;
-}
+IMPLEMENT_CLASS(DDoor, false, false)
 
 DDoor::DDoor ()
 {
 }
 
-void DDoor::Serialize (FArchive &arc)
+void DDoor::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Type
-		<< m_TopDist
-		<< m_BotSpot << m_BotDist << m_OldFloorDist
-		<< m_Speed
-		<< m_Direction
-		<< m_TopWait
-		<< m_TopCountdown
-		<< m_LightTag;
+	arc.Enum("type", m_Type)
+		("topdist", m_TopDist)
+		("botspot", m_BotSpot)
+		("botdist", m_BotDist)
+		("oldfloordist", m_OldFloorDist)
+		("speed", m_Speed)
+		("direction", m_Direction)
+		("topwait", m_TopWait)
+		("topcountdown", m_TopCountdown)
+		("lighttag", m_LightTag);
 }
 
 //============================================================================
@@ -293,10 +288,9 @@ void DDoor::DoorSound(bool raise, DSeqNode *curseq) const
 
 			// Search the front top textures of 2-sided lines on the door sector
 			// for a door sound to use.
-			for (int i = 0; i < m_Sector->linecount; ++i)
+			for (auto line : m_Sector->Lines)
 			{
 				const char *texname;
-				line_t *line = m_Sector->lines[i];
 
 				if (line->backsector == NULL)
 					continue;
@@ -449,7 +443,7 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 
 		// get the sector on the second side of activating linedef
 		sec = line->sidedef[1]->sector;
-		secnum = int(sec-sectors);
+		secnum = sec->sectornum;
 
 		// if door already has a thinker, use it
 		if (sec->PlaneMoving(sector_t::ceiling))
@@ -501,7 +495,7 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 		FSectorTagIterator it(tag);
 		while ((secnum = it.Next()) >= 0)
 		{
-			sec = &sectors[secnum];
+			sec = &level.sectors[secnum];
 			// if the ceiling is already moving, don't start the door action
 			if (sec->PlaneMoving(sector_t::ceiling))
 				continue;
@@ -520,7 +514,7 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 //
 //============================================================================
 
-IMPLEMENT_CLASS (DAnimatedDoor)
+IMPLEMENT_CLASS(DAnimatedDoor, false, false)
 
 DAnimatedDoor::DAnimatedDoor ()
 {
@@ -531,19 +525,21 @@ DAnimatedDoor::DAnimatedDoor (sector_t *sec)
 {
 }
 
-void DAnimatedDoor::Serialize (FArchive &arc)
+void DAnimatedDoor::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
 	
-	arc << m_Line1 << m_Line2
-		<< m_Frame
-		<< m_Timer
-		<< m_BotDist
-		<< m_Status
-		<< m_Speed
-		<< m_Delay
-		<< m_DoorAnim
-		<< m_SetBlocking1 << m_SetBlocking2;
+	arc("line1", m_Line1)
+		("line2", m_Line2)
+		("frame", m_Frame)
+		("timer", m_Timer)
+		("botdist", m_BotDist)
+		("status", m_Status)
+		("speed", m_Speed)
+		("delay", m_Delay)
+		("dooranim", m_DoorAnim)
+		("setblock1", m_SetBlocking1)
+		("setblock2", m_SetBlocking2);
 }
 
 //============================================================================
@@ -699,14 +695,14 @@ DAnimatedDoor::DAnimatedDoor (sector_t *sec, line_t *line, int speed, int delay,
 	m_Line1 = line;
 	m_Line2 = line;
 
-	for (int i = 0; i < sec->linecount; ++i)
+	for (auto l : sec->Lines)
 	{
-		if (sec->lines[i] == line)
+		if (l == line)
 			continue;
 
-		if (sec->lines[i]->sidedef[0]->GetTexture(side_t::top) == line->sidedef[0]->GetTexture(side_t::top))
+		if (l->sidedef[0]->GetTexture(side_t::top) == line->sidedef[0]->GetTexture(side_t::top))
 		{
-			m_Line2 = sec->lines[i];
+			m_Line2 = l;
 			break;
 		}
 	}
@@ -788,15 +784,14 @@ bool EV_SlidingDoor (line_t *line, AActor *actor, int tag, int speed, int delay)
 	FSectorTagIterator it(tag);
 	while ((secnum = it.Next()) >= 0)
 	{
-		sec = &sectors[secnum];
+		sec = &level.sectors[secnum];
 		if (sec->ceilingdata != NULL)
 		{
 			continue;
 		}
 
-		for (int i = 0; tag != 0 && i < sec->linecount; ++i)
+		for (auto line : sec->Lines)
 		{
-			line = sec->lines[i];
 			if (line->backsector == NULL)
 			{
 				continue;

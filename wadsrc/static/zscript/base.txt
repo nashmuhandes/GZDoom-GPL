@@ -1,0 +1,448 @@
+struct TexMan
+{
+	enum EUseTypes
+	{
+		Type_Any,
+		Type_Wall,
+		Type_Flat,
+		Type_Sprite,
+		Type_WallPatch,
+		Type_Build,
+		Type_SkinSprite,
+		Type_Decal,
+		Type_MiscPatch,
+		Type_FontChar,
+		Type_Override,	// For patches between TX_START/TX_END
+		Type_Autopage,	// Automap background - used to enable the use of FAutomapTexture
+		Type_SkinGraphic,
+		Type_Null,
+		Type_FirstDefined,
+	};
+
+	enum EFlags
+	{
+		TryAny = 1,
+		Overridable = 2,
+		ReturnFirst = 4,
+		AllowSkins = 8,
+		ShortNameOnly = 16,
+		DontCreate = 32
+	};
+
+	native static TextureID CheckForTexture(String name, int usetype, int flags = TryAny);
+}
+
+struct Screen native
+{
+	enum EColorRange
+	{
+		CR_UNDEFINED = -1,
+		CR_BRICK,
+		CR_TAN,
+		CR_GRAY,
+		CR_GREY = CR_GRAY,
+		CR_GREEN,
+		CR_BROWN,
+		CR_GOLD,
+		CR_RED,
+		CR_BLUE,
+		CR_ORANGE,
+		CR_WHITE,
+		CR_YELLOW,
+		CR_UNTRANSLATED,
+		CR_BLACK,
+		CR_LIGHTBLUE,
+		CR_CREAM,
+		CR_OLIVE,
+		CR_DARKGREEN,
+		CR_DARKRED,
+		CR_DARKBROWN,
+		CR_PURPLE,
+		CR_DARKGRAY,
+		CR_CYAN,
+		NUM_TEXT_COLORS
+	};
+
+	native static int GetWidth();
+	native static int GetHeight();
+	native static void DrawHUDTexture(TextureID tex, double x, double y);
+}
+
+struct Font native
+{
+	native static Font FindFont(String name);
+}
+
+struct Console native
+{
+	native static void HideConsole();
+	native static void MidPrint(string fontname, string textlabel, bool bold = false);	// always uses the stringtable.
+}
+
+struct DamageTypeDefinition native
+{
+	native static bool IgnoreArmor(Name type);
+}
+
+struct GameInfoStruct native
+{
+	// will be extended as needed.
+	native Name backpacktype;
+	native double Armor2Percent;
+	native String ArmorIcon1;
+	native String ArmorIcon2;
+	native int gametype;
+}
+
+class Object native
+{
+	native bool bDestroyed;
+
+	// These really should be global functions...
+	native static int G_SkillPropertyInt(int p);
+	native static double G_SkillPropertyFloat(int p);
+	native static vector3, int G_PickDeathmatchStart();
+	native static vector3, int G_PickPlayerStart(int pnum, int flags = 0);
+	native static void S_Sound (Sound sound_id, int channel, float volume = 1, float attenuation = ATTN_NORM);
+	native static void S_PauseSound (bool notmusic, bool notsfx);
+	native static void S_ResumeSound (bool notsfx);
+	native static bool S_ChangeMusic(String music_name, int order = 0, bool looping = true, bool force = false);
+	native static uint BAM(double angle);
+	native static void SetMusicVolume(float vol);
+
+	native Name GetClassName();
+	native void Destroy();
+
+	// This does not call into the native method of the same name to avoid problems with objects that get garbage collected late on shutdown.
+	virtual void OnDestroy() {}
+}
+
+class Thinker : Object native
+{
+	enum EStatnums
+	{
+ 		// Thinkers that don't actually think
+		STAT_INFO,								// An info queue
+		STAT_DECAL,								// A decal
+		STAT_AUTODECAL,							// A decal that can be automatically deleted
+		STAT_CORPSEPOINTER,						// An entry in Hexen's corpse queue
+		STAT_TRAVELLING,						// An actor temporarily travelling to a new map
+
+		// Thinkers that do think
+		STAT_FIRST_THINKING=32,
+		STAT_SCROLLER=STAT_FIRST_THINKING,		// A DScroller thinker
+		STAT_PLAYER,							// A player actor
+		STAT_BOSSTARGET,						// A boss brain target
+		STAT_LIGHTNING,							// The lightning thinker
+		STAT_DECALTHINKER,						// An object that thinks for a decal
+		STAT_INVENTORY,							// An inventory item
+		STAT_LIGHT,								// A sector light effect
+		STAT_LIGHTTRANSFER,						// A sector light transfer. These must be ticked after the light effects.
+		STAT_EARTHQUAKE,						// Earthquake actors
+		STAT_MAPMARKER,							// Map marker actors
+
+		STAT_DEFAULT = 100,						// Thinkers go here unless specified otherwise.
+		STAT_SECTOREFFECT,						// All sector effects that cause floor and ceiling movement
+		STAT_ACTORMOVER,						// actor movers
+		STAT_SCRIPTS,							// The ACS thinker. This is to ensure that it can't tick before all actors called PostBeginPlay
+		STAT_BOT,								// Bot thinker
+		MAX_STATNUM = 127
+	}
+
+	const TICRATE = 35;
+	
+	virtual native void Tick();
+	virtual native void PostBeginPlay();
+	virtual native void ChangeStatNum(int stat);
+}
+
+class ThinkerIterator : Object native
+{
+
+	native static ThinkerIterator Create(class<Object> type = "Actor", int statnum=Thinker.MAX_STATNUM+1);
+	native Thinker Next(bool exact = false);
+	native void Reinit();
+}
+
+class ActorIterator : Object native
+{
+	native static ActorIterator Create(int tid, class<Actor> type = "Actor");
+	native Actor Next();
+	native void Reinit();
+}
+
+class BlockThingsIterator : Object native
+{
+	native Actor thing;
+	native Vector3 position;
+	native int portalflags;
+	
+	native static BlockThingsIterator Create(Actor origin, double checkradius = -1, bool ignorerestricted = false);
+	native static BlockThingsIterator CreateFromPos(double checkx, double checky, double checkz, double checkh, double checkradius, bool ignorerestricted);
+	native bool Next();
+}
+
+class DropItem : Object native
+{
+	native readonly DropItem Next;
+	native readonly name Name;
+	native readonly int Probability;
+	native int Amount;
+}
+
+class SpotState : Object native
+{
+	native static SpotState GetSpotState();
+	native SpecialSpot GetNextInList(class<Actor> type, int skipcounter);
+	native SpecialSpot GetSpotWithMinMaxDistance(Class<Actor> type, double x, double y, double mindist, double maxdist);
+	
+}
+
+struct LevelLocals native
+{
+	native readonly int time;
+	native readonly int maptime;
+	native readonly int totaltime;
+	native readonly int starttime;
+	native readonly int partime;
+	native readonly int sucktime;
+	native readonly int cluster;
+	native readonly int clusterflags;
+	native readonly int levelnum;
+	native readonly String LevelName;
+	native readonly String MapName;
+	native String NextMap;
+	native String NextSecretMap;
+	native readonly int maptype;
+	native readonly String Music;
+	native readonly int musicorder;
+	native int total_secrets;
+	native int found_secrets;
+	native int total_items;
+	native int found_items;
+	native int total_monsters;
+	native int killed_monsters;
+	native double gravity;
+	native double aircontrol;
+	native double airfriction;
+	native int airsupply;
+	native double teamdamage;
+	native bool monsterstelefrag;
+	native bool actownspecial;
+	native bool sndseqtotalctrl;
+	native bool allmap;
+	native bool missilesactivateimpact;
+	native bool monsterfallingdamage;
+	native bool checkswitchrange;
+	native bool polygrind;
+	native bool nomonsters;
+	native bool frozen;
+	native bool infinite_flight;
+// level_info_t *info cannot be done yet.
+}
+
+struct StringTable native
+{
+	native static String Localize(String val, bool prefixed = false);
+}
+
+// a few values of this need to be readable by the play code.
+// Most are handled at load time and are omitted here.
+struct DehInfo native
+{
+	native int MaxSoulsphere;
+	native uint8 ExplosionStyle;
+	native double ExplosionAlpha;
+	native int NoAutofreeze;
+	native int BFGCells;
+	native int BlueAC;
+}
+
+struct State native
+{
+	native State NextState;
+	native int sprite;
+	native int16 Tics;
+	native uint16 TicRange;
+	native uint8 Frame;		
+	native uint8 UseFlags;	
+	native int Misc1;
+	native int Misc2;
+	native uint16 bSlow;
+	native uint16 bFast;
+	native bool bFullbright;
+	native bool bNoDelay;
+	native bool bSameFrame;
+	native bool bCanRaise;
+	native bool bDehacked;
+	
+	native int DistanceTo(state other);
+	native bool ValidateSpriteFrame();
+}
+
+struct F3DFloor native
+{
+}
+
+struct Wads
+{
+	enum WadNamespace
+	{
+		ns_hidden = -1,
+
+		ns_global = 0,
+		ns_sprites,
+		ns_flats,
+		ns_colormaps,
+		ns_acslibrary,
+		ns_newtextures,
+		ns_bloodraw,
+		ns_bloodsfx,
+		ns_bloodmisc,
+		ns_strifevoices,
+		ns_hires,
+		ns_voxels,
+
+		ns_specialzipdirectory,
+		ns_sounds,
+		ns_patches,
+		ns_graphics,
+		ns_music,
+
+		ns_firstskin,
+	}
+
+	native static int CheckNumForName(string name, int ns, int wadnum = -1, bool exact = false);
+}
+
+struct TerrainDef native
+{
+	native Name TerrainName;
+	native int Splash;
+	native int DamageAmount;
+	native Name DamageMOD;
+	native int DamageTimeMask;
+	native double FootClip;
+	native float StepVolume;
+	native int WalkStepTics;
+	native int RunStepTics;
+	native Sound LeftStepSound;
+	native Sound RightStepSound;
+	native bool IsLiquid;
+	native bool AllowProtection;
+	native double Friction;
+	native double MoveFactor;
+};
+
+enum EPickStart
+{
+	PPS_FORCERANDOM			= 1,
+	PPS_NOBLOCKINGCHECK		= 2,
+}
+
+// Although String is a builtin type, this is a convenient way to attach methods to it.
+struct StringStruct native
+{
+	native void Replace(String pattern, String replacement);
+	native static vararg String Format(String fmt, ...);
+        native vararg void AppendFormat(String fmt, ...);
+}
+
+class Floor : Thinker native
+{
+	// only here so that some constants and functions can be added. Not directly usable yet.
+	enum EFloor
+	{
+		floorLowerToLowest,
+		floorLowerToNearest,
+		floorLowerToHighest,
+		floorLowerByValue,
+		floorRaiseByValue,
+		floorRaiseToHighest,
+		floorRaiseToNearest,
+		floorRaiseAndCrush,
+		floorRaiseAndCrushDoom,
+		floorCrushStop,
+		floorLowerInstant,
+		floorRaiseInstant,
+		floorMoveToValue,
+		floorRaiseToLowestCeiling,
+		floorRaiseByTexture,
+
+		floorLowerAndChange,
+		floorRaiseAndChange,
+
+		floorRaiseToLowest,
+		floorRaiseToCeiling,
+		floorLowerToLowestCeiling,
+		floorLowerByTexture,
+		floorLowerToCeiling,
+
+		donutRaise,
+
+		buildStair,
+		waitStair,
+		resetStair,
+
+		// Not to be used as parameters to EV_DoFloor()
+		genFloorChg0,
+		genFloorChgT,
+		genFloorChg
+	};
+
+	native static bool CreateFloor(sector sec, EFloor floortype, line ln, double speed, double height = 0, int crush = -1, int change = 0, bool crushmode = false, bool hereticlower = false);
+}
+
+class Ceiling : Thinker native
+{
+	enum ECeiling
+	{
+		ceilLowerByValue,
+		ceilRaiseByValue,
+		ceilMoveToValue,
+		ceilLowerToHighestFloor,
+		ceilLowerInstant,
+		ceilRaiseInstant,
+		ceilCrushAndRaise,
+		ceilLowerAndCrush,
+		ceil_placeholder,
+		ceilCrushRaiseAndStay,
+		ceilRaiseToNearest,
+		ceilLowerToLowest,
+		ceilLowerToFloor,
+
+		// The following are only used by Generic_Ceiling
+		ceilRaiseToHighest,
+		ceilLowerToHighest,
+		ceilRaiseToLowest,
+		ceilLowerToNearest,
+		ceilRaiseToHighestFloor,
+		ceilRaiseToFloor,
+		ceilRaiseByTexture,
+		ceilLowerByTexture,
+
+		genCeilingChg0,
+		genCeilingChgT,
+		genCeilingChg
+	}
+
+	enum ECrushMode
+	{
+		crushDoom = 0,
+		crushHexen = 1,
+		crushSlowdown = 2
+	}
+	
+	native bool CreateCeiling(sector sec, int type, line ln, double speed, double speed2, double height = 0, int crush = -1, int silent = 0, int change = 0, int crushmode = crushDoom);
+	
+}
+
+struct LookExParams
+{
+	double Fov;
+	double minDist;
+	double maxDist;
+	double maxHeardist;
+	int flags;
+	State seestate;
+};

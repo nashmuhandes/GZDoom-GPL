@@ -1,11 +1,14 @@
 #include "a_sharedglobal.h"
 #include "g_level.h"
 #include "d_player.h"
-#include "farchive.h"
+#include "serializer.h"
+#include "g_levellocals.h"
 
-IMPLEMENT_POINTY_CLASS (DFlashFader)
- DECLARE_POINTER (ForWho)
-END_POINTERS
+IMPLEMENT_CLASS(DFlashFader, false, true)
+
+IMPLEMENT_POINTERS_START(DFlashFader)
+	IMPLEMENT_POINTER(ForWho)
+IMPLEMENT_POINTERS_END
 
 DFlashFader::DFlashFader ()
 {
@@ -20,19 +23,19 @@ DFlashFader::DFlashFader (float r1, float g1, float b1, float a1,
 	Blends[1][0]=r2; Blends[1][1]=g2; Blends[1][2]=b2; Blends[1][3]=a2;
 }
 
-void DFlashFader::Destroy ()
+void DFlashFader::OnDestroy ()
 {
 	SetBlend (1.f);
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
-void DFlashFader::Serialize (FArchive &arc)
+void DFlashFader::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << TotalTics << StartTic << ForWho;
-	for (int i = 1; i >= 0; --i)
-		for (int j = 3; j >= 0; --j)
-			arc << Blends[i][j];
+	arc("totaltics", TotalTics)
+		("starttic", StartTic)
+		("forwho", ForWho)
+		.Array("blends", Blends[0], 8);
 }
 
 void DFlashFader::Tick ()

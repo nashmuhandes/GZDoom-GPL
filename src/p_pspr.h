@@ -26,17 +26,12 @@
 
 // Basic data types.
 // Needs fixed point, and BAM angles.
-#include "thingdef/thingdef.h"
 
 #define WEAPONBOTTOM			128.
 
-// [RH] +0x6000 helps it meet the screen bottom
-//		at higher resolutions while still being in
-//		the right spot at 320x200.
-#define WEAPONTOP				(32+6./16)
-
+#define WEAPONTOP				32.
+#define WEAPON_FUDGE_Y			0.375
 class AInventory;
-class FArchive;
 
 //
 // Overlay psprites are scaled shapes
@@ -59,6 +54,7 @@ enum PSPFlags
 	PSPF_ADDBOB		= 1 << 1,
 	PSPF_POWDOUBLE	= 1 << 2,
 	PSPF_CVARFAST	= 1 << 3,
+	PSPF_FLIP		= 1 << 6,
 };
 
 class DPSprite : public DObject
@@ -79,6 +75,8 @@ public:
 	DPSprite*	GetNext()	      { return Next; }
 	AActor*		GetCaller()	      { return Caller; }
 	void		SetCaller(AActor *newcaller) { Caller = newcaller; }
+	void		ResetInterpolation() { oldx = x; oldy = y; }
+	void OnDestroy() override;
 
 	double x, y;
 	double oldx, oldy;
@@ -89,10 +87,10 @@ public:
 private:
 	DPSprite () {}
 
-	void Serialize(FArchive &arc);
+	void Serialize(FSerializer &arc);
 	void Tick();
-	void Destroy();
 
+public:	// must be public to be able to generate the field export tables. Grrr...
 	TObjPtr<AActor> Caller;
 	TObjPtr<DPSprite> Next;
 	player_t *Owner;
@@ -114,15 +112,13 @@ void P_FireWeapon (player_t *player);
 void P_DropWeapon (player_t *player);
 void P_BobWeapon (player_t *player, float *x, float *y, double ticfrac);
 DAngle P_BulletSlope (AActor *mo, FTranslatedLineTarget *pLineTarget = NULL, int aimflags = 0);
-
-void P_GunShot (AActor *mo, bool accurate, PClassActor *pufftype, DAngle pitch);
+AActor *P_AimTarget(AActor *mo);
 
 void DoReadyWeapon(AActor *self);
 void DoReadyWeaponToBob(AActor *self);
 void DoReadyWeaponToFire(AActor *self, bool primary = true, bool secondary = true);
 void DoReadyWeaponToSwitch(AActor *self, bool switchable = true);
 
-DECLARE_ACTION(A_Raise)
 void A_ReFire(AActor *self, FState *state = NULL);
 
 #endif	// __P_PSPR_H__

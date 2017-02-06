@@ -45,8 +45,8 @@
 #include "r_state.h"
 #include "templates.h"
 #include "po_man.h"
+#include "g_levellocals.h"
 
-static AActor *RoughBlockCheck (AActor *mo, int index, void *);
 sector_t *P_PointInSectorBuggy(double x, double y);
 int P_VanillaPointOnDivlineSide(double x, double y, const divline_t* line);
 
@@ -244,9 +244,9 @@ void P_LineOpening (FLineOpening &open, AActor *actor, const line_t *linedef, co
 //
 //==========================================================================
 
-void AActor::UnlinkFromWorld ()
+void AActor::UnlinkFromWorld (FLinkContext *ctx)
 {
-	sector_list = NULL;
+	if (ctx != nullptr) ctx->sector_list = nullptr;
 	if (!(flags & MF_NOSECTOR))
 	{
 		// invisible things don't need to be in sector list
@@ -273,12 +273,19 @@ void AActor::UnlinkFromWorld ()
 			// put it back into touching_sectorlist. It's done this way to
 			// avoid a lot of deleting/creating for nodes, when most of the
 			// time you just get back what you deleted anyway.
-			//
-			// If this Thing is being removed entirely, then the calling
-			// routine will clear out the nodes in sector_list.
 
-			sector_list = touching_sectorlist;
-			touching_sectorlist = NULL; //to be restored by P_SetThingPosition
+			if (ctx != nullptr)
+			{
+				ctx->sector_list = touching_sectorlist;
+				ctx->render_list = touching_rendersectors;
+			}
+			else
+			{
+				P_DelSeclist(touching_sectorlist, &sector_t::touching_thinglist);
+				P_DelSeclist(touching_rendersectors, &sector_t::touching_renderthings);
+			}
+			touching_sectorlist = nullptr; //to be restored by P_SetThingPosition
+			touching_rendersectors = nullptr;
 		}
 	}
 		
@@ -325,7 +332,7 @@ bool AActor::FixMapthingPos()
 
 		for (list = blockmaplump + blockmap[blocky*bmapwidth + blockx] + 1; *list != -1; ++list)
 		{
-			line_t *ldef = &lines[*list];
+			line_t *ldef = &level.lines[*list];
 
 			if (ldef->frontsector == ldef->backsector)
 			{ // Skip two-sided lines inside a single sector
@@ -362,10 +369,10 @@ bool AActor::FixMapthingPos()
 
 			if (distance < radius)
 			{
-				DPrintf("%s at (%f,%f) lies on %s line %td, distance = %f\n",
+				DPrintf(DMSG_NOTIFY, "%s at (%f,%f) lies on %s line %d, distance = %f\n",
 					this->GetClass()->TypeName.GetChars(), X(), Y(),
 					ldef->Delta().X == 0 ? "vertical" : ldef->Delta().Y == 0 ? "horizontal" : "diagonal",
-					ldef - lines, distance);
+					ldef->Index(), distance);
 				DAngle ang = ldef->Delta().Angle();
 				if (ldef->backsector != NULL && ldef->backsector == secstart)
 				{
@@ -387,6 +394,15 @@ bool AActor::FixMapthingPos()
 	return success;
 }
 
+DEFINE_ACTION_FUNCTION(AActor, UnlinkFromWorld)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_POINTER_DEF(ctx, FLinkContext);
+	self->UnlinkFromWorld(ctx); // fixme
+	return 0;
+}
+
+
 //==========================================================================
 //
 // P_SetThingPosition
@@ -395,7 +411,7 @@ bool AActor::FixMapthingPos()
 //
 //==========================================================================
 
-void AActor::LinkToWorld(bool spawningmapthing, sector_t *sector)
+void AActor::LinkToWorld(FLinkContext *ctx, bool spawningmapthing, sector_t *sector)
 {
 	bool spawning = spawningmapthing;
 
@@ -447,9 +463,13 @@ void AActor::LinkToWorld(bool spawningmapthing, sector_t *sector)
 		// When a node is deleted, its sector links (the links starting
 		// at sector_t->touching_thinglist) are broken. When a node is
 		// added, new sector links are created.
-		P_CreateSecNodeList(this);
-		touching_sectorlist = sector_list;	// Attach to thing
-		sector_list = NULL;		// clear for next time
+		touching_sectorlist = P_CreateSecNodeList(this, radius, ctx != nullptr? ctx->sector_list : nullptr, &sector_t::touching_thinglist);	// Attach to thing
+		if (renderradius >= 0) touching_rendersectors = P_CreateSecNodeList(this, MAX(radius, renderradius), ctx != nullptr ? ctx->render_list : nullptr, &sector_t::touching_renderthings);
+		else
+		{
+			touching_rendersectors = nullptr;
+			if (ctx != nullptr) P_DelSeclist(ctx->render_list, &sector_t::touching_renderthings);
+		}
 	}
 
 
@@ -509,13 +529,33 @@ void AActor::LinkToWorld(bool spawningmapthing, sector_t *sector)
 	if (!spawningmapthing) UpdateRenderSectorList();
 }
 
+DEFINE_ACTION_FUNCTION(AActor, LinkToWorld)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_POINTER_DEF(ctx, FLinkContext);
+	self->LinkToWorld(ctx);
+	return 0;
+}
+
 void AActor::SetOrigin(double x, double y, double z, bool moving)
 {
-	UnlinkFromWorld ();
+	FLinkContext ctx;
+	UnlinkFromWorld (&ctx);
 	SetXYZ(x, y, z);
-	LinkToWorld ();
+	LinkToWorld (&ctx);
 	P_FindFloorCeiling(this, FFCF_ONLYSPAWNPOS);
 	if (!moving) ClearInterpolation();
+}
+
+DEFINE_ACTION_FUNCTION(AActor, SetOrigin)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT(x);
+	PARAM_FLOAT(y);
+	PARAM_FLOAT(z);
+	PARAM_BOOL(moving);
+	self->SetOrigin(x, y, z, moving);
+	return 0;
 }
 
 //===========================================================================
@@ -673,7 +713,7 @@ line_t *FBlockLinesIterator::Next()
 		{
 			while (*list != -1)
 			{
-				line_t *ld = &lines[*list];
+				line_t *ld = &level.lines[*list];
 
 				list++;
 				if (ld->validcount != validcount)
@@ -901,7 +941,7 @@ void FBlockThingsIterator::init(const FBoundingBox &box)
 
 void FBlockThingsIterator::ClearHash()
 {
-	clearbuf(Buckets, countof(Buckets), -1);
+	memset(Buckets, -1, sizeof(Buckets));
 	NumFixedHash = 0;
 	DynHash.Clear();
 }
@@ -1127,6 +1167,80 @@ void FMultiBlockThingsIterator::Reset()
 	portalflags = 0;
 	startIteratorForGroup(basegroup);
 }
+
+//===========================================================================
+//
+// and the scriptable version
+//
+//===========================================================================
+
+class DBlockThingsIterator : public DObject, public FMultiBlockThingsIterator
+{
+	DECLARE_CLASS(DBlockThingsIterator, DObject);
+	FPortalGroupArray check;
+protected:
+	DBlockThingsIterator()
+		:FMultiBlockThingsIterator(check)
+	{
+	}
+public:
+	FMultiBlockThingsIterator::CheckResult cres;
+
+public:
+	bool Next()
+	{
+		return FMultiBlockThingsIterator::Next(&cres);
+	}
+
+	DBlockThingsIterator(AActor *origin, double checkradius = -1, bool ignorerestricted = false)
+		: FMultiBlockThingsIterator(check, origin, checkradius, ignorerestricted)
+	{
+		cres.thing = nullptr;
+		cres.Position.Zero();
+		cres.portalflags = 0;
+	}
+
+	DBlockThingsIterator(double checkx, double checky, double checkz, double checkh, double checkradius, bool ignorerestricted, sector_t *newsec)
+		: FMultiBlockThingsIterator(check, checkx, checky, checkz, checkh, checkradius, ignorerestricted, newsec)
+	{
+		cres.thing = nullptr;
+		cres.Position.Zero();
+		cres.portalflags = 0;
+	}
+};
+
+IMPLEMENT_CLASS(DBlockThingsIterator, false, false);
+
+DEFINE_ACTION_FUNCTION(DBlockThingsIterator, Create)
+{
+	PARAM_PROLOGUE;
+	PARAM_OBJECT_NOT_NULL(origin, AActor);
+	PARAM_FLOAT_DEF(radius);
+	PARAM_BOOL_DEF(ignore);
+	ACTION_RETURN_OBJECT(new DBlockThingsIterator(origin, radius, ignore));
+}
+
+DEFINE_ACTION_FUNCTION(DBlockThingsIterator, CreateFromPos)
+{
+	PARAM_PROLOGUE;
+	PARAM_FLOAT(x);
+	PARAM_FLOAT(y);
+	PARAM_FLOAT(z);
+	PARAM_FLOAT(h);
+	PARAM_FLOAT(radius);
+	PARAM_BOOL(ignore);
+	ACTION_RETURN_OBJECT(new DBlockThingsIterator(x, y, z, h, radius, ignore, nullptr));
+}
+
+DEFINE_ACTION_FUNCTION(DBlockThingsIterator, Next)
+{
+	PARAM_SELF_PROLOGUE(DBlockThingsIterator);
+	ACTION_RETURN_BOOL(self->Next());
+}
+
+DEFINE_FIELD_NAMED(DBlockThingsIterator, cres.thing, thing);
+DEFINE_FIELD_NAMED(DBlockThingsIterator, cres.Position, position);
+DEFINE_FIELD_NAMED(DBlockThingsIterator, cres.portalflags, portalflags);
 
 //===========================================================================
 //
@@ -1660,11 +1774,6 @@ FPathTraverse::~FPathTraverse()
 //		distance is in MAPBLOCKUNITS
 //===========================================================================
 
-AActor *P_RoughMonsterSearch (AActor *mo, int distance, bool onlyseekable)
-{
-	return P_BlockmapSearch (mo, distance, RoughBlockCheck, (void *)onlyseekable);
-}
-
 AActor *P_BlockmapSearch (AActor *mo, int distance, AActor *(*check)(AActor*, int, void *), void *params)
 {
 	int blockX;
@@ -1754,6 +1863,13 @@ AActor *P_BlockmapSearch (AActor *mo, int distance, AActor *(*check)(AActor*, in
 	return NULL;	
 }
 
+struct BlockCheckInfo
+{
+	bool onlyseekable;
+	bool frontonly;
+	divline_t frontline;
+};
+
 //===========================================================================
 //
 // RoughBlockCheck
@@ -1762,14 +1878,19 @@ AActor *P_BlockmapSearch (AActor *mo, int distance, AActor *(*check)(AActor*, in
 
 static AActor *RoughBlockCheck (AActor *mo, int index, void *param)
 {
-	bool onlyseekable = param != NULL;
+	BlockCheckInfo *info = (BlockCheckInfo *)param;
+
 	FBlockNode *link;
 
 	for (link = blocklinks[index]; link != NULL; link = link->NextActor)
 	{
 		if (link->Me != mo)
 		{
-			if (onlyseekable && !mo->CanSeek(link->Me))
+			if (info->onlyseekable && !mo->CanSeek(link->Me))
+			{
+				continue;
+			}
+			if (info->frontonly && P_PointOnDivlineSide(link->Me->X(), link->Me->Y(), &info->frontline) != 0)
 			{
 				continue;
 			}
@@ -1780,6 +1901,30 @@ static AActor *RoughBlockCheck (AActor *mo, int index, void *param)
 		}
 	}
 	return NULL;
+}
+
+AActor *P_RoughMonsterSearch(AActor *mo, int distance, bool onlyseekable, bool frontonly)
+{
+	BlockCheckInfo info;
+	info.onlyseekable = onlyseekable;
+	if ((info.frontonly = frontonly))
+	{
+		info.frontline.x = mo->X();
+		info.frontline.y = mo->Y();
+		info.frontline.dx = -mo->Angles.Yaw.Sin();
+		info.frontline.dy = -mo->Angles.Yaw.Cos();
+	}
+
+	return P_BlockmapSearch(mo, distance, RoughBlockCheck, (void *)&info);
+}
+
+DEFINE_ACTION_FUNCTION(AActor, RoughMonsterSearch)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(distance);
+	PARAM_BOOL_DEF(onlyseekable);
+	PARAM_BOOL_DEF(frontonly);
+	ACTION_RETURN_OBJECT(P_RoughMonsterSearch(self, distance, onlyseekable, frontonly));
 }
 
 //==========================================================================
@@ -1877,8 +2022,8 @@ int P_VanillaPointOnLineSide(double x, double y, const line_t* line)
 	auto dx = FloatToFixed(x - line->v1->fX());
 	auto dy = FloatToFixed(y - line->v1->fY());
 
-	auto left = MulScale16( int(delta.Y * 256) , dx );
-	auto right = MulScale16( dy , int(delta.X * 256) );
+	auto left = FixedMul( int(delta.Y * 256) , dx );
+	auto right = FixedMul( dy , int(delta.X * 256) );
 
 	if (right < left)
 		return 0;		// front side
@@ -1916,4 +2061,3 @@ sector_t *P_PointInSectorBuggy(double x, double y)
 	subsector_t *ssec = (subsector_t *)((BYTE *)node - 1);
 	return ssec->sector;
 }
-

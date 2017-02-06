@@ -54,7 +54,7 @@
 
 #include "t_script.h"
 #include "a_pickups.h"
-#include "farchive.h"
+#include "serializer.h"
 
 
 //==========================================================================
@@ -179,10 +179,12 @@ AActor* actorvalue(const svalue_t &svalue)
 //
 //==========================================================================
 
-IMPLEMENT_POINTY_CLASS(DFsVariable)
- DECLARE_POINTER (next)
- DECLARE_POINTER (actor)
-END_POINTERS
+IMPLEMENT_CLASS(DFsVariable, false, true)
+
+IMPLEMENT_POINTERS_START(DFsVariable)
+	IMPLEMENT_POINTER(next)
+	IMPLEMENT_POINTER(actor)
+IMPLEMENT_POINTERS_END
 
 //==========================================================================
 //
@@ -306,10 +308,15 @@ void DFsVariable::SetValue(const svalue_t &newvalue)
 //
 //==========================================================================
 
-void DFsVariable::Serialize(FArchive & ar)
+void DFsVariable::Serialize(FSerializer & ar)
 {
 	Super::Serialize(ar);
-	ar << Name << type << string << actor << value.i << next;
+	ar("name", Name)
+		("type", type)
+		("string", string)
+		("actor", actor)
+		("value", value.i)
+		("next", next);
 }
 
 

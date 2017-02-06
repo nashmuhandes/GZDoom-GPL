@@ -36,10 +36,11 @@
 
 #include <stdlib.h>
 #include "doomtype.h"
+#include "i_system.h"
 
 class PClass;
-
-class FArchive;
+class PType;
+class FSerializer;
 
 class   DObject;
 /*
@@ -93,15 +94,10 @@ enum
 	CLASSREG_PClass,
 	CLASSREG_PClassActor,
 	CLASSREG_PClassInventory,
-	CLASSREG_PClassAmmo,
-	CLASSREG_PClassHealth,
-	CLASSREG_PClassPuzzleItem,
 	CLASSREG_PClassWeapon,
 	CLASSREG_PClassPlayerPawn,
 	CLASSREG_PClassType,
 	CLASSREG_PClassClass,
-	CLASSREG_PClassWeaponPiece,
-	CLASSREG_PClassPowerupGiver
 };
 
 struct ClassReg
@@ -109,8 +105,10 @@ struct ClassReg
 	PClass *MyClass;
 	const char *Name;
 	ClassReg *ParentType;
+	ClassReg *_VMExport;
 	const size_t *Pointers;
 	void (*ConstructNative)(void *);
+	void(*InitNatives)();
 	unsigned int SizeOf:28;
 	unsigned int MetaClassNum:4;
 
@@ -124,8 +122,8 @@ enum EInPlace { EC_InPlace };
 public: \
 	virtual PClass *StaticType() const; \
 	static ClassReg RegistrationInfo, * const RegistrationInfoPtr; \
-private: \
 	typedef parent Super; \
+private: \
 	typedef cls ThisClass;
 
 #define DECLARE_ABSTRACT_CLASS_WITH_META(cls,parent,meta) \
@@ -147,11 +145,6 @@ protected: \
 #define HAS_OBJECT_POINTERS \
 	static const size_t PointerOffsets[];
 
-// Taking the address of a field in an object at address 1 instead of
-// address 0 keeps GCC from complaining about possible misuse of offsetof.
-#define DECLARE_POINTER(field)	(size_t)&((ThisClass*)1)->field - 1,
-#define END_POINTERS			~(size_t)0 };
-
 #if defined(_MSC_VER)
 #	pragma section(".creg$u",read)
 #	define _DECLARE_TI(cls) __declspec(allocate(".creg$u")) ClassReg * const cls::RegistrationInfoPtr = &cls::RegistrationInfo;
@@ -159,36 +152,41 @@ protected: \
 #	define _DECLARE_TI(cls) ClassReg * const cls::RegistrationInfoPtr __attribute__((section(SECTION_CREG))) = &cls::RegistrationInfo;
 #endif
 
-#define _IMP_PCLASS(cls,ptrs,create) \
+#define _IMP_PCLASS(cls, ptrs, create) \
 	ClassReg cls::RegistrationInfo = {\
-		NULL, \
+		nullptr, \
 		#cls, \
 		&cls::Super::RegistrationInfo, \
+		nullptr, \
 		ptrs, \
 		create, \
+		nullptr, \
 		sizeof(cls), \
 		cls::MetaClassNum }; \
 	_DECLARE_TI(cls) \
 	PClass *cls::StaticType() const { return RegistrationInfo.MyClass; }
 
-#define _IMP_CREATE_OBJ(cls) \
-	void cls::InPlaceConstructor(void *mem) { new((EInPlace *)mem) cls; }
+#define IMPLEMENT_CLASS(cls, isabstract, ptrs) \
+	_X_CONSTRUCTOR_##isabstract(cls) \
+	_IMP_PCLASS(cls, _X_POINTERS_##ptrs(cls), _X_ABSTRACT_##isabstract(cls))
 
-#define IMPLEMENT_POINTY_CLASS(cls) \
-	_IMP_CREATE_OBJ(cls) \
-	_IMP_PCLASS(cls,cls::PointerOffsets,cls::InPlaceConstructor) \
-	const size_t cls::PointerOffsets[] = {
+// Taking the address of a field in an object at address 1 instead of
+// address 0 keeps GCC from complaining about possible misuse of offsetof.
+#define IMPLEMENT_POINTERS_START(cls)	const size_t cls::PointerOffsets[] = {
+#define IMPLEMENT_POINTER(field)		(size_t)&((ThisClass*)1)->field - 1,
+#define IMPLEMENT_POINTERS_END			~(size_t)0 };
 
-#define IMPLEMENT_CLASS(cls) \
-	_IMP_CREATE_OBJ(cls) \
-	_IMP_PCLASS(cls,NULL,cls::InPlaceConstructor) 
-
-#define IMPLEMENT_ABSTRACT_CLASS(cls) \
-	_IMP_PCLASS(cls,NULL,NULL)
-
-#define IMPLEMENT_ABSTRACT_POINTY_CLASS(cls) \
-	_IMP_PCLASS(cls,cls::PointerOffsets,NULL) \
-	const size_t cls::PointerOffsets[] = {
+// Possible arguments for the IMPLEMENT_CLASS macro
+#define _X_POINTERS_true(cls)		cls::PointerOffsets
+#define _X_POINTERS_false(cls)		nullptr
+#define _X_FIELDS_true(cls)			nullptr
+#define _X_FIELDS_false(cls)		nullptr
+#define _X_CONSTRUCTOR_true(cls)
+#define _X_CONSTRUCTOR_false(cls)	void cls::InPlaceConstructor(void *mem) { new((EInPlace *)mem) cls; }
+#define _X_ABSTRACT_true(cls)		nullptr
+#define _X_ABSTRACT_false(cls)		cls::InPlaceConstructor
+#define _X_VMEXPORT_true(cls)		nullptr
+#define _X_VMEXPORT_false(cls)		nullptr
 
 enum EObjectFlags
 {
@@ -209,6 +207,7 @@ enum EObjectFlags
 	OF_JustSpawned		= 1 << 8,		// Thinker was spawned this tic
 	OF_SerialSuccess	= 1 << 9,		// For debugging Serialize() calls
 	OF_Sentinel			= 1 << 10,		// Object is serving as the sentinel in a ring list
+	OF_Transient		= 1 << 11,		// Object should not be archived (references to it will be nulled on disk)
 };
 
 template<class T> class TObjPtr;
@@ -413,15 +412,11 @@ public:
 		return GC::ReadBarrier(p) == u;
 	}
 
-	template<class U> friend inline FArchive &operator<<(FArchive &arc, TObjPtr<U> &o);
 	template<class U> friend inline void GC::Mark(TObjPtr<U> &obj);
+	template<class U> friend FSerializer &Serialize(FSerializer &arc, const char *key, TObjPtr<U> &value, TObjPtr<U> *);
+
 	friend class DObject;
 };
-
-template<class T> inline FArchive &operator<<(FArchive &arc, TObjPtr<T> &o)
-{
-	return arc << o.p;
-}
 
 // Use barrier_cast instead of static_cast when you need to cast
 // the contents of a TObjPtr to a related type.
@@ -455,6 +450,10 @@ public:
 	DObject *GCNext;			// Next object in this collection list
 	uint32 ObjectFlags;			// Flags for this object
 
+	void *ScriptVar(FName field, PType *type);
+
+protected:
+
 public:
 	DObject ();
 	DObject (PClass *inClass);
@@ -463,8 +462,9 @@ public:
 	inline bool IsKindOf (const PClass *base) const;
 	inline bool IsA (const PClass *type) const;
 
-	void SerializeUserVars(FArchive &arc);
-	virtual void Serialize (FArchive &arc);
+	void SerializeUserVars(FSerializer &arc);
+	virtual void Serialize(FSerializer &arc);
+
 	void ClearClass()
 	{
 		Class = NULL;
@@ -474,13 +474,22 @@ public:
 	// that don't call their base class.
 	void CheckIfSerialized () const;
 
-	virtual void Destroy ();
+	virtual void OnDestroy() {}
+	void Destroy();
+
+	// Add other types as needed.
+	bool &BoolVar(FName field);
+	int &IntVar(FName field);
+	PalEntry &ColorVar(FName field);
+	FName &NameVar(FName field);
+	double &FloatVar(FName field);
+	template<class T> T*& PointerVar(FName field);
 
 	// If you need to replace one object with another and want to
 	// change any pointers from the old object to the new object,
 	// use this method.
 	virtual size_t PointerSubstitution (DObject *old, DObject *notOld);
-	static size_t StaticPointerSubstitution (DObject *old, DObject *notOld);
+	static size_t StaticPointerSubstitution (DObject *old, DObject *notOld, bool scandefaults = false);
 
 	PClass *GetClass() const
 	{
@@ -576,6 +585,11 @@ protected:
 	}
 };
 
+class AInventory;//
+
+// When you write to a pointer to an Object, you must call this for
+// proper bookkeeping in case the Object holding this pointer has
+// already been processed by the GC.
 static inline void GC::WriteBarrier(DObject *pointing, DObject *pointed)
 {
 	if (pointed != NULL && pointed->IsWhite() && pointing->IsBlack())

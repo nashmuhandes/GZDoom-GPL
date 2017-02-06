@@ -47,6 +47,8 @@ extern int CleanWidth_1, CleanHeight_1, CleanXfac_1, CleanYfac_1;
 extern int DisplayWidth, DisplayHeight, DisplayBits;
 
 bool V_DoModeSetup (int width, int height, int bits);
+void V_UpdateModeSize (int width, int height);
+void V_OutputResized (int width, int height);
 void V_CalcCleanFacs (int designwidth, int designheight, int realwidth, int realheight, int *cleanx, int *cleany, int *cx1=NULL, int *cx2=NULL);
 
 class FTexture;
@@ -73,9 +75,8 @@ enum
 	DTA_DestWidth,		// width of area to draw to
 	DTA_DestHeight,		// height of area to draw to
 	DTA_Alpha,			// alpha value for translucency
-	DTA_AlphaF,			// alpha value for translucency
 	DTA_FillColor,		// color to stencil onto the destination (RGB is the color for truecolor drawers, A is the palette index for paletted drawers)
-	DTA_Translation,	// translation table to recolor the source
+	DTA_TranslationIndex, // translation table to recolor the source
 	DTA_AlphaChannel,	// bool: the source is an alpha channel; used with DTA_FillColor
 	DTA_Clean,			// bool: scale texture size and position by CleanXfac and CleanYfac
 	DTA_320x200,		// bool: scale texture size and position to fit on a virtual 320x200 screen
@@ -161,7 +162,7 @@ struct DrawParms
 	uint32 colorOverlay;
 	INTBOOL alphaChannel;
 	INTBOOL flipX;
-	fixed_t shadowAlpha;
+	float shadowAlpha;
 	int shadowColor;
 	INTBOOL keepratio;
 	INTBOOL masked;
@@ -176,6 +177,12 @@ struct DrawParms
 	bool virtBottom;
 };
 
+struct VMVa_List
+{
+	VMValue *args;
+	int curindex;
+	int numargs;
+};
 //
 // VIDEO
 //
@@ -216,10 +223,13 @@ public:
 	// Fill an area with a texture
 	virtual void FlatFill (int left, int top, int right, int bottom, FTexture *src, bool local_origin=false);
 
+	virtual void StartSimplePolys();
+	virtual void FinishSimplePolys();
+
 	// Fill a simple polygon with a texture
 	virtual void FillSimplePoly(FTexture *tex, FVector2 *points, int npoints,
 		double originx, double originy, double scalex, double scaley, DAngle rotation,
-		struct FDynamicColormap *colormap, int lightlevel);
+		struct FDynamicColormap *colormap, PalEntry flatcolor, int lightlevel, int bottomclip);
 
 	// Set an area to a specified color
 	virtual void Clear (int left, int top, int right, int bottom, int palcolor, uint32 color);
@@ -247,6 +257,7 @@ public:
 	// 2D Texture drawing
 	bool SetTextureParms(DrawParms *parms, FTexture *img, double x, double y) const;
 	void DrawTexture (FTexture *img, double x, double y, int tags, ...);
+	void DrawTexture(FTexture *img, double x, double y, VMVa_List &);
 	void FillBorder (FTexture *img);	// Fills the border around a 4:3 part of the screen on non-4:3 displays
 	void VirtualToRealCoords(double &x, double &y, double &w, double &h, double vwidth, double vheight, bool vbottom=false, bool handleaspect=true) const;
 
@@ -259,7 +270,7 @@ public:
 #endif
 	// 2D Text drawing
 	void DrawText (FFont *font, int normalcolor, int x, int y, const char *string, int tag_first, ...);
-	void DrawChar (FFont *font, int normalcolor, int x, int y, BYTE character, int tag_first, ...);
+	void DrawChar (FFont *font, int normalcolor, double x, double y, int character, int tag_first, ...);
 
 protected:
 	BYTE *Buffer;
@@ -271,7 +282,9 @@ protected:
 	bool ClipBox (int &left, int &top, int &width, int &height, const BYTE *&src, const int srcpitch) const;
 	void DrawTextureV(FTexture *img, double x, double y, uint32 tag, va_list tags) = delete;
 	virtual void DrawTextureParms(FTexture *img, DrawParms &parms);
-	bool ParseDrawTextureTags (FTexture *img, double x, double y, uint32 tag, va_list tags, DrawParms *parms, bool fortext) const;
+
+	template<class T>
+	bool ParseDrawTextureTags(FTexture *img, double x, double y, DWORD tag, T& tags, DrawParms *parms, bool fortext) const;
 
 	DCanvas() {}
 
@@ -297,6 +310,8 @@ public:
 	void Unlock ();
 
 protected:
+	void Resize(int width, int height);
+
 	BYTE *MemBuffer;
 
 	DSimpleCanvas() {}
@@ -415,7 +430,9 @@ public:
 	virtual bool Is8BitMode() = 0;
 #endif
 
-	virtual void SetSmoothPicture(bool smooth) {}
+	// The original size of the framebuffer as selected in the video menu.
+	int VideoWidth = 0;
+	int VideoHeight = 0;
 
 protected:
 	void DrawRateStuff ();
@@ -453,6 +470,14 @@ union ColorTable32k
 };
 extern "C" ColorTable32k RGB32k;
 
+// [SP] RGB666 support
+union ColorTable256k
+{
+	BYTE RGB[64][64][64];
+	BYTE All[64 *64 *64];
+};
+extern "C" ColorTable256k RGB256k;
+
 // Col2RGB8 is a pre-multiplied palette for color lookup. It is stored in a
 // special R10B10G10 format for efficient blending computation.
 //		--RRRRRrrr--BBBBBbbb--GGGGGggg--   at level 64
@@ -488,15 +513,17 @@ void V_Shutdown ();
 
 void V_MarkRect (int x, int y, int width, int height);
 
+class FScanner;
 // Returns the closest color to the one desired. String
 // should be of the form "rr gg bb".
-int V_GetColorFromString (const DWORD *palette, const char *colorstring);
+int V_GetColorFromString (const DWORD *palette, const char *colorstring, FScriptPosition *sc = nullptr);
 // Scans through the X11R6RGB lump for a matching color
 // and returns a color string suitable for V_GetColorFromString.
-FString V_GetColorStringByName (const char *name);
+FString V_GetColorStringByName (const char *name, FScriptPosition *sc = nullptr);
 
 // Tries to get color by name, then by string
-int V_GetColor (const DWORD *palette, const char *str);
+int V_GetColor (const DWORD *palette, const char *str, FScriptPosition *sc = nullptr);
+int V_GetColor(const DWORD *palette, FScanner &sc);
 void V_DrawFrame (int left, int top, int width, int height);
 
 // If the view size is not full screen, draws a border around it.
@@ -505,20 +532,19 @@ void V_RefreshViewBorder ();
 
 void V_SetBorderNeedRefresh();
 
-#if defined(X86_ASM) || defined(X64_ASM)
-extern "C" void ASM_PatchPitch (void);
-#endif
-
 int CheckRatio (int width, int height, int *trueratio=NULL);
 static inline int CheckRatio (double width, double height) { return CheckRatio(int(width), int(height)); }
-extern const int BaseRatioSizes[7][4];
+inline bool IsRatioWidescreen(int ratio) { return (ratio & 3) != 0; }
 
-inline bool IsRatioWidescreen(int ratio) {
-    return (ratio & 3)!=0;
-}
+float ActiveRatio (int width, int height, float *trueratio = NULL);
+static inline double ActiveRatio (double width, double height) { return ActiveRatio(int(width), int(height)); }
 
-inline bool Is54Aspect(int ratio) {
-    return ratio == 4;
-}
+int AspectBaseWidth(float aspect);
+int AspectBaseHeight(float aspect);
+double AspectPspriteOffset(float aspect);
+int AspectMultiplier(float aspect);
+bool AspectTallerThanWide(float aspect);
+
+EXTERN_CVAR(Int, uiscale);
 
 #endif // __V_VIDEO_H__

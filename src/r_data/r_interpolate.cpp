@@ -39,7 +39,7 @@
 #include "p_local.h"
 #include "i_system.h"
 #include "po_man.h"
-#include "farchive.h"
+#include "serializer.h"
 
 //==========================================================================
 //
@@ -62,11 +62,12 @@ public:
 
 	DSectorPlaneInterpolation() {}
 	DSectorPlaneInterpolation(sector_t *sector, bool plane, bool attach);
-	void Destroy();
+	void OnDestroy() override;
 	void UpdateInterpolation();
 	void Restore();
 	void Interpolate(double smoothratio);
-	void Serialize(FArchive &arc);
+	
+	virtual void Serialize(FSerializer &arc);
 	size_t PointerSubstitution (DObject *old, DObject *notOld);
 	size_t PropagateMark();
 };
@@ -90,11 +91,12 @@ public:
 
 	DSectorScrollInterpolation() {}
 	DSectorScrollInterpolation(sector_t *sector, bool plane);
-	void Destroy();
+	void OnDestroy() override;
 	void UpdateInterpolation();
 	void Restore();
 	void Interpolate(double smoothratio);
-	void Serialize(FArchive &arc);
+	
+	virtual void Serialize(FSerializer &arc);
 };
 
 
@@ -117,11 +119,12 @@ public:
 
 	DWallScrollInterpolation() {}
 	DWallScrollInterpolation(side_t *side, int part);
-	void Destroy();
+	void OnDestroy() override;
 	void UpdateInterpolation();
 	void Restore();
 	void Interpolate(double smoothratio);
-	void Serialize(FArchive &arc);
+	
+	virtual void Serialize(FSerializer &arc);
 };
 
 //==========================================================================
@@ -143,11 +146,12 @@ public:
 
 	DPolyobjInterpolation() {}
 	DPolyobjInterpolation(FPolyObj *poly);
-	void Destroy();
+	void OnDestroy() override;
 	void UpdateInterpolation();
 	void Restore();
 	void Interpolate(double smoothratio);
-	void Serialize(FArchive &arc);
+	
+	virtual void Serialize(FSerializer &arc);
 };
 
 
@@ -157,14 +161,17 @@ public:
 //
 //==========================================================================
 
-IMPLEMENT_ABSTRACT_POINTY_CLASS(DInterpolation)
-DECLARE_POINTER(Next)
-DECLARE_POINTER(Prev)
-END_POINTERS
-IMPLEMENT_CLASS(DSectorPlaneInterpolation)
-IMPLEMENT_CLASS(DSectorScrollInterpolation)
-IMPLEMENT_CLASS(DWallScrollInterpolation)
-IMPLEMENT_CLASS(DPolyobjInterpolation)
+IMPLEMENT_CLASS(DInterpolation, true, true)
+
+IMPLEMENT_POINTERS_START(DInterpolation)
+	IMPLEMENT_POINTER(Next)
+	IMPLEMENT_POINTER(Prev)
+IMPLEMENT_POINTERS_END
+
+IMPLEMENT_CLASS(DSectorPlaneInterpolation, false, false)
+IMPLEMENT_CLASS(DSectorScrollInterpolation, false, false)
+IMPLEMENT_CLASS(DWallScrollInterpolation, false, false)
+IMPLEMENT_CLASS(DPolyobjInterpolation, false, false)
 
 //==========================================================================
 //
@@ -357,11 +364,11 @@ int DInterpolation::DelRef(bool force)
 //
 //==========================================================================
 
-void DInterpolation::Destroy()
+void DInterpolation::OnDestroy()
 {
 	interpolator.RemoveInterpolation(this);
 	refcount = 0;
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -370,11 +377,11 @@ void DInterpolation::Destroy()
 //
 //==========================================================================
 
-void DInterpolation::Serialize(FArchive &arc)
+void DInterpolation::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
-	arc << refcount;
-	if (arc.IsLoading())
+	arc("refcount", refcount);
+	if (arc.isReading())
 	{
 		interpolator.AddInterpolation(this);
 	}
@@ -412,22 +419,25 @@ DSectorPlaneInterpolation::DSectorPlaneInterpolation(sector_t *_sector, bool _pl
 //
 //==========================================================================
 
-void DSectorPlaneInterpolation::Destroy()
+void DSectorPlaneInterpolation::OnDestroy()
 {
-	if (ceiling) 
+	if (sector != nullptr)
 	{
-		sector->interpolations[sector_t::CeilingMove] = NULL;
+		if (ceiling)
+		{
+			sector->interpolations[sector_t::CeilingMove] = nullptr;
+		}
+		else
+		{
+			sector->interpolations[sector_t::FloorMove] = nullptr;
+		}
+		sector = nullptr;
 	}
-	else 
-	{
-		sector->interpolations[sector_t::FloorMove] = NULL;
-	}
-
 	for(unsigned i=0; i<attached.Size(); i++)
 	{
 		attached[i]->DelRef();
 	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -516,10 +526,14 @@ void DSectorPlaneInterpolation::Interpolate(double smoothratio)
 //
 //==========================================================================
 
-void DSectorPlaneInterpolation::Serialize(FArchive &arc)
+void DSectorPlaneInterpolation::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
-	arc << sector << ceiling << oldheight << oldtexz << attached;
+	arc("sector", sector)
+		("ceiling", ceiling)
+		("oldheight", oldheight)
+		("oldtexz", oldtexz)
+		("attached", attached);
 }
 
 //==========================================================================
@@ -583,17 +597,21 @@ DSectorScrollInterpolation::DSectorScrollInterpolation(sector_t *_sector, bool _
 //
 //==========================================================================
 
-void DSectorScrollInterpolation::Destroy()
+void DSectorScrollInterpolation::OnDestroy()
 {
-	if (ceiling) 
+	if (sector != nullptr)
 	{
-		sector->interpolations[sector_t::CeilingScroll] = NULL;
+		if (ceiling)
+		{
+			sector->interpolations[sector_t::CeilingScroll] = nullptr;
+		}
+		else
+		{
+			sector->interpolations[sector_t::FloorScroll] = nullptr;
+		}
+		sector = nullptr;
 	}
-	else 
-	{
-		sector->interpolations[sector_t::FloorScroll] = NULL;
-	}
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -648,10 +666,13 @@ void DSectorScrollInterpolation::Interpolate(double smoothratio)
 //
 //==========================================================================
 
-void DSectorScrollInterpolation::Serialize(FArchive &arc)
+void DSectorScrollInterpolation::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
-	arc << sector << ceiling << oldx << oldy;
+	arc("sector", sector)
+		("ceiling", ceiling)
+		("oldx", oldx)
+		("oldy", oldy);
 }
 
 
@@ -681,10 +702,14 @@ DWallScrollInterpolation::DWallScrollInterpolation(side_t *_side, int _part)
 //
 //==========================================================================
 
-void DWallScrollInterpolation::Destroy()
+void DWallScrollInterpolation::OnDestroy()
 {
-	side->textures[part].interpolation = NULL;
-	Super::Destroy();
+	if (side != nullptr)
+	{
+		side->textures[part].interpolation = nullptr;
+		side = nullptr;
+	}
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -739,10 +764,13 @@ void DWallScrollInterpolation::Interpolate(double smoothratio)
 //
 //==========================================================================
 
-void DWallScrollInterpolation::Serialize(FArchive &arc)
+void DWallScrollInterpolation::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
-	arc << side << part << oldx << oldy;
+	arc("side", side)
+		("part", part)
+		("oldx", oldx)
+		("oldy", oldy);
 }
 
 //==========================================================================
@@ -772,10 +800,13 @@ DPolyobjInterpolation::DPolyobjInterpolation(FPolyObj *po)
 //
 //==========================================================================
 
-void DPolyobjInterpolation::Destroy()
+void DPolyobjInterpolation::OnDestroy()
 {
-	poly->interpolation = NULL;
-	Super::Destroy();
+	if (poly != nullptr)
+	{
+		poly->interpolation = nullptr;
+	}
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -855,15 +886,14 @@ void DPolyobjInterpolation::Interpolate(double smoothratio)
 //
 //==========================================================================
 
-void DPolyobjInterpolation::Serialize(FArchive &arc)
+void DPolyobjInterpolation::Serialize(FSerializer &arc)
 {
 	Super::Serialize(arc);
-	int po = int(poly - polyobjs);
-	arc << po << oldverts;
-	poly = polyobjs + po;
-
-	arc << oldcx << oldcy;
-	if (arc.IsLoading()) bakverts.Resize(oldverts.Size());
+	arc("poly", poly)
+		("oldverts", oldverts)
+		("oldcx", oldcx)
+		("oldcy", oldcy);
+	if (arc.isReading()) bakverts.Resize(oldverts.Size());
 }
 
 

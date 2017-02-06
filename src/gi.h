@@ -36,6 +36,7 @@
 
 #include "basictypes.h"
 #include "zstring.h"
+#include "s_sound.h"
 
 // Flags are not user configurable and only depend on the standard IWADs
 #define GI_MAPxx				0x00000001
@@ -120,6 +121,10 @@ struct gameinfo_t
 	TArray<FName> DefaultWeaponSlots[10];
 	TArray<FName> PlayerClasses;
 
+	TArray<FName> PrecachedClasses;
+	TArray<FString> PrecachedTextures;
+	TArray<FSoundID> PrecachedSounds;
+
 	FString titleMusic;
 	int titleOrder;
 	float titleTime;
@@ -143,7 +148,7 @@ struct gameinfo_t
 	FString translator;
 	DWORD defaultbloodcolor;
 	DWORD defaultbloodparticlecolor;
-	FString backpacktype;
+	FName backpacktype;
 	FString statusbar;
 	FString intermissionMusic;
 	int intermissionOrder;
@@ -173,6 +178,7 @@ struct gameinfo_t
 	FGIFont mStatscreenFinishedFont;
 	FGIFont mStatscreenEnteringFont;
 	bool norandomplayerclass;
+	bool forcekillscripts;
 
 	const char *GetFinalePage(unsigned int num) const;
 };

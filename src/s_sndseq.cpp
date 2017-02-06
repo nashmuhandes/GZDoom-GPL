@@ -27,8 +27,9 @@
 #include "templates.h"
 #include "c_dispatch.h"
 #include "g_level.h"
-#include "farchive.h"
+#include "serializer.h"
 #include "d_player.h"
+#include "g_levellocals.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -105,8 +106,8 @@ class DSeqActorNode : public DSeqNode
 	HAS_OBJECT_POINTERS
 public:
 	DSeqActorNode(AActor *actor, int sequence, int modenum);
-	void Destroy();
-	void Serialize(FArchive &arc);
+	void OnDestroy() override;
+	void Serialize(FSerializer &arc);
 	void MakeSound(int loop, FSoundID id)
 	{
 		S_Sound(m_Actor, CHAN_BODY|loop, id, clamp(m_Volume, 0.f, 1.f), m_Atten);
@@ -133,8 +134,8 @@ class DSeqPolyNode : public DSeqNode
 	DECLARE_CLASS(DSeqPolyNode, DSeqNode)
 public:
 	DSeqPolyNode(FPolyObj *poly, int sequence, int modenum);
-	void Destroy();
-	void Serialize(FArchive &arc);
+	void OnDestroy() override;
+	void Serialize(FSerializer &arc);
 	void MakeSound(int loop, FSoundID id)
 	{
 		S_Sound (m_Poly, CHAN_BODY|loop, id, clamp(m_Volume, 0.f, 1.f), m_Atten);
@@ -161,8 +162,8 @@ class DSeqSectorNode : public DSeqNode
 	DECLARE_CLASS(DSeqSectorNode, DSeqNode)
 public:
 	DSeqSectorNode(sector_t *sec, int chan, int sequence, int modenum);
-	void Destroy();
-	void Serialize(FArchive &arc);
+	void OnDestroy() override;
+	void Serialize(FSerializer &arc);
 	void MakeSound(int loop, FSoundID id)
 	{
 		Channel = (Channel & 7) | CHAN_AREA | loop;
@@ -280,17 +281,19 @@ static FRandom pr_sndseq ("SndSeq");
 
 // CODE --------------------------------------------------------------------
 
-void DSeqNode::SerializeSequences (FArchive &arc)
+void DSeqNode::SerializeSequences (FSerializer &arc)
 {
-	arc << SequenceListHead;
+	arc("sndseqlisthead", SequenceListHead);
 }
 
-IMPLEMENT_POINTY_CLASS (DSeqNode)
- DECLARE_POINTER(m_ChildSeqNode)
- DECLARE_POINTER(m_ParentSeqNode)
- DECLARE_POINTER(m_Next)
- DECLARE_POINTER(m_Prev)
-END_POINTERS
+IMPLEMENT_CLASS(DSeqNode, false, true)
+
+IMPLEMENT_POINTERS_START(DSeqNode)
+	IMPLEMENT_POINTER(m_ChildSeqNode)
+	IMPLEMENT_POINTER(m_ParentSeqNode)
+	IMPLEMENT_POINTER(m_Next)
+	IMPLEMENT_POINTER(m_Prev)
+IMPLEMENT_POINTERS_END
 
 DSeqNode::DSeqNode ()
 : m_SequenceChoices(0)
@@ -298,55 +301,58 @@ DSeqNode::DSeqNode ()
 	m_Next = m_Prev = m_ChildSeqNode = m_ParentSeqNode = NULL;
 }
 
-void DSeqNode::Serialize (FArchive &arc)
+void DSeqNode::Serialize(FSerializer &arc)
 {
 	int seqOffset;
 	unsigned int i;
+	FName seqName;
+	int delayTics = 0;
+	FSoundID id;
+	float volume;
+	float atten = ATTN_NORM;
+	int seqnum;
+	unsigned int numchoices;
 
-	Super::Serialize (arc);
-	if (arc.IsStoring ())
+	// copy these to local variables so that the actual serialization code does not need to be duplicated for saving and loading.
+	if (arc.isWriting())
 	{
-		seqOffset = (int)SN_GetSequenceOffset (m_Sequence, m_SequencePtr);
-		arc << seqOffset
-			<< m_DelayUntilTic
-			<< m_Volume
-			<< m_Atten
-			<< m_ModeNum
-			<< m_Next
-			<< m_Prev
-			<< m_ChildSeqNode
-			<< m_ParentSeqNode
-			<< m_CurrentSoundID
-			<< Sequences[m_Sequence]->SeqName;
+		seqOffset = (int)SN_GetSequenceOffset(m_Sequence, m_SequencePtr);
+		delayTics = m_DelayUntilTic;
+		volume = m_Volume;
+		atten = m_Atten;
+		id = m_CurrentSoundID;
+		seqName = Sequences[m_Sequence]->SeqName;
+		numchoices = m_SequenceChoices.Size();
+	}
+	Super::Serialize(arc);
 
-		arc.WriteCount (m_SequenceChoices.Size());
-		for (i = 0; i < m_SequenceChoices.Size(); ++i)
+	arc("seqoffset", seqOffset)
+		("delaytics", delayTics)
+		("volume", volume)
+		("atten", atten)
+		("modelnum", m_ModeNum)
+		("next", m_Next)
+		("prev", m_Prev)
+		("childseqnode", m_ChildSeqNode)
+		("parentseqnode", m_ParentSeqNode)
+		("id", id)
+		("seqname", seqName)
+		("numchoices", numchoices);
+
+	// The way this is saved makes it hard to encapsulate so just do it the hard way...
+	if (arc.isWriting())
+	{
+		if (numchoices > 0 && arc.BeginArray("choices"))
 		{
-			arc << Sequences[m_SequenceChoices[i]]->SeqName;
+			for (i = 0; i < m_SequenceChoices.Size(); ++i)
+			{
+				arc(nullptr, Sequences[m_SequenceChoices[i]]->SeqName);
+			}
+			arc.EndArray();
 		}
 	}
 	else
 	{
-		FName seqName;
-		int delayTics = 0;
-		FSoundID id;
-		float volume;
-		float atten = ATTN_NORM;
-		int seqnum;
-		unsigned int numchoices;
-
-		arc << seqOffset
-			<< delayTics
-			<< volume
-			<< atten
-			<< m_ModeNum
-			<< m_Next
-			<< m_Prev
-			<< m_ChildSeqNode
-			<< m_ParentSeqNode
-			<< id
-			<< seqName;
-
 		seqnum = FindSequence (seqName);
 		if (seqnum >= 0)
 		{
@@ -360,17 +366,20 @@ void DSeqNode::Serialize (FArchive &arc)
 
 		ChangeData (seqOffset, delayTics - TIME_REFERENCE, volume, id);
 
-		numchoices = arc.ReadCount();
 		m_SequenceChoices.Resize(numchoices);
-		for (i = 0; i < numchoices; ++i)
+		if (numchoices > 0 && arc.BeginArray("choices"))
 		{
-			arc << seqName;
-			m_SequenceChoices[i] = FindSequence (seqName);
+			for (i = 0; i < numchoices; ++i)
+			{
+				arc(nullptr, seqName);
+				m_SequenceChoices[i] = FindSequence(seqName);
+			}
+			arc.EndArray();
 		}
 	}
 }
 
-void DSeqNode::Destroy()
+void DSeqNode::OnDestroy()
 {
 	// If this sequence was launched by a parent sequence, advance that
 	// sequence now.
@@ -396,7 +405,7 @@ void DSeqNode::Destroy()
 		GC::WriteBarrier(m_Next, m_Prev);
 	}
 	ActiveSequences--;
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 void DSeqNode::StopAndDestroy ()
@@ -416,35 +425,54 @@ void DSeqNode::AddChoice (int seqnum, seqtype_t type)
 	}
 }
 
+DEFINE_ACTION_FUNCTION(DSeqNode, AddChoice)
+{
+	PARAM_SELF_PROLOGUE(DSeqNode);
+	PARAM_NAME(seq);
+	PARAM_INT(mode);
+	self->AddChoice(seq, seqtype_t(mode));
+	return 0;
+}
+
+
 FName DSeqNode::GetSequenceName () const
 {
 	return Sequences[m_Sequence]->SeqName;
 }
 
-IMPLEMENT_POINTY_CLASS (DSeqActorNode)
- DECLARE_POINTER (m_Actor)
-END_POINTERS
-
-void DSeqActorNode::Serialize (FArchive &arc)
+DEFINE_ACTION_FUNCTION(DSeqNode, GetSequenceName)
 {
-	Super::Serialize (arc);
-	arc << m_Actor;
+	PARAM_SELF_PROLOGUE(DSeqNode);
+	ACTION_RETURN_INT(self->GetSequenceName().GetIndex());
 }
 
-IMPLEMENT_CLASS (DSeqPolyNode)
+IMPLEMENT_CLASS(DSeqActorNode, false, true)
 
-void DSeqPolyNode::Serialize (FArchive &arc)
+IMPLEMENT_POINTERS_START(DSeqActorNode)
+	IMPLEMENT_POINTER(m_Actor)
+IMPLEMENT_POINTERS_END
+
+void DSeqActorNode::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Poly;
+	arc("actor", m_Actor);
 }
 
-IMPLEMENT_CLASS (DSeqSectorNode)
+IMPLEMENT_CLASS(DSeqPolyNode, false, false)
 
-void DSeqSectorNode::Serialize (FArchive &arc)
+void DSeqPolyNode::Serialize(FSerializer &arc)
 {
 	Super::Serialize (arc);
-	arc << m_Sector << Channel;
+	arc("poly", m_Poly);
+}
+
+IMPLEMENT_CLASS(DSeqSectorNode, false, false)
+
+void DSeqSectorNode::Serialize(FSerializer &arc)
+{
+	Super::Serialize (arc);
+	arc("sector",m_Sector)
+		("channel", Channel);
 }
 
 //==========================================================================
@@ -857,6 +885,16 @@ DSeqNode *SN_StartSequence (AActor *actor, int sequence, seqtype_t type, int mod
 	return NULL;
 }
 
+DEFINE_ACTION_FUNCTION(AActor, StartSoundSequenceID)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(seq);
+	PARAM_INT(type);
+	PARAM_INT(modenum);
+	PARAM_BOOL_DEF(nostop);
+	ACTION_RETURN_POINTER(SN_StartSequence(self, seq, seqtype_t(type), modenum, nostop));
+}
+
 DSeqNode *SN_StartSequence (sector_t *sector, int chan, int sequence, seqtype_t type, int modenum, bool nostop)
 {
 	if (!nostop)
@@ -868,6 +906,17 @@ DSeqNode *SN_StartSequence (sector_t *sector, int chan, int sequence, seqtype_t 
 		return new DSeqSectorNode (sector, chan, sequence, modenum);
 	}
 	return NULL;
+}
+
+DEFINE_ACTION_FUNCTION(_Sector, StartSoundSequenceID)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_INT(chan);
+	PARAM_INT(seq);
+	PARAM_INT(type);
+	PARAM_INT(modenum);
+	PARAM_BOOL_DEF(nostop);
+	ACTION_RETURN_POINTER(SN_StartSequence(self, chan, seq, seqtype_t(type), modenum, nostop));
 }
 
 DSeqNode *SN_StartSequence (FPolyObj *poly, int sequence, seqtype_t type, int modenum, bool nostop)
@@ -909,6 +958,15 @@ DSeqNode *SN_StartSequence (AActor *actor, FName seqname, int modenum)
 	return NULL;
 }
 
+DEFINE_ACTION_FUNCTION(AActor, StartSoundSequence)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_NAME(seq);
+	PARAM_INT(modenum);
+	ACTION_RETURN_POINTER(SN_StartSequence(self, seq, modenum));
+}
+
+
 DSeqNode *SN_StartSequence (sector_t *sec, int chan, const char *seqname, int modenum)
 {
 	int seqnum = FindSequence(seqname);
@@ -927,6 +985,15 @@ DSeqNode *SN_StartSequence (sector_t *sec, int chan, FName seqname, int modenum)
 		return SN_StartSequence (sec, chan, seqnum, SEQ_NOTRANS, modenum);
 	}
 	return NULL;
+}
+
+DEFINE_ACTION_FUNCTION(_Sector, StartSoundSequence)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_INT(chan);
+	PARAM_NAME(seq);
+	PARAM_INT(modenum);
+	ACTION_RETURN_POINTER(SN_StartSequence(self, chan, seq, modenum));
 }
 
 DSeqNode *SN_StartSequence (FPolyObj *poly, const char *seqname, int modenum)
@@ -989,6 +1056,13 @@ DSeqNode *SN_CheckSequence(sector_t *sector, int chan)
 	return NULL;
 }
 
+DEFINE_ACTION_FUNCTION(_Sector, CheckSoundSequence)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_INT(chan);
+	ACTION_RETURN_POINTER(SN_CheckSequence(self, chan));
+}
+
 //==========================================================================
 //
 //  SN_StopSequence
@@ -1000,6 +1074,13 @@ void SN_StopSequence (AActor *actor)
 	SN_DoStop (actor);
 }
 
+DEFINE_ACTION_FUNCTION(AActor, StopSoundSequence)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	SN_StopSequence(self);
+	return 0;
+}
+
 void SN_StopSequence (sector_t *sector, int chan)
 {
 	DSeqNode *node = SN_CheckSequence(sector, chan);
@@ -1008,6 +1089,15 @@ void SN_StopSequence (sector_t *sector, int chan)
 		node->StopAndDestroy();
 	}
 }
+
+DEFINE_ACTION_FUNCTION(_Sector, StopSoundSequence)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	PARAM_INT(chan);
+	SN_StopSequence(self, chan);
+	return 0;
+}
+
 
 void SN_StopSequence (FPolyObj *poly)
 {
@@ -1029,31 +1119,31 @@ void SN_DoStop (void *source)
 	}
 }
 
-void DSeqActorNode::Destroy ()
+void DSeqActorNode::OnDestroy ()
 {
 	if (m_StopSound >= 0)
 		S_StopSound (m_Actor, CHAN_BODY);
 	if (m_StopSound >= 1)
 		MakeSound (0, m_StopSound);
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
-void DSeqSectorNode::Destroy ()
+void DSeqSectorNode::OnDestroy ()
 {
 	if (m_StopSound >= 0)
 		S_StopSound (m_Sector, Channel & 7);
 	if (m_StopSound >= 1)
 		MakeSound (0, m_StopSound);
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
-void DSeqPolyNode::Destroy ()
+void DSeqPolyNode::OnDestroy ()
 {
 	if (m_StopSound >= 0)
 		S_StopSound (m_Poly, CHAN_BODY);
 	if (m_StopSound >= 1)
 		MakeSound (0, m_StopSound);
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -1077,6 +1167,13 @@ bool SN_IsMakingLoopingSound (sector_t *sector)
 	}
 	return false;
 }
+
+DEFINE_ACTION_FUNCTION(_Sector, IsMakingLoopingSound)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	ACTION_RETURN_BOOL(SN_IsMakingLoopingSound(self));
+}
+
 
 //==========================================================================
 //
@@ -1313,6 +1410,15 @@ FName SN_GetSequenceSlot (int sequence, seqtype_t type)
 	return NAME_None;
 }
 
+DEFINE_ACTION_FUNCTION(DSeqNode, GetSequenceSlot)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(seq);
+	PARAM_INT(type);
+	ACTION_RETURN_INT(SN_GetSequenceSlot(seq, seqtype_t(type)).GetIndex());
+}
+
+
 //==========================================================================
 //
 // SN_MarkPrecacheSounds
@@ -1338,6 +1444,16 @@ void SN_MarkPrecacheSounds(int sequence, seqtype_t type)
 		}
 	}
 }
+
+DEFINE_ACTION_FUNCTION(DSeqNode, MarkPrecacheSounds)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(seq);
+	PARAM_INT(type);
+	SN_MarkPrecacheSounds(seq, seqtype_t(type));
+	return 0;
+}
+
 
 //==========================================================================
 //
@@ -1450,7 +1566,16 @@ bool SN_AreModesSame(int seqnum, seqtype_t type, int mode1, int mode2)
 	return true;
 }
 
-bool SN_AreModesSame(const char *name, int mode1, int mode2)
+DEFINE_ACTION_FUNCTION(DSeqNode, AreModesSameID)
+{
+	PARAM_SELF_PROLOGUE(DSeqNode);
+	PARAM_INT(seqnum);
+	PARAM_INT(type);
+	PARAM_INT(mode);
+	ACTION_RETURN_BOOL(SN_AreModesSame(seqnum, seqtype_t(type), mode, self->GetModeNum()));
+}
+
+bool SN_AreModesSame(FName name, int mode1, int mode2)
 {
 	int seqnum = FindSequence(name);
 	if (seqnum >= 0)
@@ -1459,6 +1584,14 @@ bool SN_AreModesSame(const char *name, int mode1, int mode2)
 	}
 	// The sequence doesn't exist, so that makes both modes equally nonexistant.
 	return true;
+}
+
+DEFINE_ACTION_FUNCTION(DSeqNode, AreModesSame)
+{
+	PARAM_SELF_PROLOGUE(DSeqNode);
+	PARAM_NAME(seq);
+	PARAM_INT(mode);
+	ACTION_RETURN_BOOL(SN_AreModesSame(seq, mode, self->GetModeNum()));
 }
 
 //==========================================================================

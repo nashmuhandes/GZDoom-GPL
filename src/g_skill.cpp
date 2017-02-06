@@ -43,6 +43,7 @@
 #include "v_font.h"
 #include "m_fixed.h"
 #include "gstrings.h"
+#include "g_levellocals.h"
 
 TArray<FSkillInfo> AllSkills;
 int DefaultSkill = -1;
@@ -388,6 +389,13 @@ int G_SkillProperty(ESkillProperty prop)
 	return 0;
 }
 
+DEFINE_ACTION_FUNCTION(DObject, G_SkillPropertyInt)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(which);
+	ACTION_RETURN_INT(G_SkillProperty((ESkillProperty)which));
+}
+
 //==========================================================================
 //
 //
@@ -431,6 +439,13 @@ double G_SkillProperty(EFSkillProperty prop)
 		}
 	}
 	return 0;
+}
+
+DEFINE_ACTION_FUNCTION(DObject, G_SkillPropertyFloat)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(which);
+	ACTION_RETURN_FLOAT(G_SkillProperty((EFSkillProperty)which));
 }
 
 

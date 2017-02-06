@@ -51,17 +51,20 @@
 #include "p_conversation.h"
 #include "menu/menu.h"
 #include "d_net.h"
+#include "g_levellocals.h"
 
 FIntermissionDescriptorList IntermissionDescriptors;
 
-IMPLEMENT_CLASS(DIntermissionScreen)
-IMPLEMENT_CLASS(DIntermissionScreenFader)
-IMPLEMENT_CLASS(DIntermissionScreenText)
-IMPLEMENT_CLASS(DIntermissionScreenCast)
-IMPLEMENT_CLASS(DIntermissionScreenScroller)
-IMPLEMENT_POINTY_CLASS(DIntermissionController)
-	DECLARE_POINTER(mScreen)
-END_POINTERS
+IMPLEMENT_CLASS(DIntermissionScreen, false, false)
+IMPLEMENT_CLASS(DIntermissionScreenFader, false, false)
+IMPLEMENT_CLASS(DIntermissionScreenText, false, false)
+IMPLEMENT_CLASS(DIntermissionScreenCast, false, false)
+IMPLEMENT_CLASS(DIntermissionScreenScroller, false, false)
+IMPLEMENT_CLASS(DIntermissionController, false, true)
+
+IMPLEMENT_POINTERS_START(DIntermissionController)
+	IMPLEMENT_POINTER(mScreen)
+IMPLEMENT_POINTERS_END
 
 extern int		NoWipe;
 
@@ -201,7 +204,7 @@ void DIntermissionScreen::Drawer ()
 	if (!mFlatfill) screen->FillBorder (NULL);
 }
 
-void DIntermissionScreen::Destroy()
+void DIntermissionScreen::OnDestroy()
 {
 	if (mPaletteChanged)
 	{
@@ -219,7 +222,7 @@ void DIntermissionScreen::Destroy()
 		M_EnableMenu(true);
 	}
 	S_StopSound(CHAN_VOICE);
-	Super::Destroy();
+	Super::OnDestroy();
 }
 
 //==========================================================================
@@ -385,15 +388,8 @@ void DIntermissionScreenText::Drawer ()
 			w *= CleanXfac;
 			if (cx + w > SCREENWIDTH)
 				continue;
-			if (pic != NULL)
-			{
-				screen->DrawTexture (pic,
-					cx,
-					cy,
-					DTA_Translation, range,
-					DTA_CleanNoMove, true,
-					TAG_DONE);
-			}
+
+			screen->DrawChar(SmallFont, mTextColor, cx, cy, c, DTA_CleanNoMove, true, TAG_DONE);
 			cx += w;
 		}
 	}
@@ -429,16 +425,15 @@ void DIntermissionScreenCast::Init(FIntermissionAction *desc, bool first)
 	if (mClass->IsDescendantOf(RUNTIME_CLASS(APlayerPawn)))
 	{
 		advplayerstate = mDefaults->MissileState;
-		casttranslation = translationtables[TRANSLATION_Players][consoleplayer];
+		casttranslation = TRANSLATION(TRANSLATION_Players, consoleplayer);
 	}
 	else
 	{
 		advplayerstate = NULL;
-		casttranslation = NULL;
+		casttranslation = 0;
 		if (mDefaults->Translation != 0)
 		{
-			casttranslation = translationtables[GetTranslationType(mDefaults->Translation)]
-												[GetTranslationIndex(mDefaults->Translation)];
+			casttranslation = mDefaults->Translation;
 		}
 	}
 	castdeath = false;
@@ -627,8 +622,8 @@ void DIntermissionScreenCast::Drawer ()
 			DTA_DestHeightF, pic->GetScaledHeightDouble() * castscale.Y,
 			DTA_DestWidthF, pic->GetScaledWidthDouble() * castscale.X,
 			DTA_RenderStyle, mDefaults->RenderStyle,
-			DTA_AlphaF, mDefaults->Alpha,
-			DTA_Translation, casttranslation,
+			DTA_Alpha, mDefaults->Alpha,
+			DTA_TranslationIndex, casttranslation,
 			TAG_DONE);
 	}
 }
@@ -871,9 +866,9 @@ void DIntermissionController::Drawer ()
 	}
 }
 
-void DIntermissionController::Destroy ()
+void DIntermissionController::OnDestroy ()
 {
-	Super::Destroy();
+	Super::OnDestroy();
 	if (mScreen != NULL) mScreen->Destroy();
 	if (mDeleteDesc) delete mDesc;
 	mDesc = NULL;

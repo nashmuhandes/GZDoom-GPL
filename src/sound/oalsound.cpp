@@ -55,9 +55,13 @@
 #include "actor.h"
 #include "r_state.h"
 #include "w_wad.h"
+#include "i_module.h"
 #include "i_music.h"
 #include "i_musicinterns.h"
 #include "tempfiles.h"
+#include "cmdlib.h"
+
+FModule OpenALModule{"OpenAL"};
 
 #include "oalload.h"
 
@@ -65,18 +69,11 @@ CVAR (String, snd_aldevice, "Default", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (Bool, snd_efx, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 #ifdef _WIN32
-static HMODULE hmodOpenAL;
 #define OPENALLIB "openal32.dll"
-#else
-static void* hmodOpenAL;
-#ifdef __APPLE__
+#elif defined(__APPLE__)
 #define OPENALLIB "OpenAL.framework/OpenAL"
 #else
 #define OPENALLIB "libopenal.so.1"
-#endif
-#define LoadLibrary(x) dlopen((x), RTLD_LAZY)
-#define GetProcAddress(a,b) dlsym((a),(b))
-#define FreeLibrary(x) dlclose((x))
 #endif
 
 bool IsOpenALPresent()
@@ -92,29 +89,7 @@ bool IsOpenALPresent()
 	if (!done)
 	{
 		done = true;
-		if (hmodOpenAL == NULL)
-		{
-			hmodOpenAL = LoadLibrary(NicePath("$PROGDIR/" OPENALLIB));
-			if (hmodOpenAL == NULL)
-			{
-				hmodOpenAL = LoadLibrary(OPENALLIB);
-				if (hmodOpenAL == NULL)
-				{
-					return false;
-				}
-			}
-			for(int i = 0; oalfuncs[i].name != NULL; i++)
-			{
-				*oalfuncs[i].funcaddr = GetProcAddress(hmodOpenAL, oalfuncs[i].name);
-				if (*oalfuncs[i].funcaddr == NULL)
-				{
-					FreeLibrary(hmodOpenAL);
-					hmodOpenAL = NULL;
-					return false;
-				}
-			}
-		}
-		cached_result = true;
+		cached_result = OpenALModule.Load({NicePath("$PROGDIR/" OPENALLIB), OPENALLIB});
 	}
 	return cached_result;
 #endif
@@ -432,7 +407,7 @@ public:
     virtual FString GetStats()
         {
         FString stats;
-        size_t pos, len;
+        size_t pos = 0, len = 0;
         ALfloat volume;
         ALint offset;
         ALint processed;
@@ -454,28 +429,34 @@ public:
             return stats;
         }
 
-        pos = Decoder->getSampleOffset();
-        len = Decoder->getSampleLength();
+		if (Decoder != nullptr)
+		{
+			pos = Decoder->getSampleOffset();
+			len = Decoder->getSampleLength();
+		}
         lock.unlock();
 
         stats = (state == AL_INITIAL) ? "Buffering" : (state == AL_STOPPED) ? "Underrun" :
                 (state == AL_PLAYING || state == AL_PAUSED) ? "Ready" : "Unknown state";
 
-        if(state == AL_STOPPED)
-            offset = BufferCount * (Data.Size()/FrameSize);
-        else
-        {
-            size_t rem = queued*(Data.Size()/FrameSize) - offset;
-            if(pos > rem) pos -= rem;
-            else if(len > 0) pos += len - rem;
-            else pos = 0;
-        }
-        pos = (size_t)(pos * 1000.0 / SampleRate);
-        len = (size_t)(len * 1000.0 / SampleRate);
-        stats.AppendFormat(",%3u%% buffered", 100 - 100*offset/(BufferCount*(Data.Size()/FrameSize)));
-        stats.AppendFormat(", %zu.%03zu", pos/1000, pos%1000);
-        if(len > 0)
-            stats.AppendFormat(" / %zu.%03zu", len/1000, len%1000);
+		if (Decoder != nullptr)
+		{
+			if (state == AL_STOPPED)
+				offset = BufferCount * (Data.Size() / FrameSize);
+			else
+			{
+				size_t rem = queued*(Data.Size() / FrameSize) - offset;
+				if (pos > rem) pos -= rem;
+				else if (len > 0) pos += len - rem;
+				else pos = 0;
+			}
+			pos = (size_t)(pos * 1000.0 / SampleRate);
+			len = (size_t)(len * 1000.0 / SampleRate);
+			stats.AppendFormat(",%3u%% buffered", 100 - 100 * offset / (BufferCount*(Data.Size() / FrameSize)));
+			stats.AppendFormat(", %zu.%03zu", pos / 1000, pos % 1000);
+			if (len > 0)
+				stats.AppendFormat(" / %zu.%03zu", len / 1000, len % 1000);
+		}
         if(state == AL_PAUSED)
             stats += ", paused";
         if(state == AL_PLAYING)
@@ -747,8 +728,8 @@ OpenALSoundRenderer::OpenALSoundRenderer()
     ALCint major=0, minor=0;
     alcGetIntegerv(Device, ALC_MAJOR_VERSION, 1, &major);
     alcGetIntegerv(Device, ALC_MINOR_VERSION, 1, &minor);
-    DPrintf("  ALC Version: " TEXTCOLOR_BLUE"%d.%d\n", major, minor);
-    DPrintf("  ALC Extensions: " TEXTCOLOR_ORANGE"%s\n", alcGetString(Device, ALC_EXTENSIONS));
+    DPrintf(DMSG_SPAMMY, "  ALC Version: " TEXTCOLOR_BLUE"%d.%d\n", major, minor);
+    DPrintf(DMSG_SPAMMY, "  ALC Extensions: " TEXTCOLOR_ORANGE"%s\n", alcGetString(Device, ALC_EXTENSIONS));
 
     TArray<ALCint> attribs;
     if(*snd_samplerate > 0)
@@ -778,10 +759,10 @@ OpenALSoundRenderer::OpenALSoundRenderer()
     }
     attribs.Clear();
 
-    DPrintf("  Vendor: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_VENDOR));
-    DPrintf("  Renderer: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_RENDERER));
-    DPrintf("  Version: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_VERSION));
-    DPrintf("  Extensions: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_EXTENSIONS));
+    DPrintf(DMSG_SPAMMY, "  Vendor: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_VENDOR));
+    DPrintf(DMSG_SPAMMY, "  Renderer: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_RENDERER));
+    DPrintf(DMSG_SPAMMY, "  Version: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_VERSION));
+    DPrintf(DMSG_SPAMMY, "  Extensions: " TEXTCOLOR_ORANGE"%s\n", alGetString(AL_EXTENSIONS));
 
     ALC.EXT_EFX = !!alcIsExtensionPresent(Device, "ALC_EXT_EFX");
     ALC.EXT_disconnect = !!alcIsExtensionPresent(Device, "ALC_EXT_disconnect");
@@ -864,7 +845,7 @@ OpenALSoundRenderer::OpenALSoundRenderer()
         return;
     }
     FreeSfx = Sources;
-    DPrintf("  Allocated " TEXTCOLOR_BLUE"%u" TEXTCOLOR_NORMAL" sources\n", Sources.Size());
+    DPrintf(DMSG_NOTIFY, "  Allocated " TEXTCOLOR_BLUE"%u" TEXTCOLOR_NORMAL" sources\n", Sources.Size());
 
     WasInWater = false;
     if(*snd_efx && ALC.EXT_EFX)
@@ -913,10 +894,10 @@ OpenALSoundRenderer::OpenALSoundRenderer()
             {
                 alEffecti(envReverb, AL_EFFECT_TYPE, AL_EFFECT_EAXREVERB);
                 if(alGetError() == AL_NO_ERROR)
-                    DPrintf("  EAX Reverb found\n");
+                    DPrintf(DMSG_SPAMMY, "  EAX Reverb found\n");
                 alEffecti(envReverb, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
                 if(alGetError() == AL_NO_ERROR)
-                    DPrintf("  Standard Reverb found\n");
+                    DPrintf(DMSG_SPAMMY, "  Standard Reverb found\n");
 
                 alDeleteEffects(1, &envReverb);
                 getALError();
@@ -929,7 +910,7 @@ OpenALSoundRenderer::OpenALSoundRenderer()
                 alFilteri(EnvFilters[0], AL_FILTER_TYPE, AL_FILTER_LOWPASS);
                 alFilteri(EnvFilters[1], AL_FILTER_TYPE, AL_FILTER_LOWPASS);
                 if(getALError() == AL_NO_ERROR)
-                    DPrintf("  Lowpass found\n");
+                    DPrintf(DMSG_SPAMMY, "  Lowpass found\n");
                 else
                 {
                     alDeleteFilters(2, EnvFilters);
@@ -1194,7 +1175,7 @@ std::pair<SoundHandle,bool> OpenALSoundRenderer::LoadSoundRaw(BYTE *sfxdata, int
             loopend = length / (channels*bits/8);
 
         ALint loops[2] = { loopstart, loopend };
-        DPrintf("Setting loop points %d -> %d\n", loops[0], loops[1]);
+        DPrintf(DMSG_NOTIFY, "Setting loop points %d -> %d\n", loops[0], loops[1]);
         alBufferiv(buffer, AL_LOOP_POINTS_SOFT, loops);
         getALError();
     }
@@ -1202,7 +1183,7 @@ std::pair<SoundHandle,bool> OpenALSoundRenderer::LoadSoundRaw(BYTE *sfxdata, int
     {
         static bool warned = false;
         if(!warned)
-            Printf("Loop points not supported!\n");
+            Printf(DMSG_WARNING, "Loop points not supported!\n");
         warned = true;
     }
 
@@ -1867,7 +1848,7 @@ void OpenALSoundRenderer::UpdateListener(SoundListener *listener)
     if(env != PrevEnvironment || env->Modified)
     {
         PrevEnvironment = env;
-        DPrintf("Reverb Environment %s\n", env->Name);
+        DPrintf(DMSG_NOTIFY, "Reverb Environment %s\n", env->Name);
 
         if(EnvSlot != 0)
             LoadReverb(env);

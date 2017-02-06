@@ -537,10 +537,18 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		if (screen && !VidResizing)
 		{
 			LPMINMAXINFO mmi = (LPMINMAXINFO)lParam;
-			RECT rect = { 0, 0, screen->GetWidth(), screen->GetHeight() };
-			AdjustWindowRectEx(&rect, WS_VISIBLE|WS_OVERLAPPEDWINDOW, FALSE, WS_EX_APPWINDOW);
-			mmi->ptMinTrackSize.x = rect.right - rect.left;
-			mmi->ptMinTrackSize.y = rect.bottom - rect.top;
+			if (screen->IsFullscreen())
+			{
+				RECT rect = { 0, 0, screen->GetWidth(), screen->GetHeight() };
+				AdjustWindowRectEx(&rect, WS_VISIBLE | WS_OVERLAPPEDWINDOW, FALSE, WS_EX_APPWINDOW);
+				mmi->ptMinTrackSize.x = rect.right - rect.left;
+				mmi->ptMinTrackSize.y = rect.bottom - rect.top;
+			}
+			else
+			{
+				mmi->ptMinTrackSize.x = 320;
+				mmi->ptMinTrackSize.y = 200;
+			}
 			return 0;
 		}
 		break;
@@ -582,11 +590,9 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					break;
 				case WTS_CONSOLE_DISCONNECT:
 					SessionState |= 2;
-					//I_MovieDisableSound ();
 					break;
 				case WTS_CONSOLE_CONNECT:
 					SessionState &= ~2;
-					//I_MovieResumeSound ();
 					break;
 				}
 			}
@@ -610,10 +616,6 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				if (!oldstate && SessionState)
 				{
 					GSnd->SuspendSound ();
-				}
-				else if (oldstate && !SessionState)
-				{
-					GSnd->MovieResumeSound ();
 				}
 #endif
 			}
@@ -938,18 +940,6 @@ FString I_GetFromClipboard (bool return_nothing)
 
 	CloseClipboard ();
 	return retstr;
-}
-
-#include "i_movie.h"
-
-CCMD (playmovie)
-{
-	if (argv.argc() != 2)
-	{
-		Printf ("Usage: playmovie <movie name>\n");
-		return;
-	}
-	I_PlayMovie (argv[1]);
 }
 
 //==========================================================================

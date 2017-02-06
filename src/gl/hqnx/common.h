@@ -23,7 +23,7 @@
 #define __HQX_COMMON_H_
 
 #include <stdlib.h>
-#include "mystdint.h"
+#include <stdint.h>
 
 #define MASK_2     0x0000FF00
 #define MASK_13    0x00FF00FF
@@ -48,9 +48,9 @@ static inline uint32_t rgb_to_yuv(uint32_t c)
 
 /* Test if there is difference in color */
 static inline int yuv_diff(uint32_t yuv1, uint32_t yuv2) {
-    return (( abs((int64_t)(yuv1 & Ymask) - (int64_t)(yuv2 & Ymask)) > trY ) ||
-            ( abs((int64_t)(yuv1 & Umask) - (int64_t)(yuv2 & Umask)) > trU ) ||
-            ( abs((int64_t)(yuv1 & Vmask) - (int64_t)(yuv2 & Vmask)) > trV ) );
+    return (( abs((int32_t)(yuv1 & Ymask) - (int32_t)(yuv2 & Ymask)) > trY ) ||
+            ( abs((int32_t)(yuv1 & Umask) - (int32_t)(yuv2 & Umask)) > trU ) ||
+            ( abs((int32_t)(yuv1 & Vmask) - (int32_t)(yuv2 & Vmask)) > trV ) );
 }
 
 static inline int Diff(uint32_t c1, uint32_t c2)

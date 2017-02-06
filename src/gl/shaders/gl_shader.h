@@ -1,3 +1,24 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 
 #ifndef __GL_SHADERS_H__
 #define __GL_SHADERS_H__
@@ -12,9 +33,11 @@ enum
 	VATTR_VERTEX = 0,
 	VATTR_TEXCOORD = 1,
 	VATTR_COLOR = 2,
-	VATTR_VERTEX2 = 3
+	VATTR_VERTEX2 = 3,
+	VATTR_NORMAL = 4
 };
 
+class FShaderCollection;
 
 //==========================================================================
 //
@@ -123,6 +146,17 @@ public:
 			glUniform2fv(mIndex, 1, newvalue);
 		}
 	}
+
+	void Set(float f1, float f2)
+	{
+		if (mBuffer[0] != f1 || mBuffer[1] != f2)
+		{
+			mBuffer[0] = f1;
+			mBuffer[1] = f2;
+			glUniform2fv(mIndex, 1, mBuffer);
+		}
+	}
+
 };
 
 class FBufferedUniform4f
@@ -190,10 +224,32 @@ public:
 	}
 };
 
+class FBufferedUniformSampler
+{
+	int mBuffer;
+	int mIndex;
+
+public:
+	void Init(GLuint hShader, const GLchar *name)
+	{
+		mIndex = glGetUniformLocation(hShader, name);
+		mBuffer = -1;
+	}
+
+	void Set(int newvalue)
+	{
+		if (newvalue != mBuffer)
+		{
+			mBuffer = newvalue;
+			glUniform1i(mIndex, newvalue);
+		}
+	}
+};
+
 
 class FShader
 {
-	friend class FShaderManager;
+	friend class FShaderCollection;
 	friend class FRenderState;
 
 	unsigned int hShader;
@@ -203,6 +259,7 @@ class FShader
 
 	FBufferedUniform1f muDesaturation;
 	FBufferedUniform1i muFogEnabled;
+	FBufferedUniform1i muPalLightLevels;
 	FBufferedUniform1i muTextureMode;
 	FBufferedUniform4f muCameraPos;
 	FBufferedUniform4f muLightParms;
@@ -214,6 +271,7 @@ class FShader
 	FBufferedUniformPE muFogColor;
 	FBufferedUniform4f muDynLightColor;
 	FBufferedUniformPE muObjectColor;
+	FBufferedUniformPE muObjectColor2;
 	FUniform4f muGlowBottomColor;
 	FUniform4f muGlowTopColor;
 	FUniform4f muGlowBottomPlane;
@@ -230,9 +288,14 @@ class FShader
 	int lights_index;
 	int projectionmatrix_index;
 	int viewmatrix_index;
+	int normalviewmatrix_index;
 	int modelmatrix_index;
+	int normalmodelmatrix_index;
 	int texturematrix_index;
 public:
+	int vertexmatrix_index;
+	int texcoordmatrix_index;
+	int quadmode_index;
 	int fakevb_index;
 private:
 	int currentglowstate = 0;
@@ -260,10 +323,9 @@ public:
 	bool Bind();
 	unsigned int GetHandle() const { return hShader; }
 
-	void ApplyMatrices(VSMatrix *proj, VSMatrix *view);
+	void ApplyMatrices(VSMatrix *proj, VSMatrix *view, VSMatrix *norm);
 
 };
-
 
 //==========================================================================
 //
@@ -272,26 +334,40 @@ public:
 //==========================================================================
 class FShaderManager
 {
-	TArray<FShader*> mTextureEffects;
-	TArray<FShader*> mTextureEffectsNAT;
-	FShader *mActiveShader;
-	FShader *mEffectShaders[MAX_EFFECTS];
-
-	void Clean();
-	void CompileShaders();
-	
 public:
 	FShaderManager();
 	~FShaderManager();
-	FShader *Compile(const char *ShaderName, const char *ShaderPath, bool usediscard);
+
+	void SetActiveShader(FShader *sh);
+	FShader *GetActiveShader() const { return mActiveShader; }
+
+	FShader *BindEffect(int effect, EPassType passType);
+	FShader *Get(unsigned int eff, bool alphateston, EPassType passType);
+	void ApplyMatrices(VSMatrix *proj, VSMatrix *view, EPassType passType);
+
+	void ResetFixedColormap();
+
+private:
+	FShader *mActiveShader = nullptr;
+	TArray<FShaderCollection*> mPassShaders;
+};
+
+class FShaderCollection
+{
+	TArray<FShader*> mTextureEffects;
+	TArray<FShader*> mTextureEffectsNAT;
+	FShader *mEffectShaders[MAX_EFFECTS];
+
+	void Clean();
+	void CompileShaders(EPassType passType);
+	
+public:
+	FShaderCollection(EPassType passType);
+	~FShaderCollection();
+	FShader *Compile(const char *ShaderName, const char *ShaderPath, bool usediscard, EPassType passType);
 	int Find(const char *mame);
 	FShader *BindEffect(int effect);
-	void SetActiveShader(FShader *sh);
 	void ApplyMatrices(VSMatrix *proj, VSMatrix *view);
-	FShader *GetActiveShader() const
-	{
-		return mActiveShader;
-	}
 
 	void ResetFixedColormap()
 	{

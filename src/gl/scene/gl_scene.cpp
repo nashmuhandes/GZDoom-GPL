@@ -1,40 +1,27 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2004-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_scene.cpp
 ** manages the rendering of the player's view
-**
-**---------------------------------------------------------------------------
-** Copyright 2004-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -53,9 +40,10 @@
 #include "sbar.h"
 #include "po_man.h"
 #include "r_utility.h"
-#include "a_hexenglobal.h"
 #include "p_local.h"
 #include "gl/gl_functions.h"
+#include "serializer.h"
+#include "g_levellocals.h"
 
 #include "gl/dynlights/gl_lightbuffer.h"
 #include "gl/system/gl_interface.h"
@@ -72,7 +60,6 @@
 #include "gl/scene/gl_drawinfo.h"
 #include "gl/scene/gl_portal.h"
 #include "gl/shaders/gl_shader.h"
-#include "gl/shaders/gl_presentshader.h"
 #include "gl/stereo3d/gl_stereo3d.h"
 #include "gl/stereo3d/scoped_view_shifter.h"
 #include "gl/textures/gl_translate.h"
@@ -95,17 +82,17 @@ CVAR(Bool, gl_sort_textures, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 EXTERN_CVAR (Bool, cl_capfps)
 EXTERN_CVAR (Bool, r_deathcamera)
-EXTERN_CVAR(Float, vid_brightness)
-EXTERN_CVAR(Float, vid_contrast)
+EXTERN_CVAR (Float, underwater_fade_scalar)
 
 
 extern int viewpitch;
 extern bool NoInterpolateView;
 extern bool r_showviewer;
 
-DWORD			gl_fixedcolormap;
+int			gl_fixedcolormap;
 area_t			in_area;
 TArray<BYTE> currentmapsection;
+int camtexcount;
 
 void gl_ParseDefs();
 
@@ -123,7 +110,7 @@ angle_t FGLRenderer::FrustumAngle()
 
 	// ok, this is a gross hack that barely works...
 	// but at least it doesn't overestimate too much...
-	double floatangle=2.0+(45.0+((tilt/1.9)))*mCurrentFoV*48.0/BaseRatioSizes[WidescreenRatio][3]/90.0;
+	double floatangle=2.0+(45.0+((tilt/1.9)))*mCurrentFoV*48.0/AspectMultiplier(WidescreenRatio)/90.0;
 	angle_t a1 = DAngle(floatangle).BAMs();
 	if (a1>=ANGLE_180) return 0xffffffff;
 	return a1;
@@ -160,10 +147,7 @@ void FGLRenderer::SetViewArea()
 
 void FGLRenderer::Reset3DViewport()
 {
-	if (FGLRenderBuffers::IsSupported())
-		glViewport(0, 0, mOutputViewport.width, mOutputViewport.height);
-	else
-		glViewport(mOutputViewport.left, mOutputViewport.top, mOutputViewport.width, mOutputViewport.height);
+	glViewport(mScreenViewport.left, mScreenViewport.top, mScreenViewport.width, mScreenViewport.height);
 }
 
 //-----------------------------------------------------------------------------
@@ -172,127 +156,35 @@ void FGLRenderer::Reset3DViewport()
 //
 //-----------------------------------------------------------------------------
 
-void FGLRenderer::Set3DViewport()
+void FGLRenderer::Set3DViewport(bool mainview)
 {
-	const auto &bounds = mOutputViewportLB;
-	if (FGLRenderBuffers::IsSupported())
+	if (mainview && mBuffers->Setup(mScreenViewport.width, mScreenViewport.height, mSceneViewport.width, mSceneViewport.height))
 	{
-		mBuffers->Setup(mOutputViewport.width, mOutputViewport.height);
-		mBuffers->BindSceneFB();
-		glViewport(0, 0, bounds.width, bounds.height);
-		glScissor(0, 0, bounds.width, bounds.height);
-	}
-	else
-	{
-		glViewport(bounds.left, bounds.top, bounds.width, bounds.height);
-		glScissor(bounds.left, bounds.top, bounds.width, bounds.height);
+		bool useSSAO = (gl_ssao != 0);
+		mBuffers->BindSceneFB(useSSAO);
+		gl_RenderState.SetPassType(useSSAO ? GBUFFER_PASS : NORMAL_PASS);
+		gl_RenderState.EnableDrawBuffers(gl_RenderState.GetPassDrawBufferCount());
+		gl_RenderState.Apply();
 	}
 
+	// Always clear all buffers with scissor test disabled.
+	// This is faster on newer hardware because it allows the GPU to skip
+	// reading from slower memory where the full buffers are stored.
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(mSceneClearColor[0], mSceneClearColor[1], mSceneClearColor[2], 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+	const auto &bounds = mSceneViewport;
+	glViewport(bounds.left, bounds.top, bounds.width, bounds.height);
+	glScissor(bounds.left, bounds.top, bounds.width, bounds.height);
+
 	glEnable(GL_SCISSOR_TEST);
-	
-	#ifdef _DEBUG
-		glClearColor(0.0f, 0.0f, 0.0f, 0.0f); 
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-	#else
-		glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-	#endif
 
 	glEnable(GL_MULTISAMPLE);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_STENCIL_TEST);
 	glStencilFunc(GL_ALWAYS,0,~0);	// default stencil
 	glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
-}
-
-//-----------------------------------------------------------------------------
-//
-// Run post processing steps and copy to frame buffer
-//
-//-----------------------------------------------------------------------------
-
-void FGLRenderer::Flush()
-{
-	if (FGLRenderBuffers::IsSupported())
-	{
-		glDisable(GL_MULTISAMPLE);
-		glDisable(GL_DEPTH_TEST);
-		glDisable(GL_STENCIL_TEST);
-
-		mBuffers->BindOutputFB();
-
-		// Calculate letterbox
-		int clientWidth = framebuffer->GetClientWidth();
-		int clientHeight = framebuffer->GetClientHeight();
-		float scaleX = clientWidth / (float)mOutputViewport.width;
-		float scaleY = clientHeight / (float)mOutputViewport.height;
-		float scale = MIN(scaleX, scaleY);
-		int width = (int)round(mOutputViewport.width * scale);
-		int height = (int)round(mOutputViewport.height * scale);
-		int x = (clientWidth - width) / 2;
-		int y = (clientHeight - height) / 2;
-
-		// Black bars around the box:
-		glViewport(0, 0, clientWidth, clientHeight);
-		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-		glEnable(GL_SCISSOR_TEST);
-		if (y > 0)
-		{
-			glScissor(0, 0, clientWidth, y);
-			glClear(GL_COLOR_BUFFER_BIT);
-		}
-		if (clientHeight - y - height > 0)
-		{
-			glScissor(0, y + height, clientWidth, clientHeight - y - height);
-			glClear(GL_COLOR_BUFFER_BIT);
-		}
-		if (x > 0)
-		{
-			glScissor(0, y, x, height);
-			glClear(GL_COLOR_BUFFER_BIT);
-		}
-		if (clientWidth - x - width > 0)
-		{
-			glScissor(x + width, y, clientWidth - x - width, height);
-			glClear(GL_COLOR_BUFFER_BIT);
-		}
-		glDisable(GL_SCISSOR_TEST);
-
-		// Present what was rendered:
-		glViewport(x, y, width, height);
-
-		GLboolean blendEnabled;
-		GLint currentProgram;
-		glGetBooleanv(GL_BLEND, &blendEnabled);
-		glGetIntegerv(GL_CURRENT_PROGRAM, &currentProgram);
-		glDisable(GL_BLEND);
-
-		mPresentShader->Bind();
-		mPresentShader->InputTexture.Set(0);
-		if (framebuffer->IsHWGammaActive())
-		{
-			mPresentShader->Gamma.Set(1.0f);
-			mPresentShader->Contrast.Set(1.0f);
-			mPresentShader->Brightness.Set(0.0f);
-		}
-		else
-		{
-			mPresentShader->Gamma.Set(clamp<float>(Gamma, 0.1f, 4.f));
-			mPresentShader->Contrast.Set(clamp<float>(vid_contrast, 0.1f, 3.f));
-			mPresentShader->Brightness.Set(clamp<float>(vid_brightness, -0.8f, 0.8f));
-		}
-		mBuffers->BindSceneTexture(0);
-
-		FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-		ptr->Set(-1.0f, -1.0f, 0, 0.0f, 0.0f); ptr++;
-		ptr->Set(-1.0f, 1.0f, 0, 0.0f, 1.0f); ptr++;
-		ptr->Set(1.0f, -1.0f, 0, 1.0f, 0.0f); ptr++;
-		ptr->Set(1.0f, 1.0f, 0, 1.0f, 1.0f); ptr++;
-		GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
-
-		if (blendEnabled)
-			glEnable(GL_BLEND);
-		glUseProgram(currentProgram);
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -323,8 +215,7 @@ void FGLRenderer::SetProjection(float fov, float ratio, float fovratio)
 {
 
 	float fovy = 2 * RAD2DEG(atan(tan(DEG2RAD(fov) / 2) / fovratio));
-	gl_RenderState.mProjectionMatrix.perspective(fovy, ratio, 5.f, 65536.f);
-	gl_RenderState.Set2DMode(false);
+	gl_RenderState.mProjectionMatrix.perspective(fovy, ratio, GetZNear(), GetZFar());
 }
 
 // raw matrix input from stereo 3d modes
@@ -332,7 +223,6 @@ void FGLRenderer::SetProjection(VSMatrix matrix)
 {
 	gl_RenderState.mProjectionMatrix.loadIdentity();
 	gl_RenderState.mProjectionMatrix.multMatrix(matrix);
-	gl_RenderState.Set2DMode(false);
 }
 
 //-----------------------------------------------------------------------------
@@ -388,6 +278,7 @@ void FGLRenderer::CreateScene()
 	for(unsigned i=0;i<portals.Size(); i++) portals[i]->glportal = NULL;
 	gl_spriteindex=0;
 	Bsp.Clock();
+	GLRenderer->mVBO->Map();
 	R_SetView();
 	validcount++;	// used for processing sidedefs only once by the renderer.
 	gl_RenderBSPNode (nodes + numnodes - 1);
@@ -399,6 +290,7 @@ void FGLRenderer::CreateScene()
 	gl_drawinfo->HandleMissingTextures();	// Missing upper/lower textures
 	gl_drawinfo->HandleHackedSubsectors();	// open sector hacks for deep water
 	gl_drawinfo->ProcessSectorStacks();		// merge visplanes of sector stacks
+	GLRenderer->mVBO->Unmap();
 
 	ProcessAll.Unclock();
 
@@ -511,9 +403,11 @@ void FGLRenderer::RenderScene(int recursion)
 
 	// this is the only geometry type on which decals can possibly appear
 	gl_drawinfo->drawlists[GLDL_PLAINWALLS].DrawDecals();
-	if (gl.lightmethod == LM_SOFTWARE)
+	if (gl.legacyMode)
 	{
 		// also process the render lists with walls and dynamic lights
+        gl_drawinfo->dldrawlists[GLLDL_WALLS_PLAIN].DrawDecals();
+        gl_drawinfo->dldrawlists[GLLDL_WALLS_FOG].DrawDecals();
 	}
 
 	gl_RenderState.SetTextureMode(TM_MODULATE);
@@ -580,19 +474,31 @@ void FGLRenderer::RenderTranslucent()
 // stencil, z-buffer and the projection matrix intact!
 //
 //-----------------------------------------------------------------------------
-EXTERN_CVAR(Bool, gl_draw_sync)
 
 void FGLRenderer::DrawScene(int drawmode)
 {
 	static int recursion=0;
+	static int ssao_portals_available = 0;
+
+	bool applySSAO = false;
+	if (drawmode == DM_MAINVIEW)
+	{
+		ssao_portals_available = gl_ssao_portals;
+		applySSAO = true;
+	}
+	else if (drawmode == DM_OFFSCREEN)
+	{
+		ssao_portals_available = 0;
+	}
+	else if (ssao_portals_available > 0)
+	{
+		applySSAO = true;
+		ssao_portals_available--;
+	}
 
 	if (camera != nullptr)
 	{
 		ActorRenderFlags savedflags = camera->renderflags;
-		if (drawmode != DM_PORTAL && !r_showviewer)
-		{
-			camera->renderflags |= RF_INVISIBLE;
-		}
 		CreateScene();
 		camera->renderflags = savedflags;
 	}
@@ -602,15 +508,17 @@ void FGLRenderer::DrawScene(int drawmode)
 	}
 	GLRenderer->mClipPortal = NULL;	// this must be reset before any portal recursion takes place.
 
-	// Up to this point in the main draw call no rendering is performed so we can wait
-	// with swapping the render buffer until now.
-	if (!gl_draw_sync && drawmode == DM_MAINVIEW)
-	{
-		All.Unclock();
-		static_cast<OpenGLFrameBuffer*>(screen)->Swap();
-		All.Clock();
-	}
 	RenderScene(recursion);
+
+	if (applySSAO && gl_RenderState.GetPassType() == GBUFFER_PASS)
+	{
+		gl_RenderState.EnableDrawBuffers(1);
+		AmbientOccludeScene();
+		mBuffers->BindSceneFB(true);
+		gl_RenderState.EnableDrawBuffers(gl_RenderState.GetPassDrawBufferCount());
+		gl_RenderState.Apply();
+		gl_RenderState.ApplyMatrices();
+	}
 
 	// Handle all portals after rendering the opaque objects but before
 	// doing all translucent stuff
@@ -626,16 +534,8 @@ void gl_FillScreen()
 	gl_RenderState.AlphaFunc(GL_GEQUAL, 0.f);
 	gl_RenderState.EnableTexture(false);
 	gl_RenderState.Apply();
-	FFlatVertex *ptr = GLRenderer->mVBO->GetBuffer();
-	ptr->Set(0, 0, 0, 0, 0);
-	ptr++;
-	ptr->Set(0, (float)SCREENHEIGHT, 0, 0, 0);
-	ptr++;
-	ptr->Set((float)SCREENWIDTH, 0, 0, 0, 0);
-	ptr++;
-	ptr->Set((float)SCREENWIDTH, (float)SCREENHEIGHT, 0, 0, 0);
-	ptr++;
-	GLRenderer->mVBO->RenderCurrent(ptr, GL_TRIANGLE_STRIP);
+	// The fullscreen quad is stored at index 4 in the main vertex buffer.
+	GLRenderer->mVBO->RenderArray(GL_TRIANGLE_STRIP, FFlatVertexBuffer::FULLSCREEN_INDEX, 4);
 }
 
 //==========================================================================
@@ -731,7 +631,11 @@ void FGLRenderer::DrawBlend(sector_t * viewsector)
 		}
 		else if (blendv.a)
 		{
-			V_AddBlend(blendv.r / 255.f, blendv.g / 255.f, blendv.b / 255.f, blendv.a / 255.0f, blend);
+			// [Nash] allow user to set blend intensity
+			int cnt = blendv.a;
+			cnt = (int)(cnt * underwater_fade_scalar);
+
+			V_AddBlend(blendv.r / 255.f, blendv.g / 255.f, blendv.b / 255.f, cnt / 255.0f, blend);
 		}
 	}
 
@@ -752,12 +656,15 @@ void FGLRenderer::DrawBlend(sector_t * viewsector)
 		V_AddBlend (player->BlendR, player->BlendG, player->BlendB, player->BlendA, blend);
 	}
 
+	gl_RenderState.SetTextureMode(TM_MODULATE);
+	gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	if (blend[3]>0.0f)
 	{
-		gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		gl_RenderState.SetColor(blend[0], blend[1], blend[2], blend[3]);
 		gl_FillScreen();
 	}
+	gl_RenderState.ResetColor();
+	gl_RenderState.EnableTexture(true);
 }
 
 
@@ -788,21 +695,23 @@ void FGLRenderer::EndDrawScene(sector_t * viewsector)
 	framebuffer->Begin2D(false);
 
 	Reset3DViewport();
+
 	// [BB] Only draw the sprites if we didn't render a HUD model before.
 	if ( renderHUDModel == false )
 	{
 		DrawPlayerSprites (viewsector, false);
 	}
-	int cm = gl_RenderState.GetFixedColormap();
+	if (gl.legacyMode)
+	{
+		gl_RenderState.DrawColormapOverlay();
+	}
+
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 	gl_RenderState.SetSoftLightLevel(-1);
 	DrawTargeterSprites();
-	DrawBlend(viewsector);
-	if (gl.glslversion == 0.0)
+	if (!FGLRenderBuffers::IsEnabled())
 	{
-		gl_RenderState.SetFixedColormap(cm);
-		gl_RenderState.DrawColormapOverlay();
-		gl_RenderState.SetFixedColormap(CM_DEFAULT);
+		DrawBlend(viewsector);
 	}
 
 	// Restore standard rendering state
@@ -858,16 +767,18 @@ void FGLRenderer::SetFixedColormap (player_t *player)
 		}
 		else if (cplayer->fixedlightlevel != -1)
 		{
+			auto torchtype = PClass::FindActor(NAME_PowerTorch);
+			auto litetype = PClass::FindActor(NAME_PowerLightAmp);
 			for(AInventory * in = cplayer->mo->Inventory; in; in = in->Inventory)
 			{
-				PalEntry color = in->GetBlend ();
+				PalEntry color = in->CallGetBlend ();
 
 				// Need special handling for light amplifiers 
-				if (in->IsKindOf(RUNTIME_CLASS(APowerTorch)))
+				if (in->IsKindOf(torchtype))
 				{
 					gl_fixedcolormap = cplayer->fixedlightlevel + CM_TORCH;
 				}
-				else if (in->IsKindOf(RUNTIME_CLASS(APowerLightAmp)))
+				else if (in->IsKindOf(litetype))
 				{
 					gl_fixedcolormap = CM_LITE;
 				}
@@ -885,7 +796,10 @@ void FGLRenderer::SetFixedColormap (player_t *player)
 
 sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, float fov, float ratio, float fovratio, bool mainview, bool toscreen)
 {       
-	sector_t * retval;
+	sector_t * lviewsector;
+	mSceneClearColor[0] = 0.0f;
+	mSceneClearColor[1] = 0.0f;
+	mSceneClearColor[2] = 0.0f;
 	R_SetupFrame (camera);
 	SetViewArea();
 
@@ -915,19 +829,19 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 	}
 
 	// 'viewsector' will not survive the rendering so it cannot be used anymore below.
-	retval = viewsector;
+	lviewsector = viewsector;
 
 	// Render (potentially) multiple views for stereo 3d
 	float viewShift[3];
-	const s3d::Stereo3DMode& stereo3dMode = s3d::Stereo3DMode::getCurrentMode();
+	const s3d::Stereo3DMode& stereo3dMode = mainview && toscreen? s3d::Stereo3DMode::getCurrentMode() : s3d::Stereo3DMode::getMonoMode();
 	stereo3dMode.SetUp();
 	for (int eye_ix = 0; eye_ix < stereo3dMode.eye_count(); ++eye_ix)
 	{
 		const s3d::EyePose * eye = stereo3dMode.getEyePose(eye_ix);
 		eye->SetUp();
-		// TODO: stereo specific viewport - needed when implementing side-by-side modes etc.
 		SetOutputViewport(bounds);
-		Set3DViewport();
+		Set3DViewport(mainview);
+		mDrawingScene2D = true;
 		mCurrentFoV = fov;
 		// Stereo mode specific perspective projection
 		SetProjection( eye->GetProjection(fov, ratio, fovratio) );
@@ -944,14 +858,26 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 		clipper.SafeAddClipRangeRealAngles(ViewAngle.BAMs() + a1, ViewAngle.BAMs() - a1);
 
 		ProcessScene(toscreen);
-		if (mainview) EndDrawScene(retval);	// do not call this for camera textures.
+		if (mainview && toscreen) EndDrawScene(lviewsector); // do not call this for camera textures.
+		if (mainview && FGLRenderBuffers::IsEnabled())
+		{
+			PostProcessScene();
+
+			// This should be done after postprocessing, not before.
+			mBuffers->BindCurrentFB();
+			glViewport(mScreenViewport.left, mScreenViewport.top, mScreenViewport.width, mScreenViewport.height);
+			DrawBlend(lviewsector);
+		}
+		mDrawingScene2D = false;
+		if (!stereo3dMode.IsMono() && FGLRenderBuffers::IsEnabled())
+			mBuffers->BlitToEyeTexture(eye_ix);
 		eye->TearDown();
 	}
 	stereo3dMode.TearDown();
 
 	gl_frameCount++;	// This counter must be increased right before the interpolations are restored.
 	interpolator.RestoreInterpolations ();
-	return retval;
+	return lviewsector;
 }
 
 //-----------------------------------------------------------------------------
@@ -987,7 +913,7 @@ void FGLRenderer::RenderView (player_t* player)
 
 	P_FindParticleSubsectors ();
 
-	if (gl.lightmethod != LM_SOFTWARE) GLRenderer->mLights->Clear();
+	if (!gl.legacyMode) GLRenderer->mLights->Clear();
 
 	// NoInterpolateView should have no bearing on camera textures, but needs to be preserved for the main view below.
 	bool saved_niv = NoInterpolateView;
@@ -997,14 +923,10 @@ void FGLRenderer::RenderView (player_t* player)
 	NoInterpolateView = saved_niv;
 
 
-	// I stopped using BaseRatioSizes here because the information there wasn't well presented.
-	//							4:3				16:9		16:10		17:10		5:4
-	static float ratios[]={1.333333f, 1.777777f, 1.6f, 1.7f, 1.25f, 1.7f, 2.333333f};
-
 	// now render the main view
 	float fovratio;
-	float ratio = ratios[WidescreenRatio];
-	if (! Is54Aspect(WidescreenRatio))
+	float ratio = WidescreenRatio;
+	if (WidescreenRatio >= 1.3f)
 	{
 		fovratio = 1.333333f;
 	}
@@ -1030,7 +952,7 @@ void FGLRenderer::RenderView (player_t* player)
 //
 //===========================================================================
 
-void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int height)
+void FGLRenderer::WriteSavePic (player_t *player, FileWriter *file, int width, int height)
 {
 	GL_IRECT bounds;
 
@@ -1042,7 +964,7 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 	SetFixedColormap(player);
 	gl_RenderState.SetVertexBuffer(mVBO);
 	GLRenderer->mVBO->Reset();
-	if (gl.lightmethod != LM_SOFTWARE) GLRenderer->mLights->Clear();
+	if (!gl.legacyMode) GLRenderer->mLights->Clear();
 
 	// Check if there's some lights. If not some code can be skipped.
 	TThinkerIterator<ADynamicLight> it(STAT_DLIGHT);
@@ -1054,7 +976,11 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 	gl_RenderState.SetSoftLightLevel(-1);
 	screen->Begin2D(false);
-	DrawBlend(viewsector);
+	if (!FGLRenderBuffers::IsEnabled())
+	{
+		DrawBlend(viewsector);
+	}
+	CopyToBackbuffer(&bounds, false);
 	glFlush();
 
 	byte * scr = (byte *)M_Malloc(width * height * 3);
@@ -1072,25 +998,25 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 
 struct FGLInterface : public FRenderer
 {
-	bool UsesColormap() const;
+	bool UsesColormap() const override;
 	void PrecacheTexture(FTexture *tex, int cache);
 	void PrecacheSprite(FTexture *tex, SpriteHits &hits);
-	void Precache(BYTE *texhitlist, TMap<PClassActor*, bool> &actorhitlist);
-	void RenderView(player_t *player);
-	void WriteSavePic (player_t *player, FILE *file, int width, int height);
-	void StateChanged(AActor *actor);
-	void StartSerialize(FArchive &arc);
-	void EndSerialize(FArchive &arc);
-	void RenderTextureView (FCanvasTexture *self, AActor *viewpoint, int fov);
-	sector_t *FakeFlat(sector_t *sec, sector_t *tempsec, int *floorlightlevel, int *ceilinglightlevel, bool back);
-	void SetFogParams(int _fogdensity, PalEntry _outsidefogcolor, int _outsidefogdensity, int _skyfog);
-	void PreprocessLevel();
-	void CleanLevelData();
-	bool RequireGLNodes();
+	void Precache(BYTE *texhitlist, TMap<PClassActor*, bool> &actorhitlist) override;
+	void RenderView(player_t *player) override;
+	void WriteSavePic (player_t *player, FileWriter *file, int width, int height) override;
+	void StateChanged(AActor *actor) override;
+	void StartSerialize(FSerializer &arc) override;
+	void EndSerialize(FSerializer &arc) override;
+	void RenderTextureView (FCanvasTexture *self, AActor *viewpoint, int fov) override;
+	sector_t *FakeFlat(sector_t *sec, sector_t *tempsec, int *floorlightlevel, int *ceilinglightlevel, bool back) override;
+	void SetFogParams(int _fogdensity, PalEntry _outsidefogcolor, int _outsidefogdensity, int _skyfog) override;
+	void PreprocessLevel() override;
+	void CleanLevelData() override;
+	bool RequireGLNodes() override;
 
-	int GetMaxViewPitch(bool down);
-	void ClearBuffer(int color);
-	void Init();
+	int GetMaxViewPitch(bool down) override;
+	void ClearBuffer(int color) override;
+	void Init() override;
 };
 
 //===========================================================================
@@ -1300,20 +1226,24 @@ void FGLInterface::StateChanged(AActor *actor)
 //
 //===========================================================================
 
-void FGLInterface::StartSerialize(FArchive &arc)
+void FGLInterface::StartSerialize(FSerializer &arc)
 {
-	gl_DeleteAllAttachedLights();
+	if (arc.BeginObject("glinfo"))
+	{
+		arc("fogdensity", fogdensity)
+			("outsidefogdensity", outsidefogdensity)
+			("skyfog", skyfog)
+			.EndObject();
+	}
 }
 
-void gl_SerializeGlobals(FArchive &arc)
+void FGLInterface::EndSerialize(FSerializer &arc)
 {
-	arc << fogdensity << outsidefogdensity << skyfog;
-}
-
-void FGLInterface::EndSerialize(FArchive &arc)
-{
-	gl_RecreateAllAttachedLights();
-	if (arc.IsLoading()) gl_InitPortals();
+	if (arc.isReading())
+	{
+		gl_RecreateAllAttachedLights();
+		gl_InitPortals();
+	}
 }
 
 //===========================================================================
@@ -1338,8 +1268,9 @@ int FGLInterface::GetMaxViewPitch(bool down)
 void FGLInterface::ClearBuffer(int color)
 {
 	PalEntry pe = GPalette.BaseColors[color];
-	glClearColor(pe.r/255.f, pe.g/255.f, pe.b/255.f, 1.f);
-	glClear(GL_COLOR_BUFFER_BIT);
+	GLRenderer->mSceneClearColor[0] = pe.r / 255.f;
+	GLRenderer->mSceneClearColor[1] = pe.g / 255.f;
+	GLRenderer->mSceneClearColor[2] = pe.b / 255.f;
 }
 
 //===========================================================================
@@ -1348,7 +1279,7 @@ void FGLInterface::ClearBuffer(int color)
 //
 //===========================================================================
 
-void FGLInterface::WriteSavePic (player_t *player, FILE *file, int width, int height)
+void FGLInterface::WriteSavePic (player_t *player, FileWriter *file, int width, int height)
 {
 	GLRenderer->WriteSavePic(player, file, width, height);
 }
@@ -1394,29 +1325,16 @@ void FGLInterface::RenderTextureView (FCanvasTexture *tex, AActor *Viewpoint, in
 	gl_fixedcolormap=CM_DEFAULT;
 	gl_RenderState.SetFixedColormap(CM_DEFAULT);
 
-	bool usefb = gl_usefb || gltex->GetWidth() > screen->GetWidth() || gltex->GetHeight() > screen->GetHeight();
-	if (!usefb)
+	if (gl.legacyMode)
 	{
+		// In legacy mode, fail if the requested texture is too large.
+		if (gltex->GetWidth() > screen->GetWidth() || gltex->GetHeight() > screen->GetHeight()) return;
 		glFlush();
 	}
 	else
 	{
-#if defined(_WIN32) && (defined(_MSC_VER) || defined(__INTEL_COMPILER))
-		__try
-#endif
-		{
-			GLRenderer->StartOffscreen();
-			gltex->BindToFrameBuffer();
-		}
-#if defined(_WIN32) && (defined(_MSC_VER) || defined(__INTEL_COMPILER))
-		__except(1)
-		{
-			usefb = false;
-			gl_usefb = false;
-			GLRenderer->EndOffscreen();
-			glFlush();
-		}
-#endif
+		GLRenderer->StartOffscreen();
+		gltex->BindToFrameBuffer();
 	}
 
 	GL_IRECT bounds;
@@ -1426,7 +1344,7 @@ void FGLInterface::RenderTextureView (FCanvasTexture *tex, AActor *Viewpoint, in
 
 	GLRenderer->RenderViewpoint(Viewpoint, &bounds, FOV, (float)width/height, (float)width/height, false, false);
 
-	if (!usefb)
+	if (gl.legacyMode)
 	{
 		glFlush();
 		gl_RenderState.SetMaterial(gltex, 0, 0, -1, false);
@@ -1438,6 +1356,7 @@ void FGLInterface::RenderTextureView (FCanvasTexture *tex, AActor *Viewpoint, in
 	}
 
 	tex->SetUpdated();
+	camtexcount++;
 }
 
 //==========================================================================

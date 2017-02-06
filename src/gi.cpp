@@ -45,6 +45,13 @@
 
 gameinfo_t gameinfo;
 
+DEFINE_FIELD_X(GameInfoStruct, gameinfo_t, backpacktype)
+DEFINE_FIELD_X(GameInfoStruct, gameinfo_t, Armor2Percent)
+DEFINE_FIELD_X(GameInfoStruct, gameinfo_t, ArmorIcon1)
+DEFINE_FIELD_X(GameInfoStruct, gameinfo_t, ArmorIcon2)
+DEFINE_FIELD_X(GameInfoStruct, gameinfo_t, gametype)
+
+
 const char *GameNames[17] =
 {
 	NULL, "Doom", "Heretic", NULL, "Hexen", NULL, NULL, NULL, "Strife", NULL, NULL, NULL, NULL, NULL, NULL, NULL, "Chex"
@@ -307,6 +314,9 @@ void FMapInfoParser::ParseGameInfo()
 		GAMEINFOKEY_STRINGARRAY(finalePages, "finalePage", 8, true)
 		GAMEINFOKEY_STRINGARRAY(infoPages, "addinfoPage", 8, false)
 		GAMEINFOKEY_STRINGARRAY(infoPages, "infoPage", 8, true)
+		GAMEINFOKEY_STRINGARRAY(PrecachedClasses, "precacheclasses", 0, false)
+		GAMEINFOKEY_STRINGARRAY(PrecachedTextures, "precachetextures", 0, false)
+		GAMEINFOKEY_STRINGARRAY(PrecachedSounds, "precachesounds", 0, false)
 		GAMEINFOKEY_STRING(PauseSign, "pausesign")
 		GAMEINFOKEY_STRING(quitSound, "quitSound")
 		GAMEINFOKEY_STRING(BorderFlat, "borderFlat")
@@ -354,6 +364,7 @@ void FMapInfoParser::ParseGameInfo()
 		GAMEINFOKEY_PATCH(mStatscreenFinishedFont, "statscreen_finishedpatch")
 		GAMEINFOKEY_PATCH(mStatscreenEnteringFont, "statscreen_enteringpatch")
 		GAMEINFOKEY_BOOL(norandomplayerclass, "norandomplayerclass")
+		GAMEINFOKEY_BOOL(forcekillscripts, "forcekillscripts") // [JM] Force kill scripts on thing death. (MF7_NOKILLSCRIPTS overrides.)
 
 		else
 		{

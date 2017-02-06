@@ -1,42 +1,24 @@
-/*
-** gl_wall.cpp
-** Wall rendering preparation
-**
-**---------------------------------------------------------------------------
-** Copyright 2000-2005 Christoph Oelckers
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
-**
-*/
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2000-2016 Christoph Oelckers
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 
 #include "gl/system/gl_system.h"
 #include "p_local.h"
@@ -51,6 +33,7 @@
 #include "p_maputl.h"
 #include "doomdata.h"
 #include "portal.h"
+#include "g_levellocals.h"
 
 #include "gl/system/gl_cvars.h"
 #include "gl/renderer/gl_lightdata.h"
@@ -64,35 +47,6 @@
 #include "gl/utility/gl_geometric.h"
 #include "gl/utility/gl_templates.h"
 #include "gl/shaders/gl_shader.h"
-
-
-//==========================================================================
-//
-// Checks whether a wall should glow
-//
-//==========================================================================
-void GLWall::CheckGlowing()
-{
-	bottomglowcolor[3] = topglowcolor[3] = 0;
-	if (!gl_isFullbright(Colormap.LightColor, lightlevel))
-	{
-		FTexture *tex = TexMan[topflat];
-		if (tex != NULL && tex->isGlowing())
-		{
-			flags |= GLWall::GLWF_GLOW;
-			tex->GetGlowColor(topglowcolor);
-			topglowcolor[3] = tex->gl_info.GlowHeight;
-		}
-
-		tex = TexMan[bottomflat];
-		if (tex != NULL && tex->isGlowing())
-		{
-			flags |= GLWall::GLWF_GLOW;
-			tex->GetGlowColor(bottomglowcolor);
-			bottomglowcolor[3] = tex->gl_info.GlowHeight;
-		}
-	}
-}
 
 
 //==========================================================================
@@ -129,19 +83,18 @@ void GLWall::PutWall(bool translucent)
 		if (gltexture == NULL) return;
 		Colormap.Clear();
 	}
-
-	CheckGlowing();
+	if (gl_isFullbright(Colormap.LightColor, lightlevel)) flags &= ~GLWF_GLOW;
 
 	if (translucent) // translucent walls
 	{
 		ViewDistance = (ViewPos - (seg->linedef->v1->fPos() + seg->linedef->Delta() / 2)).XY().LengthSquared();
+		if (gl.buffermethod == BM_DEFERRED) MakeVertices(true);
 		gl_drawinfo->drawlists[GLDL_TRANSLUCENT].AddWall(this);
 	}
 	else
 	{
-		if (gl.lightmethod == LM_SOFTWARE && !translucent)
+		if (gl.legacyMode && !translucent)
 		{
-			// This is not yet ready.
 			if (PutWallCompat(passflag[type])) return;
 		}
 
@@ -157,16 +110,19 @@ void GLWall::PutWall(bool translucent)
 		{
 			list = masked ? GLDL_MASKEDWALLS : GLDL_PLAINWALLS;
 		}
+		if (gl.buffermethod == BM_DEFERRED) MakeVertices(false);
 		gl_drawinfo->drawlists[list].AddWall(this);
 
 	}
 	lightlist = NULL;
+	vertcount = 0;	// make sure that following parts of the same linedef do not get this one's vertex info.
 }
 
 void GLWall::PutPortal(int ptype)
 {
 	GLPortal * portal;
 
+	if (gl.buffermethod == BM_DEFERRED) MakeVertices(false);
 	switch (ptype)
 	{
 	// portals don't go into the draw list.
@@ -237,6 +193,7 @@ void GLWall::PutPortal(int ptype)
 		portal->AddLine(this);
 		break;
 	}
+	vertcount = 0;
 }
 //==========================================================================
 //
@@ -264,7 +221,7 @@ void GLWall::Put3DWall(lightlist_t * lightlist, bool translucent)
 //
 //==========================================================================
 
-void GLWall::SplitWallComplex(sector_t * frontsector, bool translucent, float maplightbottomleft, float maplightbottomright)
+bool GLWall::SplitWallComplex(sector_t * frontsector, bool translucent, float& maplightbottomleft, float& maplightbottomright)
 {
 	GLWall copyWall1, copyWall2;
 
@@ -304,7 +261,7 @@ void GLWall::SplitWallComplex(sector_t * frontsector, bool translucent, float ma
 
 			copyWall1.SplitWall(frontsector, translucent);
 			copyWall2.SplitWall(frontsector, translucent);
-			return;
+			return true;
 		}
 	}
 
@@ -345,9 +302,11 @@ void GLWall::SplitWallComplex(sector_t * frontsector, bool translucent, float ma
 
 			copyWall1.SplitWall(frontsector, translucent);
 			copyWall2.SplitWall(frontsector, translucent);
-			return;
+			return true;
 		}
 	}
+
+	return false;
 }
 
 void GLWall::SplitWall(sector_t * frontsector, bool translucent)
@@ -368,7 +327,7 @@ void GLWall::SplitWall(sector_t * frontsector, bool translucent)
 	//::SplitWall.Clock();
 
 #ifdef _DEBUG
-	if (seg->linedef-lines==1)
+	if (seg->linedef->Index() == 1)
 	{
 		int a = 0;
 	}
@@ -401,19 +360,19 @@ void GLWall::SplitWall(sector_t * frontsector, bool translucent)
 				(maplightbottomleft<zbottom[0] && maplightbottomright>zbottom[1]) ||
 				(maplightbottomleft > zbottom[0] && maplightbottomright < zbottom[1]))
 			{
-				if (gl.glslversion >= 1.3f)
+				if (!(gl.flags & RFL_NO_CLIP_PLANES))
 				{
 					// Use hardware clipping if this cannot be done cleanly.
 					this->lightlist = &lightlist;
 					PutWall(translucent);
-				}
-				else
-				{
-					// crappy fallback if no clip planes available
-					SplitWallComplex(frontsector, translucent, maplightbottomleft, maplightbottomright);
-				}
 
-				goto out;
+					goto out;
+				}
+				// crappy fallback if no clip planes available
+				else if (SplitWallComplex(frontsector, translucent, maplightbottomleft, maplightbottomright))
+				{
+					goto out;
+				}
 			}
 
 			// 3D floor is completely within this light
@@ -482,7 +441,7 @@ bool GLWall::DoHorizon(seg_t * seg,sector_t * fs, vertex_t * v1,vertex_t * v2)
 		}
 		else
 		{
-			hi.plane.GetFromSector(fs, true);
+			hi.plane.GetFromSector(fs, sector_t::ceiling);
 			hi.lightlevel = gl_ClampLight(fs->GetCeilingLight());
 			hi.colormap = fs->ColorMap;
 
@@ -510,7 +469,7 @@ bool GLWall::DoHorizon(seg_t * seg,sector_t * fs, vertex_t * v1,vertex_t * v2)
 		}
 		else
 		{
-			hi.plane.GetFromSector(fs, false);
+			hi.plane.GetFromSector(fs, sector_t::floor);
 			hi.lightlevel = gl_ClampLight(fs->GetFloorLight());
 			hi.colormap = fs->ColorMap;
 
@@ -1287,7 +1246,7 @@ void GLWall::ClipFFloors(seg_t * seg, F3DFloor * ffloor, sector_t * frontsector,
 {
 	TArray<F3DFloor *> & frontffloors = frontsector->e->XFloor.ffloors;
 
-	int flags = ffloor->flags & (FF_SWIMMABLE | FF_TRANSLUCENT);
+	const unsigned int flags = ffloor->flags & (FF_SWIMMABLE | FF_TRANSLUCENT);
 
 	for (unsigned int i = 0; i < frontffloors.Size(); i++)
 	{
@@ -1456,7 +1415,7 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 	sector_t * segback;
 
 #ifdef _DEBUG
-	if (seg->linedef - lines < 4)
+	if (seg->linedef->Index() == 1)
 	{
 		int a = 0;
 	}
@@ -1465,6 +1424,8 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 	// note: we always have a valid sidedef and linedef reference when getting here.
 
 	this->seg = seg;
+	vertindex = 0;
+	vertcount = 0;
 
 	if ((seg->sidedef->Flags & WALLF_POLYOBJ) && seg->backsector)
 	{
@@ -1475,8 +1436,8 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 	else
 	{
 		// Need these for aligning the textures
-		realfront = &sectors[frontsector->sectornum];
-		realback = backsector ? &sectors[backsector->sectornum] : NULL;
+		realfront = &level.sectors[frontsector->sectornum];
+		realback = backsector ? &level.sectors[backsector->sectornum] : NULL;
 		segfront = frontsector;
 		segback = backsector;
 	}
@@ -1554,8 +1515,8 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 	RenderStyle = STYLE_Normal;
 	gltexture = NULL;
 
-	topflat = frontsector->GetTexture(sector_t::ceiling);	// for glowing textures. These must be saved because
-	bottomflat = frontsector->GetTexture(sector_t::floor);	// the sector passed here might be a temporary copy.
+
+	if (gl_GetWallGlow(frontsector, topglowcolor, bottomglowcolor)) flags |= GLWF_GLOW;
 	topplane = frontsector->ceilingplane;
 	bottomplane = frontsector->floorplane;
 
@@ -1587,7 +1548,7 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 			zbottom[1] = zfloor[1];
 			PutPortal(PORTALTYPE_LINETOLINE);
 		}
-		else if (seg->linedef->portaltransferred > 0)
+		else if (seg->linedef->GetTransferredPortal())
 		{
 			SkyLine(frontsector, seg->linedef);
 		}
@@ -1664,7 +1625,10 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 
 
 		/* mid texture */
-		bool drawfogboundary = gl_CheckFog(frontsector, backsector);
+		bool isportal = seg->linedef->isVisualPortal() && seg->sidedef == seg->linedef->sidedef[0];
+		sector_t *backsec = isportal? seg->linedef->getPortalDestination()->frontsector : backsector;
+
+		bool drawfogboundary = gl_CheckFog(frontsector, backsec);
 		FTexture *tex = TexMan(seg->sidedef->GetTexture(side_t::mid));
 		if (tex != NULL)
 		{
@@ -1682,7 +1646,7 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 				fch1, fch2, ffh1, ffh2, bch1, bch2, bfh1, bfh2);
 		}
 
-		if (seg->linedef->isVisualPortal() && seg->sidedef == seg->linedef->sidedef[0])
+		if (isportal)
 		{
 			lineportal = linePortalToGL[seg->linedef->portalindex];
 			ztop[0] = bch1;
@@ -1758,6 +1722,9 @@ void GLWall::ProcessLowerMiniseg(seg_t *seg, sector_t * frontsector, sector_t * 
 
 	float ffh = frontsector->GetPlaneTexZ(sector_t::floor);
 	float bfh = backsector->GetPlaneTexZ(sector_t::floor);
+
+	vertindex = 0;
+	vertcount = 0;
 	if (bfh > ffh)
 	{
 		this->seg = seg;
@@ -1785,8 +1752,7 @@ void GLWall::ProcessLowerMiniseg(seg_t *seg, sector_t * frontsector, sector_t * 
 		RenderStyle = STYLE_Normal;
 		Colormap = frontsector->ColorMap;
 
-		topflat = frontsector->GetTexture(sector_t::ceiling);	// for glowing textures
-		bottomflat = frontsector->GetTexture(sector_t::floor);
+		if (gl_GetWallGlow(frontsector, topglowcolor, bottomglowcolor)) flags |= GLWF_GLOW;
 		topplane = frontsector->ceilingplane;
 		bottomplane = frontsector->floorplane;
 		dynlightindex = -1;

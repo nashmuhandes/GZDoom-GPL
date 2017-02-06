@@ -38,7 +38,9 @@
 #include "doomdef.h"
 #include "sc_man.h"
 #include "s_sound.h"
+#include "p_acs.h"
 #include "textures/textures.h"
+#include "resourcefiles/file_zip.h"
 
 struct level_info_t;
 struct cluster_info_t;
@@ -108,6 +110,7 @@ struct FMapInfoParser
 	void ParseAMColors(bool);
 	FName CheckEndSequence();
 	FName ParseEndGame();
+	void ParseDamageDefinition();
 };
 
 #define DEFINE_MAP_OPTION(name, old) \
@@ -145,7 +148,7 @@ enum ELevelFlags : unsigned int
 	LEVEL_MONSTERSTELEFRAG		= 0x00000400,
 	LEVEL_ACTOWNSPECIAL			= 0x00000800,
 	LEVEL_SNDSEQTOTALCTRL		= 0x00001000,
-	LEVEL_FORCENOSKYSTRETCH		= 0x00002000,
+	LEVEL_FORCETILEDSKY		= 0x00002000,
 
 	LEVEL_CROUCH_NO				= 0x00004000,
 	LEVEL_JUMP_NO				= 0x00008000,
@@ -223,8 +226,6 @@ enum ELevelFlags : unsigned int
 };
 
 
-struct acsdefered_t;
-
 struct FSpecialAction
 {
 	FName Type;					// this is initialized before the actors...
@@ -232,7 +233,6 @@ struct FSpecialAction
 	int Args[5];				// must allow 16 bit tags for 666 & 667!
 };
 
-class FCompressedMemFile;
 class DScroller;
 
 class FScanner;
@@ -260,7 +260,7 @@ struct FOptionalMapinfoDataPtr
 typedef TMap<FName, FOptionalMapinfoDataPtr> FOptData;
 typedef TMap<int, FName> FMusicMap;
 
-enum EMapType
+enum EMapType : int
 {
 	MAPTYPE_UNKNOWN = 0,
 	MAPTYPE_DOOM,
@@ -295,9 +295,8 @@ struct level_info_t
 	FString		LevelName;
 	SBYTE		WallVertLight, WallHorizLight;
 	int			musicorder;
-	FCompressedMemFile	*snapshot;
-	DWORD		snapshotVer;
-	struct acsdefered_t *defered;
+	FCompressedBuffer	Snapshot;
+	TArray<acsdefered_t> deferred;
 	float		skyspeed1;
 	float		skyspeed2;
 	DWORD		fadeto;
@@ -346,14 +345,16 @@ struct level_info_t
 	}
 	~level_info_t()
 	{
-		ClearSnapshot(); 
+		Snapshot.Clean();
 		ClearDefered();
 	}
 	void Reset();
 	bool isValid();
 	FString LookupLevelName ();
-	void ClearSnapshot();
-	void ClearDefered();
+	void ClearDefered()
+	{
+		deferred.Clear();
+	}
 	level_info_t *CheckLevelRedirect ();
 
 	template<class T>
@@ -373,81 +374,6 @@ struct level_info_t
 		}
 		else return NULL;
 	}
-};
-
-// [RH] These get zeroed every tic and are updated by thinkers.
-struct FSectorScrollValues
-{
-	DVector2 Scroll;
-};
-
-struct FLevelLocals
-{
-	void Tick ();
-	void AddScroller (int secnum);
-
-	int			time;			// time in the hub
-	int			maptime;		// time in the map
-	int			totaltime;		// time in the game
-	int			starttime;
-	int			partime;
-	int			sucktime;
-
-	level_info_t *info;
-	int			cluster;
-	int			clusterflags;
-	int			levelnum;
-	int			lumpnum;
-	FString		LevelName;
-	FString		MapName;			// the lump name (E1M1, MAP01, etc)
-	FString		NextMap;			// go here when using the regular exit
-	FString		NextSecretMap;		// map to go to when used secret exit
-	EMapType	maptype;
-
-	DWORD		flags;
-	DWORD		flags2;
-	DWORD		flags3;
-
-	DWORD		fadeto;					// The color the palette fades to (usually black)
-	DWORD		outsidefog;				// The fog for sectors with sky ceilings
-
-	FString		Music;
-	int			musicorder;
-	int			cdtrack;
-	unsigned int cdid;
-	FTextureID	skytexture1;
-	FTextureID	skytexture2;
-
-	float		skyspeed1;				// Scrolling speed of sky textures, in pixels per ms
-	float		skyspeed2;
-
-	int			total_secrets;
-	int			found_secrets;
-
-	int			total_items;
-	int			found_items;
-
-	int			total_monsters;
-	int			killed_monsters;
-
-	double		gravity;
-	double		aircontrol;
-	double		airfriction;
-	int			airsupply;
-	int			DefaultEnvironment;		// Default sound environment.
-
-	FSectorScrollValues	*Scrolls;		// NULL if no DScrollers in this level
-
-	SBYTE		WallVertLight;			// Light diffs for vert/horiz walls
-	SBYTE		WallHorizLight;
-
-	bool		FromSnapshot;			// The current map was restored from a snapshot
-
-	double		teamdamage;
-
-	bool		IsJumpingAllowed() const;
-	bool		IsCrouchingAllowed() const;
-	bool		IsFreelookAllowed() const;
 };
 
 
@@ -477,8 +403,7 @@ struct cluster_info_t
 #define CLUSTER_LOOKUPENTERTEXT	0x00000020	// Enter text is the name of a language string
 #define CLUSTER_LOOKUPNAME		0x00000040	// Name is the name of a language string
 #define CLUSTER_LOOKUPCLUSTERNAME 0x00000080	// Cluster name is the name of a language string
-
-extern FLevelLocals level;
+#define CLUSTER_ALLOWINTERMISSION 0x00000100  // Allow intermissions between levels in a hub.
 
 extern TArray<level_info_t> wadlevelinfos;
 extern TArray<cluster_info_t> wadclusterinfos;
@@ -537,9 +462,10 @@ void G_ClearSnapshots (void);
 void P_RemoveDefereds ();
 void G_SnapshotLevel (void);
 void G_UnSnapshotLevel (bool keepPlayers);
-struct PNGHandle;
-void G_ReadSnapshots (PNGHandle *png);
-void G_WriteSnapshots (FILE *file);
+void G_ReadSnapshots (FResourceFile *);
+void G_WriteSnapshots (TArray<FString> &, TArray<FCompressedBuffer> &);
+void G_WriteVisited(FSerializer &arc);
+void G_ReadVisited(FSerializer &arc);
 void G_ClearHubInfo();
 
 enum ESkillProperty

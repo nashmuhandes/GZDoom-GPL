@@ -259,7 +259,7 @@ void DBot::ThinkForMove (ticcmd_t *cmd)
 				r = pr_botmove();
 				if (r < 128)
 				{
-					TThinkerIterator<AInventory> it (STAT_INVENTORY, bglobal.firstthing);
+					TThinkerIterator<AInventory> it (MAX_STATNUM+1, bglobal.firstthing);
 					AInventory *item = it.Next();
 
 					if (item != NULL || (item = it.Next()) != NULL)
@@ -345,12 +345,12 @@ void DBot::WhatToGet (AActor *item)
 			}
 		}
 	}
-	else if (item->IsKindOf (RUNTIME_CLASS(AAmmo)))
+	else if (item->IsKindOf (PClass::FindActor(NAME_Ammo)))
 	{
-		AAmmo *ammo = static_cast<AAmmo *> (item);
-		PClassActor *parent = ammo->GetParentAmmo ();
-		AInventory *holdingammo = player->mo->FindInventory (parent);
-
+		auto ac = PClass::FindActor(NAME_Ammo);
+		auto parent = item->GetClass();
+		while (parent->ParentClass != ac) parent = (PClassActor*)(parent->ParentClass);
+		AInventory *holdingammo = player->mo->FindInventory(parent);
 		if (holdingammo != NULL && holdingammo->Amount >= holdingammo->MaxAmount)
 		{
 			return;
@@ -358,7 +358,7 @@ void DBot::WhatToGet (AActor *item)
 	}
 	else if ((typeis (Megasphere) || typeis (Soulsphere) || typeis (HealthBonus)) && player->mo->health >= deh.MaxSoulsphere)
 		return;
-	else if (item->IsKindOf (RUNTIME_CLASS(AHealth)) && player->mo->health >= deh.MaxHealth /*MAXHEALTH*/)
+	else if (item->IsKindOf (PClass::FindActor(NAME_Health)) && player->mo->health >= player->mo->GetMaxHealth() + player->mo->stamina)
 		return;
 
 	if ((dest == NULL ||

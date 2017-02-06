@@ -236,11 +236,45 @@ public:
 	void Insert (size_t index, const char *instr);
 	void Insert (size_t index, const char *instr, size_t instrlen);
 
+	template<typename Func>
+	void ReplaceChars (Func IsOldChar, char newchar)
+	{
+		size_t i, j;
+
+		LockBuffer();
+		for (i = 0, j = Len(); i < j; ++i)
+		{
+			if (IsOldChar(Chars[i]))
+			{
+				Chars[i] = newchar;
+			}
+		}
+		UnlockBuffer();
+	}
+
 	void ReplaceChars (char oldchar, char newchar);
 	void ReplaceChars (const char *oldcharset, char newchar);
 
+	template<typename Func>
+	void StripChars (Func IsKillChar)
+	{
+		size_t read, write, mylen;
+
+		LockBuffer();
+		for (read = write = 0, mylen = Len(); read < mylen; ++read)
+		{
+			if (!IsKillChar(Chars[read]))
+			{
+				Chars[write++] = Chars[read];
+			}
+		}
+		Chars[write] = '\0';
+		ReallocBuffer (write);
+		UnlockBuffer();
+	}
+
 	void StripChars (char killchar);
-	void StripChars (const char *killchars);
+	void StripChars (const char *killcharset);
 
 	void MergeChars (char merger);
 	void MergeChars (char merger, char newchar);
@@ -268,6 +302,7 @@ public:
 	bool IsNotEmpty() const { return Len() != 0; }
 
 	void Truncate (long newlen);
+	void Remove(size_t index, size_t remlen);
 
 	int Compare (const FString &other) const { return strcmp (Chars, other.Chars); }
 	int Compare (const char *other) const { return strcmp (Chars, other); }
@@ -297,16 +332,74 @@ protected:
 
 	friend struct FStringData;
 
+public:
+	bool operator == (const FString &other) const
+	{
+		return Compare(other) == 0;
+	}
+
+	bool operator != (const FString &other) const
+	{
+		return Compare(other) != 0;
+	}
+
+	bool operator < (const FString &other) const
+	{
+		return Compare(other) < 0;
+	}
+
+	bool operator > (const FString &other) const
+	{
+		return Compare(other) > 0;
+	}
+
+	bool operator <= (const FString &other) const
+	{
+		return Compare(other) <= 0;
+	}
+
+	bool operator >= (const FString &other) const
+	{
+		return Compare(other) >= 0;
+	}
+
+	bool operator == (const char *) const = delete;
+	bool operator != (const char *) const = delete;
+	bool operator <  (const char *) const = delete;
+	bool operator >  (const char *) const = delete;
+	bool operator <= (const char *) const = delete;
+	bool operator >= (const char *) const = delete;
+
+	bool operator == (FName) const = delete;
+	bool operator != (FName) const = delete;
+	bool operator <  (FName) const = delete;
+	bool operator >  (FName) const = delete;
+	bool operator <= (FName) const = delete;
+	bool operator >= (FName) const = delete;
+
 private:
-	// Prevent these from being called as current practices are to use Compare.
-	// Without this FStrings will be accidentally compared against char* ptrs.
-	bool operator == (const FString &illegal) const;
-	bool operator != (const FString &illegal) const;
-	bool operator < (const FString &illegal) const;
-	bool operator > (const FString &illegal) const;
-	bool operator <= (const FString &illegal) const;
-	bool operator >= (const FString &illegal) const;
 };
+
+bool operator == (const char *, const FString &) = delete;
+bool operator != (const char *, const FString &) = delete;
+bool operator <  (const char *, const FString &) = delete;
+bool operator >  (const char *, const FString &) = delete;
+bool operator <= (const char *, const FString &) = delete;
+bool operator >= (const char *, const FString &) = delete;
+
+bool operator == (FName, const FString &) = delete;
+bool operator != (FName, const FString &) = delete;
+bool operator <  (FName, const FString &) = delete;
+bool operator >  (FName, const FString &) = delete;
+bool operator <= (FName, const FString &) = delete;
+bool operator >= (FName, const FString &) = delete;
+
+class FStringf : public FString
+{
+public:
+	FStringf(const char *fmt, ...);
+};
+
 
 namespace StringFormat
 {

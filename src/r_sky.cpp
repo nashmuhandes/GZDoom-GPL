@@ -35,6 +35,7 @@
 #include "r_utility.h"
 #include "v_text.h"
 #include "gi.h"
+#include "g_levellocals.h"
 
 //
 // sky mapping
@@ -49,11 +50,18 @@ bool		skystretch;
 fixed_t		sky1cyl,		sky2cyl;
 double		sky1pos,		sky2pos;
 
+CUSTOM_CVAR(Int, testskyoffset, 0, 0)
+{
+	R_InitSkyMap();
+}
+
 // [RH] Stretch sky texture if not taller than 128 pixels?
-CUSTOM_CVAR (Bool, r_stretchsky, true, CVAR_ARCHIVE)
+// Also now controls capped skies. 0 = normal, 1 = stretched, 2 = capped
+CUSTOM_CVAR (Int, r_skymode, 2, CVAR_ARCHIVE)
 {
 	R_InitSkyMap ();
 }
+
 
 int			freelookviewheight;
 
@@ -70,10 +78,20 @@ void R_InitSkyMap ()
 	int skyheight;
 	FTexture *skytex1, *skytex2;
 
+	// Do not allow the null texture which has no bitmap and will crash.
+	if (sky1texture.isNull())
+	{
+		sky1texture = TexMan.CheckForTexture("-noflat-", FTexture::TEX_Any);
+	}
+	if (sky2texture.isNull())
+	{
+		sky2texture = TexMan.CheckForTexture("-noflat-", FTexture::TEX_Any);
+	}
+
 	skytex1 = TexMan(sky1texture, true);
 	skytex2 = TexMan(sky2texture, true);
 
-	if (skytex1 == NULL)
+	if (skytex1 == nullptr)
 		return;
 
 	if ((level.flags & LEVEL_DOUBLESKY) && skytex1->GetHeight() != skytex2->GetHeight())
@@ -100,15 +118,15 @@ void R_InitSkyMap ()
 	skytexturemid = 0;
 	if (skyheight >= 128 && skyheight < 200)
 	{
-		skystretch = (r_stretchsky
+		skystretch = (r_skymode == 1
 					  && skyheight >= 128
 					  && level.IsFreelookAllowed()
-					  && !(level.flags & LEVEL_FORCENOSKYSTRETCH)) ? 1 : 0;
+					  && !(level.flags & LEVEL_FORCETILEDSKY)) ? 1 : 0;
 		skytexturemid = -28;
 	}
 	else if (skyheight > 200)
 	{
-		skytexturemid = (200 - skyheight) * skytex1->Scale.Y;
+		skytexturemid = (200 - skyheight) * skytex1->Scale.Y +((r_skymode == 2 && !(level.flags & LEVEL_FORCETILEDSKY)) ? skytex1->SkyOffset + testskyoffset : 0);
 	}
 
 	if (viewwidth != 0 && viewheight != 0)

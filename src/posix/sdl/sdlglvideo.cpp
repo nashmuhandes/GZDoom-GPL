@@ -29,7 +29,7 @@
 
 // TYPES -------------------------------------------------------------------
 
-IMPLEMENT_ABSTRACT_CLASS(SDLGLFB)
+IMPLEMENT_CLASS(SDLGLFB, true, false)
 
 struct MiniModeInfo
 {
@@ -49,11 +49,12 @@ EXTERN_CVAR (Float, Gamma)
 EXTERN_CVAR (Int, vid_adapter)
 EXTERN_CVAR (Int, vid_displaybits)
 EXTERN_CVAR (Int, vid_renderer)
-
+EXTERN_CVAR (Int, vid_maxfps)
+EXTERN_CVAR (Bool, cl_capfps)
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
-CUSTOM_CVAR(Int, gl_vid_multisample, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL )
+CUSTOM_CVAR(Bool, gl_debug, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	Printf("This won't take effect until " GAMENAME " is restarted.\n");
 }
@@ -130,10 +131,6 @@ SDLGLVideo::SDLGLVideo (int parm)
         fprintf( stderr, "Video initialization failed: %s\n",
              SDL_GetError( ) );
     }
-#ifndef	_WIN32
-	// mouse cursor is visible by default on linux systems, we disable it by default
-	SDL_ShowCursor (0);
-#endif
 }
 
 SDLGLVideo::~SDLGLVideo ()
@@ -289,6 +286,8 @@ bool SDLGLVideo::SetupPixelFormat(bool allowsoftware, int multisample)
 		SDL_GL_SetAttribute( SDL_GL_MULTISAMPLEBUFFERS, 1 );
 		SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, multisample );
 	}
+	if (gl_debug)
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 	return true;
 }
 
@@ -314,17 +313,13 @@ bool SDLGLVideo::InitHardware (bool allowsoftware, int multisample)
 SDLGLFB::SDLGLFB (void *, int width, int height, int, int, bool fullscreen)
 	: DFrameBuffer (width, height)
 {
-	static int localmultisample=-1;
-
-	if (localmultisample<0) localmultisample=gl_vid_multisample;
-
 	int i;
 	
 	m_Lock=0;
 
 	UpdatePending = false;
 	
-	if (!static_cast<SDLGLVideo*>(Video)->InitHardware(false, localmultisample))
+	if (!static_cast<SDLGLVideo*>(Video)->InitHardware(false, 0))
 	{
 		vid_renderer = 0;
 		return;
@@ -443,6 +438,16 @@ void SDLGLFB::SetVSync( bool vsync )
 #if defined (__APPLE__)
 	const GLint value = vsync ? 1 : 0;
 	CGLSetParameter( CGLGetCurrentContext(), kCGLCPSwapInterval, &value );
+#else
+	if (vsync)
+	{
+		if (SDL_GL_SetSwapInterval(-1) == -1)
+			SDL_GL_SetSwapInterval(1);
+	}
+	else
+	{
+		SDL_GL_SetSwapInterval(0);
+	}
 #endif
 }
 
@@ -452,6 +457,13 @@ void SDLGLFB::NewRefreshRate ()
 
 void SDLGLFB::SwapBuffers()
 {
+#ifndef __APPLE__
+	if (vid_maxfps && !cl_capfps)
+	{
+		SEMAPHORE_WAIT(FPSLimitSemaphore)
+	}
+#endif
+
 	SDL_GL_SwapWindow (Screen);
 }
 

@@ -47,19 +47,38 @@
 #include "stats.h"
 #include "a_sharedglobal.h"
 #include "dsectoreffect.h"
-#include "farchive.h"
+#include "serializer.h"
+#include "virtual.h"
+#include "g_levellocals.h"
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 ClassReg DObject::RegistrationInfo =
 {
-	NULL,							// MyClass
-	"DObject",						// Name
-	NULL,							// ParentType
-	NULL,							// Pointers
-	&DObject::InPlaceConstructor,	// ConstructNative
-	sizeof(DObject),				// SizeOf
-	CLASSREG_PClass,				// MetaClassNum
+	nullptr,								// MyClass
+	"DObject",								// Name
+	nullptr,								// ParentType
+	nullptr,								
+	nullptr,								// Pointers
+	&DObject::InPlaceConstructor,			// ConstructNative
+	nullptr,
+	sizeof(DObject),						// SizeOf
+	CLASSREG_PClass,						// MetaClassNum
 };
 _DECLARE_TI(DObject)
+
+// This bit is needed in the playsim - but give it a less crappy name.
+DEFINE_FIELD_BIT(DObject,ObjectFlags, bDestroyed, OF_EuthanizeMe)
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 CCMD (dumpactors)
 {
@@ -94,6 +113,12 @@ CCMD (dumpactors)
 		}
 	}
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 CCMD (dumpclasses)
 {
@@ -234,6 +259,12 @@ CCMD (dumpclasses)
 	Printf ("%d classes shown, %d omitted\n", shown, omitted);
 }
 
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 void DObject::InPlaceConstructor (void *mem)
 {
 	new ((EInPlace *)mem) DObject;
@@ -244,6 +275,7 @@ DObject::DObject ()
 {
 	ObjectFlags = GC::CurrentWhite & OF_WhiteBits;
 	ObjNext = GC::Root;
+	GCNext = nullptr;
 	GC::Root = this;
 }
 
@@ -252,8 +284,15 @@ DObject::DObject (PClass *inClass)
 {
 	ObjectFlags = GC::CurrentWhite & OF_WhiteBits;
 	ObjNext = GC::Root;
+	GCNext = nullptr;
 	GC::Root = this;
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 DObject::~DObject ()
 {
@@ -300,14 +339,47 @@ DObject::~DObject ()
 				}
 			}
 		}
-		type->DestroySpecials(this);
+		
+		if (nullptr != type)
+		{
+			type->DestroySpecials(this);
+		}
 	}
 }
 
-void DObject::Destroy ()
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void DObject:: Destroy ()
 {
+	// We cannot call the VM during shutdown because all the needed data has been or is in the process of being deleted.
+	if (PClass::bVMOperational)
+	{
+		IFVIRTUAL(DObject, OnDestroy)
+		{
+			VMValue params[1] = { (DObject*)this };
+			GlobalVMStack.Call(func, params, 1, nullptr, 0);
+		}
+	}
+	OnDestroy();
 	ObjectFlags = (ObjectFlags & ~OF_Fixed) | OF_EuthanizeMe;
 }
+
+DEFINE_ACTION_FUNCTION(DObject, Destroy)
+{
+	PARAM_SELF_PROLOGUE(DObject);
+	self->Destroy();
+	return 0;	
+}
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 size_t DObject::PropagateMark()
 {
@@ -329,6 +401,12 @@ size_t DObject::PropagateMark()
 	}
 	return 0;
 }
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
 
 size_t DObject::PointerSubstitution (DObject *old, DObject *notOld)
 {
@@ -352,7 +430,13 @@ size_t DObject::PointerSubstitution (DObject *old, DObject *notOld)
 	return changed;
 }
 
-size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld)
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld, bool scandefaults)
 {
 	DObject *probe;
 	size_t changed = 0;
@@ -365,6 +449,18 @@ size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld)
 		i++;
 		changed += probe->PointerSubstitution(old, notOld);
 		last = probe;
+	}
+
+	if (scandefaults)
+	{
+		for (auto p : PClassActor::AllActorClasses)
+		{
+			auto def = GetDefaultByType(p);
+			if (def != nullptr)
+			{
+				def->DObject::PointerSubstitution(old, notOld);
+			}
+		}
 	}
 
 	// Go through the bodyque.
@@ -384,29 +480,26 @@ size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld)
 			changed += players[i].FixPointers (old, notOld);
 	}
 
-	for (auto &s : sectorPortals)
+	for (auto &s : level.sectorPortals)
 	{
 		if (s.mSkybox == old)
 		{
-			s.mSkybox = static_cast<ASkyViewpoint*>(notOld);
+			s.mSkybox = static_cast<AActor*>(notOld);
 			changed++;
 		}
 	}
 
 	// Go through sectors.
-	if (sectors != NULL)
+	for (auto &sec : level.sectors)
 	{
-		for (i = 0; i < numsectors; ++i)
-		{
 #define SECTOR_CHECK(f,t) \
-	if (sectors[i].f.p == static_cast<t *>(old)) { sectors[i].f = static_cast<t *>(notOld); changed++; }
-			SECTOR_CHECK( SoundTarget, AActor );
-			SECTOR_CHECK( SecActTarget, ASectorAction );
-			SECTOR_CHECK( floordata, DSectorEffect );
-			SECTOR_CHECK( ceilingdata, DSectorEffect );
-			SECTOR_CHECK( lightingdata, DSectorEffect );
+if (sec.f.p == static_cast<t *>(old)) { sec.f = static_cast<t *>(notOld); changed++; }
+		SECTOR_CHECK( SoundTarget, AActor );
+		SECTOR_CHECK( SecActTarget, AActor );
+		SECTOR_CHECK( floordata, DSectorEffect );
+		SECTOR_CHECK( ceilingdata, DSectorEffect );
+		SECTOR_CHECK( lightingdata, DSectorEffect );
 #undef SECTOR_CHECK
-		}
 	}
 
 	// Go through bot stuff.
@@ -417,70 +510,41 @@ size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld)
 	return changed;
 }
 
-void DObject::SerializeUserVars(FArchive &arc)
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void DObject::SerializeUserVars(FSerializer &arc)
 {
-	PSymbolTable *symt;
-	FName varname;
-	DWORD count, j;
-	int *varloc = NULL;
-
-	symt = &GetClass()->Symbols;
-
-	if (arc.IsStoring())
+	if (arc.isWriting())
 	{
 		// Write all fields that aren't serialized by native code.
-		GetClass()->WriteValue(arc, this);
-	}
-	else if (SaveVersion >= 4535)
-	{
-		GetClass()->ReadValue(arc, this);
+		GetClass()->WriteAllFields(arc, this);
 	}
 	else
-	{ // Old version that only deals with ints
-		// Read user variables until 'None' is encountered.
-		arc << varname;
-		while (varname != NAME_None)
-		{
-			PField *var = dyn_cast<PField>(symt->FindSymbol(varname, true));
-			DWORD wanted = 0;
-
-			if (var != NULL && !(var->Flags & VARF_Native))
-			{
-				PType *type = var->Type;
-				PArray *arraytype = dyn_cast<PArray>(type);
-				if (arraytype != NULL)
-				{
-					wanted = arraytype->ElementCount;
-					type = arraytype->ElementType;
-				}
-				else
-				{
-					wanted = 1;
-				}
-				assert(type == TypeSInt32);
-				varloc = (int *)(reinterpret_cast<BYTE *>(this) + var->Offset);
-			}
-			count = arc.ReadCount();
-			for (j = 0; j < MIN(wanted, count); ++j)
-			{
-				arc << varloc[j];
-			}
-			if (wanted < count)
-			{
-				// Ignore remaining values from archive.
-				for (; j < count; ++j)
-				{
-					int foo;
-					arc << foo;
-				}
-			}
-			arc << varname;
-		}
+	{
+		GetClass()->ReadAllFields(arc, this);
 	}
 }
 
-void DObject::Serialize (FArchive &arc)
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void DObject::Serialize(FSerializer &arc)
 {
+	int fresh = ObjectFlags & OF_JustSpawned;
+	int freshdef = 0;
+	arc("justspawned", fresh, freshdef);
+	if (arc.isReading())
+	{
+		ObjectFlags |= fresh;
+	}
 	ObjectFlags |= OF_SerialSuccess;
 }
 
@@ -496,3 +560,22 @@ void DObject::CheckIfSerialized () const
 	}
 }
 
+
+DEFINE_ACTION_FUNCTION(DObject, GetClassName)
+{
+	PARAM_SELF_PROLOGUE(DObject);
+	ACTION_RETURN_INT(self->GetClass()->TypeName);
+}
+
+
+void *DObject::ScriptVar(FName field, PType *type)
+{
+	auto sym = dyn_cast<PField>(GetClass()->Symbols.FindSymbol(field, true));
+	if (sym && (sym->Type == type || type == nullptr))
+	{
+		return (((char*)this) + sym->Offset);
+	}
+	// This is only for internal use so I_Error is fine.
+	I_Error("Variable %s not found in %s\n", field.GetChars(), GetClass()->TypeName.GetChars());
+	return nullptr;
+}

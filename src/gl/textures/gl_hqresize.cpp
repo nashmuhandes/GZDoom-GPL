@@ -43,15 +43,32 @@
 #ifdef HAVE_MMX
 #include "gl/hqnx_asm/hqnx_asm.h"
 #endif
+#include "gl/xbr/xbrz.h"
+#include "gl/xbr/xbrz_old.h"
+
+#ifdef __APPLE__
+#	include <AvailabilityMacros.h>
+#	if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+#		define GZ_USE_LIBDISPATCH
+#	endif // MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+#endif // __APPLE__
+
+#ifdef GZ_USE_LIBDISPATCH
+#	include <dispatch/dispatch.h>
+#endif // GZ_USE_LIBDISPATCH
 
 CUSTOM_CVAR(Int, gl_texture_hqresize, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
-#ifdef HAVE_MMX
-	if (self < 0 || self > 9)
-#else
-	if (self < 0 || self > 6)
-#endif
+	if (self < 0 || self > 16)
+	{
 		self = 0;
+	}
+	#ifndef HAVE_MMX
+		// This is to allow the menu option to work properly so that these filters can be skipped while cycling through them.
+		if (self == 7) self = 10;
+		if (self == 8) self = 10;
+		if (self == 9) self = 6;
+	#endif
 	GLRenderer->FlushTextures();
 }
 
@@ -69,6 +86,22 @@ CUSTOM_CVAR(Int, gl_texture_hqresize_targets, 7, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 CVAR (Flag, gl_texture_hqresize_textures, gl_texture_hqresize_targets, 1);
 CVAR (Flag, gl_texture_hqresize_sprites, gl_texture_hqresize_targets, 2);
 CVAR (Flag, gl_texture_hqresize_fonts, gl_texture_hqresize_targets, 4);
+
+#ifdef GZ_USE_LIBDISPATCH
+CVAR(Bool, gl_texture_hqresize_multithread, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+CUSTOM_CVAR(Int, gl_texture_hqresize_mt_width, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 2)    self = 2;
+	if (self > 1024) self = 1024;
+}
+
+CUSTOM_CVAR(Int, gl_texture_hqresize_mt_height, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 2)    self = 2;
+	if (self > 1024) self = 1024;
+}
+#endif // GZ_USE_LIBDISPATCH
 
 
 static void scale2x ( uint32* inputBuffer, uint32* outputBuffer, int inWidth, int inHeight )
@@ -242,6 +275,54 @@ static unsigned char *hqNxHelper( void (*hqNxFunction) ( unsigned*, unsigned*, i
 }
 
 
+			
+static unsigned char *xbrzHelper( void (*xbrzFunction) ( size_t, const uint32_t*, uint32_t*, int, int, xbrz::ColorFormat, const xbrz::ScalerCfg&, int, int ),
+							  const int N,
+							  unsigned char *inputBuffer,
+							  const int inWidth,
+							  const int inHeight,
+							  int &outWidth,
+							  int &outHeight )
+{
+	outWidth = N * inWidth;
+	outHeight = N *inHeight;
+
+	unsigned char * newBuffer = new unsigned char[outWidth*outHeight*4];
+	
+#ifdef GZ_USE_LIBDISPATCH
+	const int thresholdWidth  = gl_texture_hqresize_mt_width;
+	const int thresholdHeight = gl_texture_hqresize_mt_height;
+	
+	if (gl_texture_hqresize_multithread
+		&& inWidth  > thresholdWidth
+		&& inHeight > thresholdHeight)
+	{
+		const dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+		
+		dispatch_apply(inHeight / thresholdHeight + 1, queue, ^(size_t sliceY)
+		{
+			xbrzFunction(N, reinterpret_cast<uint32_t*>(inputBuffer), reinterpret_cast<uint32_t*>(newBuffer),
+				inWidth, inHeight, xbrz::ARGB, xbrz::ScalerCfg(), sliceY * thresholdHeight, (sliceY + 1) * thresholdHeight);
+		});
+	}
+	else
+#endif // GZ_USE_LIBDISPATCH
+	{
+		xbrzFunction(N, reinterpret_cast<uint32_t*>(inputBuffer), reinterpret_cast<uint32_t*>(newBuffer),
+			inWidth, inHeight, xbrz::ARGB, xbrz::ScalerCfg(), 0, std::numeric_limits<int>::max());
+	}
+
+	delete[] inputBuffer;
+	return newBuffer;
+}
+
+static void xbrzOldScale(size_t factor, const uint32_t* src, uint32_t* trg, int srcWidth, int srcHeight, xbrz::ColorFormat colFmt, const xbrz::ScalerCfg& cfg, int yFirst, int yLast)
+{
+	static_assert(sizeof(xbrz::ScalerCfg) == sizeof(xbrz_old::ScalerCfg), "ScalerCfg classes have different layout");
+	xbrz_old::scale(factor, src, trg, srcWidth, srcHeight, reinterpret_cast<const xbrz_old::ScalerCfg&>(cfg), yFirst, yLast);
+}
+
+
 //===========================================================================
 // 
 // [BB] Upsamples the texture in inputBuffer, frees inputBuffer and returns
@@ -264,7 +345,7 @@ unsigned char *gl_CreateUpsampledTextureBuffer ( const FTexture *inputTexture, u
 		return inputBuffer;
 
 	// [BB] Don't upsample non-shader handled warped textures. Needs too much memory and time
-	if (gl.glslversion == 0 && inputTexture->bWarped)
+	if (gl.legacyMode && inputTexture->bWarped)
 		return inputBuffer;
 
 	// already scaled?
@@ -322,6 +403,16 @@ unsigned char *gl_CreateUpsampledTextureBuffer ( const FTexture *inputTexture, u
 		case 9:
 			return hqNxAsmHelper( &HQnX_asm::hq4x_32, 4, inputBuffer, inWidth, inHeight, outWidth, outHeight );
 #endif
+		case 10:
+		case 11:
+		case 12:
+			return xbrzHelper(xbrz::scale, type - 8, inputBuffer, inWidth, inHeight, outWidth, outHeight );
+			
+		case 13:
+		case 14:
+		case 15:
+			return xbrzHelper(xbrzOldScale, type - 11, inputBuffer, inWidth, inHeight, outWidth, outHeight );
+			
 		}
 	}
 	return inputBuffer;

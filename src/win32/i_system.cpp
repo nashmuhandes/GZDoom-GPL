@@ -4,6 +4,8 @@
 **
 **---------------------------------------------------------------------------
 ** Copyright 1998-2009 Randy Heit
+** Copyright (C) 2007-2012 Skulltag Development Team
+** Copyright (C) 2007-2016 Zandronum Development Team
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -17,6 +19,15 @@
 **    documentation and/or other materials provided with the distribution.
 ** 3. The name of the author may not be used to endorse or promote products
 **    derived from this software without specific prior written permission.
+** 4. Redistributions in any form must be accompanied by information on how to
+**    obtain complete source code for the software and any accompanying software
+**    that uses the software. The source code must either be included in the
+**    distribution or be available for no more than the cost of distribution plus
+**    a nominal fee, and must be freely redistributable under reasonable
+**    conditions. For an executable file, complete source code means the source
+**    code for all modules it contains. It does not include source code for
+**    modules or files that typically accompany the major components of the
+**    operating system on which the executable file runs.
 **
 ** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 ** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -86,6 +97,8 @@
 #include "textures/bitmap.h"
 #include "textures/textures.h"
 
+#include "optwin32.h"
+
 // MACROS ------------------------------------------------------------------
 
 #ifdef _MSC_VER
@@ -125,6 +138,12 @@ static void DestroyCustomCursor();
 
 EXTERN_CVAR(String, language);
 EXTERN_CVAR (Bool, queryiwad);
+// Used on welcome/IWAD screen.
+EXTERN_CVAR (Int, vid_renderer)
+EXTERN_CVAR (Bool, fullscreen)
+EXTERN_CVAR (Bool, disableautoload)
+EXTERN_CVAR (Bool, autoloadlights)
+EXTERN_CVAR (Bool, autoloadbrightmaps)
 
 extern HWND Window, ConWindow, GameTitleWindow;
 extern HANDLE StdOut;
@@ -797,6 +816,7 @@ void I_FatalError(const char *error, ...)
 		va_start(argptr, error);
 		myvsnprintf(errortext, MAX_ERRORTEXT, error, argptr);
 		va_end(argptr);
+		OutputDebugString(errortext);
 
 		// Record error to log (if logging)
 		if (Logfile)
@@ -832,6 +852,7 @@ void I_Error(const char *error, ...)
 	va_start(argptr, error);
 	myvsnprintf(errortext, MAX_ERRORTEXT, error, argptr);
 	va_end(argptr);
+	OutputDebugString(errortext);
 
 	throw CRecoverableError(errortext);
 }
@@ -1155,6 +1176,23 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			newlabel.Format(GAMESIG " %s: %s", GetVersionString(), label);
 			SetWindowText(hDlg, newlabel.GetChars());
 		}
+
+		// [SP] Upstreamed from Zandronum
+		char	szString[256];
+
+		// Check the current video settings.
+		SendDlgItemMessage( hDlg, vid_renderer ? IDC_WELCOME_OPENGL : IDC_WELCOME_SOFTWARE, BM_SETCHECK, BST_CHECKED, 0 );
+		SendDlgItemMessage( hDlg, IDC_WELCOME_FULLSCREEN, BM_SETCHECK, fullscreen ? BST_CHECKED : BST_UNCHECKED, 0 );
+
+		// [SP] This is our's
+		SendDlgItemMessage( hDlg, IDC_WELCOME_NOAUTOLOAD, BM_SETCHECK, disableautoload ? BST_CHECKED : BST_UNCHECKED, 0 );
+		SendDlgItemMessage( hDlg, IDC_WELCOME_LIGHTS, BM_SETCHECK, autoloadlights ? BST_CHECKED : BST_UNCHECKED, 0 );
+		SendDlgItemMessage( hDlg, IDC_WELCOME_BRIGHTMAPS, BM_SETCHECK, autoloadbrightmaps ? BST_CHECKED : BST_UNCHECKED, 0 );
+
+		// Set up our version string.
+		sprintf(szString, "Version %s.", GetVersionString());
+		SetDlgItemText (hDlg, IDC_WELCOME_VERSION, szString);
+
 		// Populate the list with all the IWADs found
 		ctrl = GetDlgItem(hDlg, IDC_IWADLIST);
 		for (i = 0; i < NumWads; i++)
@@ -1188,6 +1226,14 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			(LOWORD(wParam) == IDC_IWADLIST && HIWORD(wParam) == LBN_DBLCLK))
 		{
 			SetQueryIWad(hDlg);
+			// [SP] Upstreamed from Zandronum
+			vid_renderer = SendDlgItemMessage( hDlg, IDC_WELCOME_OPENGL, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+			fullscreen = SendDlgItemMessage( hDlg, IDC_WELCOME_FULLSCREEN, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+
+			// [SP] This is our's.
+			disableautoload = SendDlgItemMessage( hDlg, IDC_WELCOME_NOAUTOLOAD, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+			autoloadlights = SendDlgItemMessage( hDlg, IDC_WELCOME_LIGHTS, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+			autoloadbrightmaps = SendDlgItemMessage( hDlg, IDC_WELCOME_BRIGHTMAPS, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
 			ctrl = GetDlgItem (hDlg, IDC_IWADLIST);
 			EndDialog(hDlg, SendMessage (ctrl, LB_GETCURSEL, 0, 0));
 		}
@@ -1310,7 +1356,7 @@ static HCURSOR CreateCompatibleCursor(FTexture *cursorpic)
 	HDC dc = GetDC(NULL);
 	if (dc == NULL)
 	{
-		return false;
+		return nullptr;
 	}
 	HDC and_mask_dc = CreateCompatibleDC(dc);
 	HDC xor_mask_dc = CreateCompatibleDC(dc);
@@ -1371,10 +1417,16 @@ static HCURSOR CreateAlphaCursor(FTexture *cursorpic)
 	HBITMAP color, mono;
 	void *bits;
 
+	// Find closest integer scale factor for the monitor DPI
+	HDC screenDC = GetDC(0);
+	int dpi = GetDeviceCaps(screenDC, LOGPIXELSX);
+	int scale = MAX((dpi + 96 / 2 - 1) / 96, 1);
+	ReleaseDC(0, screenDC);
+
 	memset(&bi, 0, sizeof(bi));
 	bi.bV5Size = sizeof(bi);
-	bi.bV5Width = 32;
-	bi.bV5Height = 32;
+	bi.bV5Width = 32 * scale;
+	bi.bV5Height = 32 * scale;
 	bi.bV5Planes = 1;
 	bi.bV5BitCount = 32;
 	bi.bV5Compression = BI_BITFIELDS;
@@ -1399,7 +1451,7 @@ static HCURSOR CreateAlphaCursor(FTexture *cursorpic)
 	}
 
 	// Create an empty mask bitmap, since CreateIconIndirect requires this.
-	mono = CreateBitmap(32, 32, 1, 1, NULL);
+	mono = CreateBitmap(32 * scale, 32 * scale, 1, 1, NULL);
 	if (mono == NULL)
 	{
 		DeleteObject(color);
@@ -1409,10 +1461,29 @@ static HCURSOR CreateAlphaCursor(FTexture *cursorpic)
 	// Copy cursor to the color bitmap. Note that GDI bitmaps are upside down compared
 	// to normal conventions, so we create the FBitmap pointing at the last row and use
 	// a negative pitch so that CopyTrueColorPixels will use GDI's orientation.
-	FBitmap bmp((BYTE *)bits + 31*32*4, -32*4, 32, 32);
-	cursorpic->CopyTrueColorPixels(&bmp, 0, 0);
+	if (scale == 1)
+	{
+		FBitmap bmp((BYTE *)bits + 31 * 32 * 4, -32 * 4, 32, 32);
+		cursorpic->CopyTrueColorPixels(&bmp, 0, 0);
+	}
+	else
+	{
+		TArray<uint32_t> unscaled;
+		unscaled.Resize(32 * 32);
+		for (int i = 0; i < 32 * 32; i++) unscaled[i] = 0;
+		FBitmap bmp((BYTE *)&unscaled[0] + 31 * 32 * 4, -32 * 4, 32, 32);
+		cursorpic->CopyTrueColorPixels(&bmp, 0, 0);
+		uint32_t *scaled = (uint32_t*)bits;
+		for (int y = 0; y < 32 * scale; y++)
+		{
+			for (int x = 0; x < 32 * scale; x++)
+			{
+				scaled[x + y * 32 * scale] = unscaled[x / scale + y / scale * 32];
+			}
+		}
+	}
 
-	return CreateBitmapCursor(cursorpic->LeftOffset, cursorpic->TopOffset, mono, color);
+	return CreateBitmapCursor(cursorpic->LeftOffset * scale, cursorpic->TopOffset * scale, mono, color);
 }
 
 //==========================================================================
@@ -1714,20 +1785,19 @@ unsigned int I_MakeRNGSeed()
 
 FString I_GetLongPathName(FString shortpath)
 {
-	static TOptWin32Proc<DWORD (WINAPI*)(LPCTSTR, LPTSTR, DWORD)>
-		GetLongPathNameA("kernel32.dll", "GetLongPathNameA");
+	using OptWin32::GetLongPathNameA;
 
 	// Doesn't exist on NT4
-	if (GetLongPathName == NULL)
+	if (!GetLongPathNameA)
 		return shortpath;
 
-	DWORD buffsize = GetLongPathNameA.Call(shortpath.GetChars(), NULL, 0);
+	DWORD buffsize = GetLongPathNameA(shortpath.GetChars(), NULL, 0);
 	if (buffsize == 0)
 	{ // nothing to change (it doesn't exist, maybe?)
 		return shortpath;
 	}
 	TCHAR *buff = new TCHAR[buffsize];
-	DWORD buffsize2 = GetLongPathNameA.Call(shortpath.GetChars(), buff, buffsize);
+	DWORD buffsize2 = GetLongPathNameA(shortpath.GetChars(), buff, buffsize);
 	if (buffsize2 >= buffsize)
 	{ // Failure! Just return the short path
 		delete[] buff;

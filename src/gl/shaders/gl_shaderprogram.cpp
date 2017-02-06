@@ -1,40 +1,27 @@
+// 
+//---------------------------------------------------------------------------
+//
+// Copyright(C) 2016 Magnus Norddahl
+// All rights reserved.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see http://www.gnu.org/licenses/
+//
+//--------------------------------------------------------------------------
+//
 /*
 ** gl_shaderprogram.cpp
 ** GLSL shader program compile and link
-**
-**---------------------------------------------------------------------------
-** Copyright 2016 Magnus Norddahl
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-**
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-**---------------------------------------------------------------------------
 **
 */
 
@@ -46,10 +33,17 @@
 #include "vectors.h"
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_cvars.h"
+#include "gl/system/gl_debug.h"
 #include "gl/shaders/gl_shaderprogram.h"
 #include "w_wad.h"
 #include "i_system.h"
 #include "doomerrors.h"
+
+FShaderProgram::FShaderProgram()
+{
+	for (int i = 0; i < NumShaderTypes; i++)
+		mShaders[i] = 0;
+}
 
 //==========================================================================
 //
@@ -93,18 +87,25 @@ void FShaderProgram::CreateShader(ShaderType type)
 //
 //==========================================================================
 
-void FShaderProgram::Compile(ShaderType type, const char *lumpName)
+void FShaderProgram::Compile(ShaderType type, const char *lumpName, const char *defines, int maxGlslVersion)
+{
+	int lump = Wads.CheckNumForFullName(lumpName, 0);
+	if (lump == -1) I_FatalError("Unable to load '%s'", lumpName);
+	FString code = Wads.ReadLump(lump).GetString().GetChars();
+	Compile(type, lumpName, code, defines, maxGlslVersion);
+}
+
+void FShaderProgram::Compile(ShaderType type, const char *name, const FString &code, const char *defines, int maxGlslVersion)
 {
 	CreateShader(type);
 
 	const auto &handle = mShaders[type];
 
-	int lump = Wads.CheckNumForFullName(lumpName);
-	if (lump == -1) I_Error("Unable to load '%s'", lumpName);
-	FString code = Wads.ReadLump(lump).GetString().GetChars();
+	FGLDebug::LabelObject(GL_SHADER, handle, name);
 
-	int lengths[1] = { (int)code.Len() };
-	const char *sources[1] = { code.GetChars() };
+	FString patchedCode = PatchShader(type, code, defines, maxGlslVersion);
+	int lengths[1] = { (int)patchedCode.Len() };
+	const char *sources[1] = { patchedCode.GetChars() };
 	glShaderSource(handle, 1, sources, lengths);
 
 	glCompileShader(handle);
@@ -113,7 +114,7 @@ void FShaderProgram::Compile(ShaderType type, const char *lumpName)
 	glGetShaderiv(handle, GL_COMPILE_STATUS, &status);
 	if (status == GL_FALSE)
 	{
-		I_Error("Compile Shader '%s':\n%s\n", lumpName, GetShaderInfoLog(handle).GetChars());
+		I_FatalError("Compile Shader '%s':\n%s\n", name, GetShaderInfoLog(handle).GetChars());
 	}
 	else
 	{
@@ -142,13 +143,14 @@ void FShaderProgram::SetFragDataLocation(int index, const char *name)
 
 void FShaderProgram::Link(const char *name)
 {
+	FGLDebug::LabelObject(GL_PROGRAM, mProgram, name);
 	glLinkProgram(mProgram);
 
 	GLint status = 0;
 	glGetProgramiv(mProgram, GL_LINK_STATUS, &status);
 	if (status == GL_FALSE)
 	{
-		I_Error("Link Shader '%s':\n%s\n", name, GetProgramInfoLog(mProgram).GetChars());
+		I_FatalError("Link Shader '%s':\n%s\n", name, GetProgramInfoLog(mProgram).GetChars());
 	}
 }
 
@@ -203,3 +205,42 @@ FString FShaderProgram::GetProgramInfoLog(GLuint handle)
 	glGetProgramInfoLog(handle, 10000, &length, buffer);
 	return FString(buffer);
 }
+
+//==========================================================================
+//
+// Patches a shader to be compatible with the version of OpenGL in use
+//
+//==========================================================================
+
+FString FShaderProgram::PatchShader(ShaderType type, const FString &code, const char *defines, int maxGlslVersion)
+{
+	FString patchedCode;
+
+	int shaderVersion = MIN((int)round(gl.glslversion * 10) * 10, maxGlslVersion);
+	patchedCode.AppendFormat("#version %d\n", shaderVersion);
+
+	// TODO: Find some way to add extension requirements to the patching
+	//
+	// #extension GL_ARB_uniform_buffer_object : require
+	// #extension GL_ARB_shader_storage_buffer_object : require
+
+	if (defines)
+		patchedCode << defines;
+
+	// these settings are actually pointless but there seem to be some old ATI drivers that fail to compile the shader without setting the precision here.
+	patchedCode << "precision highp int;\n";
+	patchedCode << "precision highp float;\n";
+
+	patchedCode << "#line 1\n";
+	patchedCode << code;
+
+	return patchedCode;
+}
+
+//==========================================================================
+//
+// patch the shader source to work with 
+// GLSL 1.2 keywords and identifiers
+//
+//==========================================================================
+
