@@ -42,6 +42,8 @@
 #endif
 
 #include <limits.h>
+#include <tuple>
+#include <algorithm>
 #include "tarray.h"
 #include "name.h"
 #include "zstring.h"
@@ -156,12 +158,9 @@ struct PalEntry
 #endif
 };
 
-class PClassInventory;
-
 class FTextureID
 {
 	friend class FTextureManager;
-	friend FTextureID GetHUDIcon(PClassInventory *cls);
 	friend void R_InitSpriteDefs();
 
 public:

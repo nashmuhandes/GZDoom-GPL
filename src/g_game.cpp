@@ -1362,7 +1362,7 @@ void G_PlayerReborn (int player)
 	BYTE		currclass;
 	userinfo_t  userinfo;	// [RH] Save userinfo
 	APlayerPawn *actor;
-	PClassPlayerPawn *cls;
+	PClassActor *cls;
 	FString		log;
 	DBot		*Bot;		//Added by MC:
 

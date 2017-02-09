@@ -573,12 +573,9 @@ struct FLinkContext
 	msecnode_t *render_list = nullptr;
 };
 
-class DDropItem : public DObject
+struct FDropItem
 {
-	DECLARE_CLASS(DDropItem, DObject)
-	HAS_OBJECT_POINTERS
-public:
-	DDropItem *Next;
+	FDropItem *Next;
 	FName Name;
 	int Probability;
 	int Amount;
@@ -597,6 +594,7 @@ public:
 	AActor &operator= (const AActor &other);
 	~AActor ();
 
+	virtual void Finalize(FStateDefinitions &statedef);
 	virtual void OnDestroy() override;
 	virtual void Serialize(FSerializer &arc) override;
 	virtual void PostSerialize() override;
@@ -610,7 +608,7 @@ public:
 		return (AActor *)(this->GetClass()->Defaults);
 	}
 
-	DDropItem *GetDropItems() const;
+	FDropItem *GetDropItems() const;
 
 	// Return true if the monster should use a missile attack, false for melee
 	bool SuggestMissileAttack (double dist);
@@ -699,7 +697,7 @@ public:
 
 	// Give an item to the actor and pick it up.
 	// Returns true if the item pickup succeeded.
-	bool GiveInventory (PClassInventory *type, int amount, bool givecheat = false);
+	bool GiveInventory (PClassActor *type, int amount, bool givecheat = false);
 
 	// Removes the item from the inventory list.
 	virtual void RemoveInventory (AInventory *item);
@@ -736,7 +734,7 @@ public:
 	AInventory *FirstInv ();
 
 	// Tries to give the actor some ammo.
-	bool GiveAmmo (PClassInventory *type, int amount);
+	bool GiveAmmo (PClassActor *type, int amount);
 
 	// Destroys all the inventory the actor is holding.
 	void DestroyAllInventory ();
@@ -973,7 +971,7 @@ public:
 	{
 		SetOrigin(Pos() + vel, true);
 	}
-	void SetOrigin(double x, double y, double z, bool moving);
+	virtual void SetOrigin(double x, double y, double z, bool moving);
 	void SetOrigin(const DVector3 & npos, bool moving)
 	{
 		SetOrigin(npos.X, npos.Y, npos.Z, moving);

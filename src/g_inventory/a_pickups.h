@@ -9,7 +9,6 @@
 
 class player_t;
 class FConfigFile;
-class PClassPlayerPawn;
 struct visstyle_t;
 
 /************************************************************************/
@@ -50,28 +49,13 @@ enum
 };
 
 
-class PClassInventory : public PClassActor
-{
-	DECLARE_CLASS(PClassInventory, PClassActor)
-public:
-	PClassInventory();
-	virtual void DeriveData(PClass *newclass);
-	virtual size_t PointerSubstitution(DObject *oldclass, DObject *newclass);
-	void Finalize(FStateDefinitions &statedef);
-
-	FString PickupMsg;
-	int GiveQuest;			// Optionally give one of the quest items.
-	FTextureID AltHUDIcon;
-	TArray<PClassPlayerPawn *> RestrictedToPlayerClass;
-	TArray<PClassPlayerPawn *> ForbiddenToPlayerClass;
-};
-
 class AInventory : public AActor
 {
-	DECLARE_CLASS_WITH_META(AInventory, AActor, PClassInventory)
+	DECLARE_CLASS(AInventory, AActor)
 	HAS_OBJECT_POINTERS
 public:
 	
+	virtual void Finalize(FStateDefinitions &statedef) override;
 	virtual void Serialize(FSerializer &arc) override;
 	virtual void MarkPrecacheSounds() const override;
 	virtual void OnDestroy() override;
@@ -103,6 +87,8 @@ public:
 	FTextureID Icon;			// Icon to show on status bar or HUD
 	int DropTime;				// Countdown after dropping
 	PClassActor *SpawnPointClass;	// For respawning like Heretic's mace
+	int GiveQuest;				// Optionally give one of the quest items.
+	FTextureID AltHUDIcon;
 
 	DWORD ItemFlags;
 	PClassActor *PickupFlash;	// actor to spawn as pickup flash
