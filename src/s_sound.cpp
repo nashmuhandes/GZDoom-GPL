@@ -1261,6 +1261,7 @@ DEFINE_ACTION_FUNCTION(DObject, S_Sound)
 	PARAM_INT(channel);
 	PARAM_FLOAT_DEF(volume);
 	PARAM_FLOAT_DEF(attn);
+	S_Sound(channel, id, volume, attn);
 	return 0;
 }
 

@@ -79,6 +79,7 @@
 #ifndef NO_EDATA
 #include "edata.h"
 #endif
+#include "events.h"
 
 #include "fragglescript/t_fs.h"
 
@@ -3433,6 +3434,8 @@ extern polyblock_t **PolyBlockMap;
 
 void P_FreeLevelData ()
 {
+	// [ZZ] delete per-map event handlers
+	E_Shutdown(true);
 	MapThingsConverted.Clear();
 	MapThingsUserDataIndex.Clear();
 	MapThingsUserData.Clear();
@@ -3637,6 +3640,10 @@ void P_SetupLevel (const char *lumpname, int position)
 	{
 		I_Error("Unable to open map '%s'\n", lumpname);
 	}
+
+	// [ZZ] init per-map static handlers. we need to call this before everything is set up because otherwise scripts don't receive PlayerEntered event
+	//      (which happens at god-knows-what stage in this function, but definitely not the last part, because otherwise it'd work to put E_InitStaticHandlers before the player spawning)
+	E_InitStaticHandlers(true);
 
 	// generate a checksum for the level, to be included and checked with savegames.
 	map->GetChecksum(level.md5);
@@ -4195,6 +4202,8 @@ void P_Init ()
 
 static void P_Shutdown ()
 {
+	// [ZZ] delete global event handlers
+	E_Shutdown(false);
 	R_DeinitSpriteData ();
 	P_DeinitKeyMessages ();
 	P_FreeLevelData ();

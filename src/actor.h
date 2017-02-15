@@ -626,6 +626,9 @@ public:
 	virtual void BeginPlay();			// Called immediately after the actor is created
 	void CallBeginPlay();
 
+	// [ZZ] custom postbeginplay (calls E_WorldThingSpawned)
+	void CallPostBeginPlay() override;
+
 	void LevelSpawned();				// Called after BeginPlay if this actor was spawned by the world
 	void HandleSpawnFlags();	// Translates SpawnFlags into in-game flags.
 
@@ -1228,6 +1231,7 @@ public:
 	bool InStateSequence(FState * newstate, FState * basestate);
 	int GetTics(FState * newstate);
 	bool SetState (FState *newstate, bool nofunction=false);
+	virtual void SplashCheck();
 	virtual bool UpdateWaterLevel (bool splash=true);
 	bool isFast();
 	bool isSlow();

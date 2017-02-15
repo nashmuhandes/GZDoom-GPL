@@ -132,11 +132,11 @@ class OptionMenuItemCommand : OptionMenuItemSubmenu
 	override bool Activate()
 	{
 		// This needs to perform a few checks to prevent abuse  by malicious modders.
-		let m = Menu.GetCurrentMenu();
+		let m = OptionMenu(Menu.GetCurrentMenu());
 		// don't execute if no menu is active
 		if (m == null) return false;	
 		// don't execute if this item cannot be found in the current menu.
-		if (m.GetItem(mAction) != self) return false;
+		if (m.mDesc.GetItem(mAction) != self) return false;
 		Menu.MenuSound("menu/choose");
 		DoCommand(mAction);
 		return true;
@@ -396,16 +396,16 @@ class EnterKey : Menu
 		}
 	}
 
-	override bool Responder(InputEvent ev)
+	override bool Responder(InputEventData ev)
 	{
 		// This checks raw keys, not GUI keys.
-		if (ev.type == InputEvent.KeyDown)
+		if (ev.type == InputEventData.KeyDown)
 		{
 			mOwner.SendKey(ev.data1);
 			menuactive = Menu.On;
 			SetMenuMessage(0);
 			Close();
-			mParentMenu.MenuEvent((ev.data1 == InputEvent.KEY_ESCAPE)? Menu.MKEY_Abort : Menu.MKEY_Input, 0);
+			mParentMenu.MenuEvent((ev.data1 == InputEventData.KEY_ESCAPE)? Menu.MKEY_Abort : Menu.MKEY_Input, 0);
 			return true;
 		}
 		return false;
@@ -1197,6 +1197,7 @@ class OptionMenuItemNumberField : OptionMenuFieldBase
 			mCVar.SetFloat(value);
 			Menu.MenuSound("menu/change");
 		}
+		else return Super.MenuEvent(mkey, fromcontroller);
 
 		return true;
 	}

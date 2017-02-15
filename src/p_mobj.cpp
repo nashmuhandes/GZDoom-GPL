@@ -72,6 +72,7 @@
 #include "virtual.h"
 #include "g_levellocals.h"
 #include "a_morph.h"
+#include "events.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -4540,23 +4541,22 @@ void AActor::CheckSectorTransition(sector_t *oldsec)
 
 //==========================================================================
 //
-// AActor::UpdateWaterLevel
+// AActor::SplashCheck
 //
 // Returns true if actor should splash
 //
 //==========================================================================
 
-bool AActor::UpdateWaterLevel (bool dosplash)
+void AActor::SplashCheck()
 {
-	BYTE lastwaterlevel = waterlevel;
 	double fh = -FLT_MAX;
-	bool reset=false;
+	bool reset = false;
 
 	waterlevel = 0;
 
 	if (Sector == NULL)
 	{
-		return false;
+		return;
 	}
 
 	if (Sector->MoreFlags & SECF_UNDERWATER)	// intentionally not SECF_UNDERWATERMASK
@@ -4568,7 +4568,7 @@ bool AActor::UpdateWaterLevel (bool dosplash)
 		const sector_t *hsec = Sector->GetHeightSec();
 		if (hsec != NULL)
 		{
-			fh = hsec->floorplane.ZatPoint (this);
+			fh = hsec->floorplane.ZatPoint(this);
 			//if (hsec->MoreFlags & SECF_UNDERWATERMASK)	// also check Boom-style non-swimmable sectors
 			{
 				if (Z() < fh)
@@ -4584,7 +4584,7 @@ bool AActor::UpdateWaterLevel (bool dosplash)
 						}
 					}
 				}
-				else if (!(hsec->MoreFlags & SECF_FAKEFLOORONLY) && (Top() > hsec->ceilingplane.ZatPoint (this)))
+				else if (!(hsec->MoreFlags & SECF_FAKEFLOORONLY) && (Top() > hsec->ceilingplane.ZatPoint(this)))
 				{
 					waterlevel = 3;
 				}
@@ -4593,29 +4593,23 @@ bool AActor::UpdateWaterLevel (bool dosplash)
 					waterlevel = 0;
 				}
 			}
-			// even non-swimmable deep water must be checked here to do the splashes correctly
-			// But the water level must be reset when this function returns
-			if (!(hsec->MoreFlags&SECF_UNDERWATERMASK))
-			{
-				reset = true;
-			}
 		}
 		else
 		{
 			// Check 3D floors as well!
-			for(auto rover : Sector->e->XFloor.ffloors)
+			for (auto rover : Sector->e->XFloor.ffloors)
 			{
 				if (!(rover->flags & FF_EXISTS)) continue;
 				if (rover->flags & FF_SOLID) continue;
 
-				reset = !(rover->flags & FF_SWIMMABLE);
+				bool reset = !(rover->flags & FF_SWIMMABLE);
 				if (reset && rover->alpha == 0) continue;
-				double ff_bottom=rover->bottom.plane->ZatPoint(this);
-				double ff_top=rover->top.plane->ZatPoint(this);
+				double ff_bottom = rover->bottom.plane->ZatPoint(this);
+				double ff_top = rover->top.plane->ZatPoint(this);
 
-				if(ff_top <= Z() || ff_bottom > (Center())) continue;
-				
-				fh=ff_top;
+				if (ff_top <= Z() || ff_bottom > (Center())) continue;
+
+				fh = ff_top;
 				if (Z() < fh)
 				{
 					waterlevel = 1;
@@ -4634,17 +4628,106 @@ bool AActor::UpdateWaterLevel (bool dosplash)
 			}
 		}
 	}
-		
+
 	// some additional checks to make deep sectors like Boom's splash without setting
 	// the water flags. 
-	if (boomwaterlevel == 0 && waterlevel != 0 && dosplash) 
+	if (boomwaterlevel == 0 && waterlevel != 0)
 	{
 		P_HitWater(this, Sector, PosAtZ(fh), true);
 	}
 	boomwaterlevel = waterlevel;
-	if (reset)
+	return;
+}
+
+//==========================================================================
+//
+// AActor::UpdateWaterLevel
+//
+// Returns true if actor should splash
+//
+//==========================================================================
+
+bool AActor::UpdateWaterLevel(bool dosplash)
+{
+	if (dosplash) SplashCheck();
+
+	double fh = -FLT_MAX;
+	bool reset = false;
+
+	waterlevel = 0;
+
+	if (Sector == NULL)
 	{
-		waterlevel = lastwaterlevel;
+		return false;
+	}
+
+	if (Sector->MoreFlags & SECF_UNDERWATER)	// intentionally not SECF_UNDERWATERMASK
+	{
+		waterlevel = 3;
+	}
+	else
+	{
+		const sector_t *hsec = Sector->GetHeightSec();
+		if (hsec != NULL)
+		{
+			fh = hsec->floorplane.ZatPoint(this);
+			if (hsec->MoreFlags & SECF_UNDERWATERMASK)	// also check Boom-style non-swimmable sectors
+			{
+				if (Z() < fh)
+				{
+					waterlevel = 1;
+					if (Center() < fh)
+					{
+						waterlevel = 2;
+						if ((player && Z() + player->viewheight <= fh) ||
+							(Top() <= fh))
+						{
+							waterlevel = 3;
+						}
+					}
+				}
+				else if (!(hsec->MoreFlags & SECF_FAKEFLOORONLY) && (Top() > hsec->ceilingplane.ZatPoint(this)))
+				{
+					waterlevel = 3;
+				}
+				else
+				{
+					waterlevel = 0;
+				}
+			}
+		}
+		else
+		{
+			// Check 3D floors as well!
+			for (auto rover : Sector->e->XFloor.ffloors)
+			{
+				if (!(rover->flags & FF_EXISTS)) continue;
+				if (rover->flags & FF_SOLID) continue;
+				if (!(rover->flags & FF_SWIMMABLE)) continue;
+
+				double ff_bottom = rover->bottom.plane->ZatPoint(this);
+				double ff_top = rover->top.plane->ZatPoint(this);
+
+				if (ff_top <= Z() || ff_bottom > (Center())) continue;
+
+				fh = ff_top;
+				if (Z() < fh)
+				{
+					waterlevel = 1;
+					if (Center() < fh)
+					{
+						waterlevel = 2;
+						if ((player && Z() + player->viewheight <= fh) ||
+							(Top() <= fh))
+						{
+							waterlevel = 3;
+						}
+					}
+				}
+
+				break;
+			}
+		}
 	}
 	return false;	// we did the splash ourselves
 }
@@ -4974,6 +5057,12 @@ void AActor::PostBeginPlay ()
 	flags7 |= MF7_HANDLENODELAY;
 }
 
+void AActor::CallPostBeginPlay()
+{
+	Super::CallPostBeginPlay();
+	E_WorldThingSpawned(this);
+}
+
 void AActor::MarkPrecacheSounds() const
 {
 	SeeSound.MarkUsed();
@@ -5105,6 +5194,12 @@ void AActor::CallDeactivate(AActor *activator)
 
 void AActor::OnDestroy ()
 {
+	// [ZZ] call destroy event hook.
+	//      note that this differs from ThingSpawned in that you can actually override OnDestroy to avoid calling the hook.
+	//      but you can't really do that without utterly breaking the game, so it's ok.
+	//      note: if OnDestroy is ever made optional, E_WorldThingDestroyed should still be called for ANY thing.
+	E_WorldThingDestroyed(this);
+
 	ClearRenderSectorList();
 	ClearRenderLineList();
 
@@ -5417,6 +5512,9 @@ APlayerPawn *P_SpawnPlayer (FPlayerStart *mthing, int playernum, int flags)
 	{
 		if (state == PST_ENTER || (state == PST_LIVE && !savegamerestore))
 		{
+			// [ZZ] fire non-hub ENTER event
+			//      level.time is a hack to make sure that we don't call it on dummy player initialization during hub return.
+			if (!level.time) E_PlayerEntered(p - players, false);
 			FBehavior::StaticStartTypedScripts (SCRIPT_Enter, p->mo, true);
 		}
 		else if (state == PST_REBORN)
@@ -7463,6 +7561,9 @@ void AActor::Revive()
 	{
 		level.total_monsters++;
 	}
+
+	// [ZZ] resurrect hook
+	E_WorldThingRevived(this);
 }
 
 int AActor::GetGibHealth() const
