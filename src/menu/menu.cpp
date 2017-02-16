@@ -270,6 +270,7 @@ bool DMenu::CallMenuEvent(int mkey, bool fromcontroller)
 
 void DMenu::Close ()
 {
+	if (DMenu::CurrentMenu == nullptr) return;	// double closing can happen in the save menu.
 	assert(DMenu::CurrentMenu == this);
 	DMenu::CurrentMenu = mParentMenu;
 	Destroy();
@@ -1283,7 +1284,7 @@ DMenuItemBase * CreateOptionMenuItemSubmenu(const char *label, FName cmd, int ce
 
 DMenuItemBase * CreateOptionMenuItemControl(const char *label, FName cmd, FKeyBindings *bindings)
 {
-	auto c = PClass::FindClass("OptionMenuItemControl");
+	auto c = PClass::FindClass("OptionMenuItemControlBase");
 	auto p = c->CreateNew();
 	VMValue params[] = { p, FString(label), cmd.GetIndex(), bindings };
 	auto f = dyn_cast<PFunction>(c->Symbols.FindSymbol("Init", false));
