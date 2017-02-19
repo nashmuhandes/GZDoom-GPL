@@ -4204,7 +4204,6 @@ static void P_Shutdown ()
 {
 	// [ZZ] delete global event handlers
 	E_Shutdown(false);
-	R_DeinitSpriteData ();
 	P_DeinitKeyMessages ();
 	P_FreeLevelData ();
 	P_FreeExtraLevelData ();

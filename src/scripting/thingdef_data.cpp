@@ -57,6 +57,8 @@
 #include "v_video.h"
 #include "c_bind.h"
 #include "menu/menu.h"
+#include "teaminfo.h"
+#include "r_data/sprites.h"
 
 static TArray<FPropertyInfo*> properties;
 static TArray<AFuncDesc> AFTable;
@@ -759,6 +761,14 @@ void InitThingdef()
 	playerclassstruct->Size = sizeof(FPlayerClass);
 	playerclassstruct->Align = alignof(FPlayerClass);
 
+	auto playerskinstruct = NewNativeStruct("PlayerSkin", nullptr);
+	playerskinstruct->Size = sizeof(FPlayerSkin);
+	playerskinstruct->Align = alignof(FPlayerSkin);
+
+	auto teamstruct = NewNativeStruct("Team", nullptr);
+	teamstruct->Size = sizeof(FTeam);
+	teamstruct->Align = alignof(FTeam);
+
 	// set up the lines array in the sector struct. This is a bit messy because the type system is not prepared to handle a pointer to an array of pointers to a native struct even remotely well...
 	// As a result, the size has to be set to something large and arbritrary because it can change between maps. This will need some serious improvement when things get cleaned up.
 	sectorstruct->AddNativeField("lines", NewPointer(NewResizableArray(NewPointer(linestruct, false)), false), myoffsetof(sector_t, Lines), VARF_Native);
@@ -797,6 +807,14 @@ void InitThingdef()
 	auto plrcls = NewPointer(NewResizableArray(playerclassstruct), false);
 	PField *plrclsf = new PField("PlayerClasses", plrcls, VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&PlayerClasses);
 	Namespaces.GlobalNamespace->Symbols.AddSymbol(plrclsf);
+
+	auto plrskn = NewPointer(NewResizableArray(playerskinstruct), false);
+	PField *plrsknf = new PField("PlayerSkins", plrskn, VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&Skins);
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(plrsknf);
+
+	auto teamst = NewPointer(NewResizableArray(teamstruct), false);
+	PField *teamf = new PField("Teams", teamst, VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&Teams);
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(teamf);
 
 	auto bindcls = NewNativeStruct("KeyBindings", nullptr);
 	PField *binding = new PField("Bindings", bindcls, VARF_Native | VARF_Static, (intptr_t)&Bindings);
@@ -888,7 +906,13 @@ void InitThingdef()
 	fieldptr = new PField("OptionMenuSettings", NewStruct("FOptionMenuSettings", nullptr), VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&OptionSettings);
 	Namespaces.GlobalNamespace->Symbols.AddSymbol(fieldptr);
 
-	
+	fieldptr = new PField("gametic", TypeSInt32, VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&gametic);
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(fieldptr);
+
+	fieldptr = new PField("demoplayback", TypeSInt32, VARF_Native | VARF_Static | VARF_ReadOnly, (intptr_t)&demoplayback);
+	Namespaces.GlobalNamespace->Symbols.AddSymbol(fieldptr);
+
+
 	// Argh. It sucks when bad hacks need to be supported. WP_NOCHANGE is just a bogus pointer but it used everywhere as a special flag.
 	// It cannot be defined as constant because constants can either be numbers or strings but nothing else, so the only 'solution'
 	// is to create a static variable from it and reference that in the script. Yuck!!!
@@ -1195,10 +1219,20 @@ DEFINE_ACTION_FUNCTION(FStringStruct, Mid)
 	ACTION_RETURN_STRING(s);
 }
 
-DEFINE_ACTION_FUNCTION(FStringStruct, Len)
+DEFINE_ACTION_FUNCTION(FStringStruct, Left)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FString);
-	ACTION_RETURN_INT((int)self->Len());
+	PARAM_UINT(len);
+	FString s = self->Left(len);
+	ACTION_RETURN_STRING(s);
+}
+
+DEFINE_ACTION_FUNCTION(FStringStruct, Truncate)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FString);
+	PARAM_UINT(len);
+	self->Truncate(len);
+	return 0;
 }
 
 // CharAt and CharCodeAt is how JS does it, and JS is similar here in that it doesn't have char type as int.
@@ -1221,3 +1255,10 @@ DEFINE_ACTION_FUNCTION(FStringStruct, CharCodeAt)
 		ACTION_RETURN_INT(0);
 	ACTION_RETURN_INT((*self)[pos]);
 }
+
+DEFINE_ACTION_FUNCTION(FStringStruct, Filter)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FString);
+	ACTION_RETURN_STRING(strbin1(*self));
+}
+
