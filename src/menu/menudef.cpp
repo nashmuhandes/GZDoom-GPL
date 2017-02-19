@@ -301,11 +301,11 @@ static void ParseListMenuBody(FScanner &sc, DListMenuDescriptor *desc)
 			sc.MustGetString();
 			desc->mSelector = GetMenuTexture(sc.String);
 			sc.MustGetStringName(",");
-			sc.MustGetNumber();
-			desc->mSelectOfsX = sc.Number;
+			sc.MustGetFloat();
+			desc->mSelectOfsX = sc.Float;
 			sc.MustGetStringName(",");
-			sc.MustGetNumber();
-			desc->mSelectOfsY = sc.Number;
+			sc.MustGetFloat();
+			desc->mSelectOfsY = sc.Float;
 		}
 		else if (sc.Compare("Linespacing"))
 		{
@@ -314,11 +314,11 @@ static void ParseListMenuBody(FScanner &sc, DListMenuDescriptor *desc)
 		}
 		else if (sc.Compare("Position"))
 		{
-			sc.MustGetNumber();
-			desc->mXpos = sc.Number;
+			sc.MustGetFloat();
+			desc->mXpos = sc.Float;
 			sc.MustGetStringName(",");
-			sc.MustGetNumber();
-			desc->mYpos = sc.Number;
+			sc.MustGetFloat();
+			desc->mYpos = sc.Float;
 		}
 		else if (sc.Compare("Centermenu"))
 		{
@@ -969,13 +969,13 @@ static void BuildEpisodeMenu()
 		if ((*desc)->IsKindOf(RUNTIME_CLASS(DListMenuDescriptor)))
 		{
 			DListMenuDescriptor *ld = static_cast<DListMenuDescriptor*>(*desc);
-			int posy = ld->mYpos;
+			int posy = (int)ld->mYpos;
 			int topy = posy;
 
 			// Get lowest y coordinate of any static item in the menu
 			for(unsigned i = 0; i < ld->mItems.Size(); i++)
 			{
-				int y = ld->mItems[i]->GetY();
+				int y = (int)ld->mItems[i]->GetY();
 				if (y < topy) topy = y;
 			}
 
@@ -1069,13 +1069,13 @@ static void BuildPlayerclassMenu()
 			// add player display
 			ld->mSelectedItem = ld->mItems.Size();
 			
-			int posy = ld->mYpos;
+			int posy = (int)ld->mYpos;
 			int topy = posy;
 
 			// Get lowest y coordinate of any static item in the menu
 			for(unsigned i = 0; i < ld->mItems.Size(); i++)
 			{
-				int y = ld->mItems[i]->GetY();
+				int y = (int)ld->mItems[i]->GetY();
 				if (y < topy) topy = y;
 			}
 
@@ -1329,8 +1329,8 @@ void M_StartupSkillMenu(FGameStartup *gs)
 		if ((*desc)->IsKindOf(RUNTIME_CLASS(DListMenuDescriptor)))
 		{
 			DListMenuDescriptor *ld = static_cast<DListMenuDescriptor*>(*desc);
-			int x = ld->mXpos;
-			int y = ld->mYpos;
+			int x = (int)ld->mXpos;
+			int y = (int)ld->mYpos;
 
 			// Delete previous contents
 			for(unsigned i=0; i<ld->mItems.Size(); i++)
@@ -1359,7 +1359,7 @@ void M_StartupSkillMenu(FGameStartup *gs)
 				// Get lowest y coordinate of any static item in the menu
 				for(unsigned i = 0; i < ld->mItems.Size(); i++)
 				{
-					int y = ld->mItems[i]->GetY();
+					int y = (int)ld->mItems[i]->GetY();
 					if (y < topy) topy = y;
 				}
 
@@ -1376,7 +1376,7 @@ void M_StartupSkillMenu(FGameStartup *gs)
 						{
 							ld->mItems[i]->OffsetPositionY(topdelta);
 						}
-						y = ld->mYpos = posy - topdelta;
+						ld->mYpos = y = posy - topdelta;
 					}
 				}
 				else
