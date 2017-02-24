@@ -56,7 +56,7 @@ struct event_t
 };
 
  
-typedef enum
+enum gameaction_t : int
 {
 	ga_nothing,
 	ga_loadlevel,
@@ -76,7 +76,7 @@ typedef enum
 	ga_screenshot,
 	ga_togglemap,
 	ga_fullconsole,
-} gameaction_t;
+};
 
 
 

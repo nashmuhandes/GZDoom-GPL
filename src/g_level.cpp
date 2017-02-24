@@ -776,7 +776,7 @@ void G_DoCompleted (void)
 		AM_Stop ();
 
 	wminfo.finished_ep = level.cluster - 1;
-	wminfo.LName0 = TexMan[TexMan.CheckForTexture(level.info->PName, FTexture::TEX_MiscPatch)];
+	wminfo.LName0 = TexMan.CheckForTexture(level.info->PName, FTexture::TEX_MiscPatch);
 	wminfo.current = level.MapName;
 
 	if (deathmatch &&
@@ -792,12 +792,12 @@ void G_DoCompleted (void)
 		if (nextinfo == NULL || strncmp (nextlevel, "enDSeQ", 6) == 0)
 		{
 			wminfo.next = nextlevel;
-			wminfo.LName1 = NULL;
+			wminfo.LName1.SetInvalid();
 		}
 		else
 		{
 			wminfo.next = nextinfo->MapName;
-			wminfo.LName1 = TexMan[TexMan.CheckForTexture(nextinfo->PName, FTexture::TEX_MiscPatch)];
+			wminfo.LName1 = TexMan.CheckForTexture(nextinfo->PName, FTexture::TEX_MiscPatch);
 		}
 	}
 
@@ -816,7 +816,6 @@ void G_DoCompleted (void)
 
 	for (i=0 ; i<MAXPLAYERS ; i++)
 	{
-		wminfo.plyr[i].in = playeringame[i];
 		wminfo.plyr[i].skills = players[i].killcount;
 		wminfo.plyr[i].sitems = players[i].itemcount;
 		wminfo.plyr[i].ssecret = players[i].secretcount;

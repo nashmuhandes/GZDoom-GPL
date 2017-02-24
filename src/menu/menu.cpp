@@ -411,6 +411,11 @@ void M_SetMenu(FName menu, int param)
 		C_DoCommand("menu_quit");
 		return;
 
+	case NAME_EndGameMenu:
+		// The separate menu class no longer exists but the name still needs support for existing mods.
+		void ActivateEndGameMenu();
+		ActivateEndGameMenu();
+		return;
 	}
 
 	// End of special checks
@@ -491,7 +496,7 @@ DEFINE_ACTION_FUNCTION(DMenu, SetMenu)
 {
 	PARAM_PROLOGUE;
 	PARAM_NAME(menu);
-	PARAM_INT(mparam);
+	PARAM_INT_DEF(mparam);
 	M_SetMenu(menu, mparam);
 	return 0;
 }
