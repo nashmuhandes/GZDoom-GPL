@@ -2709,6 +2709,7 @@ void D_DoomMain (void)
 		// clean up game state
 		ST_Clear();
 		D_ErrorCleanup ();
+		DThinker::DestroyThinkersInList(STAT_STATIC);
 		P_FreeLevelData();
 		P_FreeExtraLevelData();
 
