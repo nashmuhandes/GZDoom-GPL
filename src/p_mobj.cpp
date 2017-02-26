@@ -903,8 +903,7 @@ bool AActor::TakeInventory(PClassActor *itemclass, int amount, bool fromdecorate
 	// Do not take ammo if the "no take infinite/take as ammo depletion" flag is set
 	// and infinite ammo is on
 	if (notakeinfinite &&
-	((dmflags & DF_INFINITE_AMMO) || (player && player->cheats & CF_INFINITEAMMO)) &&
-		item->IsKindOf(NAME_Ammo))
+	((dmflags & DF_INFINITE_AMMO) || (player && FindInventory(NAME_PowerInfiniteAmmo))) && item->IsKindOf(NAME_Ammo))
 	{
 		// Nothing to do here, except maybe res = false;? Would it make sense?
 		result = false;
@@ -4439,7 +4438,8 @@ void AActor::Tick ()
 				return; 		// freed itself
 		}
 	}
-	else
+
+	if (tics == -1 || state->GetCanRaise())
 	{
 		int respawn_monsters = G_SkillProperty(SKILLP_Respawn);
 		// check for nightmare respawn
