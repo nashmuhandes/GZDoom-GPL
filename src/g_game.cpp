@@ -348,6 +348,10 @@ CCMD (weapnext)
 		StatusBar->AttachMessage(new DHUDMessageFadeOut(SmallFont, SendItemUse->GetTag(),
 			1.5f, 0.90f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
 	}
+	if (SendItemUse != players[consoleplayer].ReadyWeapon)
+	{
+		S_Sound(CHAN_AUTO, "misc/weaponchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (weapprev)
@@ -359,6 +363,10 @@ CCMD (weapprev)
 		StatusBar->AttachMessage(new DHUDMessageFadeOut(SmallFont, SendItemUse->GetTag(),
 			1.5f, 0.90f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
 	}
+	if (SendItemUse != players[consoleplayer].ReadyWeapon)
+	{
+		S_Sound(CHAN_AUTO, "misc/weaponchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (invnext)
@@ -368,6 +376,7 @@ CCMD (invnext)
 	if (who == NULL)
 		return;
 
+	auto old = who->InvSel;
 	if (who->InvSel != NULL)
 	{
 		if ((next = who->InvSel->NextInv()) != NULL)
@@ -391,6 +400,10 @@ CCMD (invnext)
 			1.5f, 0.80f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
 	}
 	who->player->inventorytics = 5*TICRATE;
+	if (old != who->InvSel)
+	{
+		S_Sound(CHAN_AUTO, "misc/invchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (invprev)
@@ -400,6 +413,7 @@ CCMD (invprev)
 	if (who == NULL)
 		return;
 
+	auto old = who->InvSel;
 	if (who->InvSel != NULL)
 	{
 		if ((item = who->InvSel->PrevInv()) != NULL)
@@ -421,6 +435,10 @@ CCMD (invprev)
 			1.5f, 0.80f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
 	}
 	who->player->inventorytics = 5*TICRATE;
+	if (old != who->InvSel)
+	{
+		S_Sound(CHAN_AUTO, "misc/invchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (invuseall)
