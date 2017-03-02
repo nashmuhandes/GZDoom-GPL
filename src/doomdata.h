@@ -360,7 +360,7 @@ struct FMapThing
 	double		Alpha;
 	DWORD		fillcolor;
 	DVector2	Scale;
-	int			health;
+	double		Health;
 	int			score;
 	short		pitch;
 	short		roll;

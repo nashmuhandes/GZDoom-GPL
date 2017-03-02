@@ -2282,9 +2282,9 @@ bool P_TryMove(AActor *thing, const DVector2 &pos,
 			}
 #endif
 		}
-		if (!(thing->flags & MF_TELEPORT) && !(thing->flags3 & MF3_FLOORHUGGER))
+		if (!(thing->flags & MF_TELEPORT) && (!(thing->flags3 & MF3_FLOORHUGGER) || thing->flags5 & MF5_NODROPOFF))
 		{
-			if ((thing->flags & MF_MISSILE) && !(thing->flags6 & MF6_STEPMISSILE) && tm.floorz > thing->Z())
+			if ((thing->flags & MF_MISSILE) && !(thing->flags6 & MF6_STEPMISSILE) && tm.floorz > thing->Z() && !(thing->flags3 & MF3_FLOORHUGGER))
 			{ // [RH] Don't let normal missiles climb steps
 				goto pushline;
 			}
@@ -2773,13 +2773,13 @@ bool P_CheckMove(AActor *thing, const DVector2 &pos, int flags)
 			if (thing->Top() > tm.ceilingz)
 				return false;
 		}
-		if (!(thing->flags & MF_TELEPORT) && !(thing->flags3 & MF3_FLOORHUGGER))
+		if (!(thing->flags & MF_TELEPORT) && (!(thing->flags3 & MF3_FLOORHUGGER) || thing->flags5 & MF5_NODROPOFF))
 		{
 			if (tm.floorz - newz > thing->MaxStepHeight)
 			{ // too big a step up
 				return false;
 			}
-			else if ((thing->flags & MF_MISSILE) && !(thing->flags6 & MF6_STEPMISSILE) && tm.floorz > newz)
+			else if ((thing->flags & MF_MISSILE) && !(thing->flags6 & MF6_STEPMISSILE) && tm.floorz > newz && !(thing->flags3 & MF3_FLOORHUGGER))
 			{ // [RH] Don't let normal missiles climb steps
 				return false;
 			}
@@ -4804,7 +4804,7 @@ void P_TraceBleed(int damage, const DVector3 &pos, AActor *actor, DAngle angle, 
 		{
 			if (bleedtrace.HitType == TRACE_HitWall)
 			{
-				PalEntry bloodcolor = actor->GetBloodColor();
+				PalEntry bloodcolor = actor->BloodColor;
 				if (bloodcolor != 0)
 				{
 					bloodcolor.r >>= 1;	// the full color is too bright for blood decals
@@ -5681,7 +5681,7 @@ int P_RadiusAttack(AActor *bombspot, AActor *bombsource, int bombdamage, int bom
 			{
 				points = points * splashfactor;
 			}
-			points *= thing->GetClass()->RDFactor;
+			points *= thing->RadiusDamageFactor;
 
 			double check = int(points) * bombdamage;
 			// points and bombdamage should be the same sign (the double cast of 'points' is needed to prevent overflows and incorrect values slipping through.)
@@ -5760,7 +5760,7 @@ int P_RadiusAttack(AActor *bombspot, AActor *bombsource, int bombdamage, int bom
 				dist = clamp<double>(dist - fulldamagedistance, 0, dist);
 				int damage = Scale(bombdamage, bombdistance - int(dist), bombdistance);
 
-				double factor = splashfactor * thing->GetClass()->RDFactor;
+				double factor = splashfactor * thing->RadiusDamageFactor;
 				damage = int(damage * factor);
 				if (damage > 0 || (bombspot->flags7 & MF7_FORCEZERORADIUSDMG))
 				{
@@ -5995,7 +5995,6 @@ void P_DoCrunch(AActor *thing, FChangePosition *cpos)
 		{
 			if (!(thing->flags&MF_NOBLOOD))
 			{
-				PalEntry bloodcolor = thing->GetBloodColor();
 				PClassActor *bloodcls = thing->GetBloodType();
 				
 				P_TraceBleed (newdam > 0 ? newdam : cpos->crushchange, thing);
@@ -6007,9 +6006,9 @@ void P_DoCrunch(AActor *thing, FChangePosition *cpos)
 
 					mo->Vel.X = pr_crunch.Random2() / 16.;
 					mo->Vel.Y = pr_crunch.Random2() / 16.;
-					if (bloodcolor != 0 && !(mo->flags2 & MF2_DONTTRANSLATE))
+					if (thing->BloodTranslation != 0 && !(mo->flags2 & MF2_DONTTRANSLATE))
 					{
-						mo->Translation = TRANSLATION(TRANSLATION_Blood, bloodcolor.a);
+						mo->Translation = thing->BloodTranslation;
 					}
 
 					if (!(cl_bloodtype <= 1)) mo->renderflags |= RF_INVISIBLE;
@@ -6018,7 +6017,7 @@ void P_DoCrunch(AActor *thing, FChangePosition *cpos)
 				DAngle an = (M_Random() - 128) * (360./256);
 				if (cl_bloodtype >= 1)
 				{
-					P_DrawSplash2(32,  thing->PosPlusZ(thing->Height/2), an, 2, bloodcolor);
+					P_DrawSplash2(32,  thing->PosPlusZ(thing->Height/2), an, 2, thing->BloodColor);
 				}
 			}
 			if (thing->CrushPainSound != 0 && !S_GetSoundPlayingInfo(thing, thing->CrushPainSound))

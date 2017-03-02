@@ -1330,7 +1330,7 @@ static int CheckInventory (AActor *activator, const char *type, bool max)
 		if (max)
 		{
 			if (activator->IsKindOf (RUNTIME_CLASS (APlayerPawn)))
-				return static_cast<APlayerPawn *>(activator)->MaxHealth;
+				return static_cast<APlayerPawn *>(activator)->GetMaxHealth();
 			else
 				return activator->SpawnHealth();
 		}
@@ -3939,7 +3939,7 @@ int DLevelScript::GetActorProperty (int tid, int property)
 	case APROP_Dormant:		return !!(actor->flags2 & MF2_DORMANT);
 	case APROP_SpawnHealth: if (actor->IsKindOf (RUNTIME_CLASS (APlayerPawn)))
 							{
-								return static_cast<APlayerPawn *>(actor)->MaxHealth;
+								return static_cast<APlayerPawn *>(actor)->GetMaxHealth();
 							}
 							else
 							{
@@ -4232,7 +4232,7 @@ enum
 	SOUND_Howl,
 };
 
-static FSoundID GetActorSound(const AActor *actor, int soundtype)
+static FSoundID GetActorSound(AActor *actor, int soundtype)
 {
 	switch (soundtype)
 	{
@@ -4245,7 +4245,7 @@ static FSoundID GetActorSound(const AActor *actor, int soundtype)
 	case SOUND_Bounce:		return actor->BounceSound;
 	case SOUND_WallBounce:	return actor->WallBounceSound;
 	case SOUND_CrushPain:	return actor->CrushPainSound;
-	case SOUND_Howl:		return actor->GetClass()->HowlSound;
+	case SOUND_Howl:		return actor->SoundVar(NAME_HowlSound);
 	default:				return 0;
 	}
 }
@@ -4367,6 +4367,10 @@ enum EACSFunctions
 	ACSF_SetTranslation,
 	ACSF_GetActorFloorTexture,
 	ACSF_GetActorFloorTerrain,
+	ACSF_StrArg,
+	ACSF_Floor,
+	ACSF_Round,
+	ACSF_Ceil,
 
 
 	// OpenGL stuff
@@ -6087,7 +6091,17 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			break;
 		}
 
+		case ACSF_StrArg:
+			return -FName(FBehavior::StaticLookupString(args[0]));
 
+		case ACSF_Floor:
+			return args[0] & ~0xffff;
+
+		case ACSF_Ceil:
+			return (args[0] & ~0xffff) + 0x10000;
+
+		case ACSF_Round:
+			return (args[0] + 32768) & ~0xffff;
 
 		default:
 			break;

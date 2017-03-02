@@ -94,7 +94,7 @@ public:
 	virtual bool UpdateWaterLevel (bool splash) override;
 
 	bool ResetAirSupply (bool playgasp = true);
-	int GetMaxHealth() const;
+	int GetMaxHealth(bool withupgrades = false) const;
 	void TweakSpeeds (double &forwardmove, double &sidemove);
 	void MorphPlayerThink ();
 	void ActivateMorphWeapon ();
@@ -126,6 +126,8 @@ public:
 
 	int			crouchsprite;
 	int			MaxHealth;
+	int			BonusHealth;
+
 	int			MugShotMaxHealth;
 	int			RunHealth;
 	int			PlayerFlags;
@@ -160,8 +162,6 @@ public:
 	FNameNoInit Face;			// Doom status bar face (when used)
 	FNameNoInit Portrait;
 	FNameNoInit Slot[10];
-	FNameNoInit InvulMode;
-	FNameNoInit HealingRadiusType;
 	double HexenArmor[5];
 	BYTE ColorRangeStart;	// Skin color range
 	BYTE ColorRangeEnd;
@@ -530,6 +530,9 @@ public:
 	DPSprite *GetPSprite(PSPLayers layer);
 
 	bool GetPainFlash(FName type, PalEntry *color) const;
+
+	// [Nash] set player FOV
+	void SetFOV(float fov);
 };
 
 // Bookkeeping on players - state.
