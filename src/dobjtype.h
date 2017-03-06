@@ -37,6 +37,10 @@ enum
 	VARF_Transient		= (1<<17),  // don't auto serialize field.
 	VARF_Meta			= (1<<18),	// static class data (by necessity read only.)
 	VARF_VarArg			= (1<<19),  // [ZZ] vararg: don't typecheck values after ... in function signature
+	VARF_UI				= (1<<20),  // [ZZ] ui: object is ui-scope only (can't modify playsim)
+	VARF_Play			= (1<<21),  // [ZZ] play: object is playsim-scope only (can't access ui)
+	VARF_VirtualScope	= (1<<22),  // [ZZ] virtualscope: object should use the scope of the particular class it's being used with (methods only)
+	VARF_ClearScope		= (1<<23),  // [ZZ] clearscope: this method ignores the member access chain that leads to it and is always plain data.
 };
 
 // An action function -------------------------------------------------------
@@ -87,6 +91,7 @@ public:
 	PSymbolTable	Symbols;
 	bool			MemberOnly = false;		// type may only be used as a struct/class member but not as a local variable or function argument.
 	FString			mDescriptiveName;
+	VersionInfo		mVersion = { 0,0,0 };
 	BYTE loadOp, storeOp, moveOp, RegType, RegCount;
 
 	PType(unsigned int size = 1, unsigned int align = 1);
@@ -362,12 +367,25 @@ public:
 class PPointer : public PBasicType
 {
 	DECLARE_CLASS(PPointer, PBasicType);
+
 public:
+	typedef void(*WriteHandler)(FSerializer &ar, const char *key, const void *addr);
+	typedef bool(*ReadHandler)(FSerializer &ar, const char *key, void *addr);
+
 	PPointer();
 	PPointer(PType *pointsat, bool isconst = false);
 
 	PType *PointedType;
 	bool IsConst;
+
+	WriteHandler writer = nullptr;
+	ReadHandler reader = nullptr;
+
+	void InstallHandlers(WriteHandler w, ReadHandler r)
+	{
+		writer = w;
+		reader = r;
+	}
 
 	virtual bool IsMatch(intptr_t id1, intptr_t id2) const;
 	virtual void GetTypeIDs(intptr_t &id1, intptr_t &id2) const;

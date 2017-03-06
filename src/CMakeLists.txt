@@ -992,6 +992,7 @@ set (PCH_SOURCES
 	scripting/thingdef_data.cpp
 	scripting/thingdef_properties.cpp
 	scripting/backend/codegen.cpp
+	scripting/backend/scopebarrier.cpp
 	scripting/backend/dynarrays.cpp
 	scripting/backend/vmbuilder.cpp
 	scripting/backend/vmdisasm.cpp

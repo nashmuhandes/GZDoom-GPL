@@ -1316,6 +1316,7 @@ PPointer::PPointer(PType *pointsat, bool isconst)
 : PBasicType(sizeof(void *), alignof(void *)), PointedType(pointsat), IsConst(isconst)
 {
 	mDescriptiveName.Format("Pointer<%s%s>", pointsat->DescriptiveName(), isconst? "readonly " : "");
+	mVersion = pointsat->mVersion;
 	SetOps();
 }
 
@@ -1396,6 +1397,10 @@ void PPointer::WriteValue(FSerializer &ar, const char *key,const void *addr) con
 			ar(key, *(DObject **)addr);
 		}
 	}
+	else if (writer != nullptr)
+	{
+		writer(ar, key, addr);
+	}
 	else
 	{
 		I_Error("Attempt to save pointer to unhandled type %s", PointedType->DescriptiveName());
@@ -1424,6 +1429,10 @@ bool PPointer::ReadValue(FSerializer &ar, const char *key, void *addr) const
 			::Serialize(ar, key, *(DObject **)addr, nullptr, &res);
 		}
 		return res;
+	}
+	else if (reader != nullptr)
+	{
+		return reader(ar, key, addr);
 	}
 	return false;
 }
@@ -1510,6 +1519,7 @@ PClassPointer::PClassPointer(PClass *restrict)
 	// This means we can use the cheapoer non-barriered opcodes here.
 	loadOp = OP_LOS;
 	storeOp = OP_SP;
+	mVersion = restrict->mVersion;
 }
 
 //==========================================================================
@@ -2514,6 +2524,14 @@ PField::PField(FName name, PType *type, DWORD flags, size_t offset, int bitvalue
 	else BitValue = -1;
 }
 
+VersionInfo PField::GetVersion()
+{
+	VersionInfo Highest = { 0,0,0 };
+	if (!(Flags & VARF_Deprecated)) Highest = mVersion;
+	if (Type->mVersion > Highest) Highest = Type->mVersion;
+	return Highest;
+}
+
 /* PProperty *****************************************************************/
 
 IMPLEMENT_CLASS(PProperty, false, false)
@@ -3138,6 +3156,9 @@ void PClass::Derive(PClass *newclass, FName name)
 	newclass->Symbols.SetParentTable(&this->Symbols);
 	newclass->TypeName = name;
 	newclass->mDescriptiveName.Format("Class<%s>", name.GetChars());
+	newclass->mVersion = mVersion;
+	newclass->MetaSize = MetaSize;
+
 }
 
 //==========================================================================
@@ -3284,7 +3305,6 @@ PClass *PClass::CreateDerivedClass(FName name, unsigned int size)
 	type->bRuntimeClass = true;
 	Derive(type, name);
 	type->Size = size;
-	type->MetaSize = MetaSize;
 	if (size != TentativeClass)
 	{
 		type->InitializeDefaults();

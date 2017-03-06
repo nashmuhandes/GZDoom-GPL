@@ -89,15 +89,25 @@ static const FLOP FxFlops[] =
 	{ NAME_TanH,	FLOP_TANH,		[](double v) { return g_tanh(v); } },
 };
 
+
 //==========================================================================
 //
 // FCompileContext
 //
 //==========================================================================
 
-FCompileContext::FCompileContext(PNamespace *cg, PFunction *fnc, PPrototype *ret, bool fromdecorate, int stateindex, int statecount, int lump) 
-	: ReturnProto(ret), Function(fnc), Class(nullptr), FromDecorate(fromdecorate), StateIndex(stateindex), StateCount(statecount), Lump(lump), CurGlobals(cg)
+FCompileContext::FCompileContext(PNamespace *cg, PFunction *fnc, PPrototype *ret, bool fromdecorate, int stateindex, int statecount, int lump, const VersionInfo &ver) 
+	: ReturnProto(ret), Function(fnc), Class(nullptr), FromDecorate(fromdecorate), StateIndex(stateindex), StateCount(statecount), Lump(lump), CurGlobals(cg), Version(ver)
 {
+	if (Version >= MakeVersion(2, 3))
+	{
+		VersionString.Format("ZScript version %d.%d.%d", Version.major, Version.minor, Version.revision);
+	}
+	else
+	{
+		VersionString =  "DECORATE";
+	}
+
 	if (fnc != nullptr) Class = fnc->OwningClass;
 }
 
@@ -167,7 +177,8 @@ void FCompileContext::CheckReturn(PPrototype *proto, FScriptPosition &pos)
 	}
 }
 
-bool FCompileContext::CheckReadOnly(int flags)
+// [ZZ] I find it really dumb that something called CheckReadOnly returns false for readonly. renamed.
+bool FCompileContext::CheckWritable(int flags)
 {
 	if (!(flags & VARF_ReadOnly)) return false;
 	if (!(flags & VARF_InternalAccess)) return true;
@@ -377,7 +388,7 @@ bool FxExpression::isConstant() const
 //
 //==========================================================================
 
-VMFunction *FxExpression::GetDirectFunction()
+VMFunction *FxExpression::GetDirectFunction(const VersionInfo &ver)
 {
 	return nullptr;
 }
@@ -5023,6 +5034,7 @@ FxNew::FxNew(FxExpression *v)
 {
 	val = new FxClassTypeCast(NewClassPointer(RUNTIME_CLASS(DObject)), v, false);
 	ValueType = NewPointer(RUNTIME_CLASS(DObject));
+	CallingFunction = nullptr;
 }
 
 //==========================================================================
@@ -5047,6 +5059,7 @@ FxExpression *FxNew::Resolve(FCompileContext &ctx)
 	CHECKRESOLVED();
 	SAFE_RESOLVE(val, ctx);
 
+	CallingFunction = ctx.Function;
 	if (!val->ValueType->IsKindOf(RUNTIME_CLASS(PClassPointer)))
 	{
 		ScriptPosition.Message(MSG_ERROR, "Class type expected");
@@ -5056,8 +5069,28 @@ FxExpression *FxNew::Resolve(FCompileContext &ctx)
 	if (val->isConstant())
 	{
 		auto cls = static_cast<PClass *>(static_cast<FxConstant*>(val)->GetValue().GetPointer());
+		if (cls->ObjectFlags & OF_Abstract)
+		{
+			ScriptPosition.Message(MSG_ERROR, "Cannot instantiate abstract class %s", cls->TypeName.GetChars());
+			delete this;
+			return nullptr;
+		}
+
+		//
+		int outerside = ctx.Function && ctx.Function->Variants.Size() ? FScopeBarrier::SideFromFlags(ctx.Function->Variants[0].Flags) : FScopeBarrier::Side_Virtual;
+		if (outerside == FScopeBarrier::Side_Virtual)
+			outerside = FScopeBarrier::SideFromObjectFlags(ctx.Class->ObjectFlags);
+		int innerside = FScopeBarrier::SideFromObjectFlags(cls->ObjectFlags);
+		if ((outerside != innerside) && (innerside != FScopeBarrier::Side_PlainData)) // "cannot construct ui class ... from data context"
+		{
+			ScriptPosition.Message(MSG_ERROR, "Cannot construct %s class %s from %s context", FScopeBarrier::StringFromSide(innerside), cls->TypeName.GetChars(), FScopeBarrier::StringFromSide(outerside));
+			delete this;
+			return nullptr;
+		}
+
 		ValueType = NewPointer(cls);
 	}
+
 	return this;
 }
 
@@ -5072,7 +5105,7 @@ ExpEmit FxNew::Emit(VMFunctionBuilder *build)
 	ExpEmit from = val->Emit(build);
 	from.Free(build);
 	ExpEmit to(build, REGT_POINTER);
-	build->Emit(from.Konst ? OP_NEW_K : OP_NEW, to.RegNum, from.RegNum);
+	build->Emit(from.Konst ? OP_NEW_K : OP_NEW, to.RegNum, from.RegNum, build->GetConstantAddress(CallingFunction, ATAG_OBJECT));
 	return to;
 }
 
@@ -5932,6 +5965,15 @@ FxExpression *FxIdentifier::Resolve(FCompileContext& ctx)
 		}
 		else if (sym->IsKindOf(RUNTIME_CLASS(PField)))
 		{
+			PField *vsym = static_cast<PField*>(sym);
+
+			if (vsym->GetVersion() > ctx.Version)
+			{
+				ScriptPosition.Message(MSG_ERROR, "%s not accessible to %s", sym->SymbolName.GetChars(), ctx.VersionString.GetChars());
+				delete this;
+				return nullptr;
+			}
+
 			// internally defined global variable
 			ScriptPosition.Message(MSG_DEBUGLOG, "Resolving name '%s' as global variable\n", Identifier.GetChars());
 			newex = new FxGlobalVariable(static_cast<PField *>(sym), ScriptPosition);
@@ -5991,7 +6033,8 @@ FxExpression *FxIdentifier::ResolveMember(FCompileContext &ctx, PStruct *classct
 		if (!objtype->IsKindOf(RUNTIME_CLASS(PClassActor)))
 		{
 			ScriptPosition.Message(MSG_ERROR, "'Default' requires an actor type.");
-			delete this;
+			delete object;
+			object = nullptr;
 			return nullptr;
 		}
 
@@ -6013,20 +6056,65 @@ FxExpression *FxIdentifier::ResolveMember(FCompileContext &ctx, PStruct *classct
 		else if (sym->IsKindOf(RUNTIME_CLASS(PField)))
 		{
 			PField *vsym = static_cast<PField*>(sym);
+			if (vsym->GetVersion() > ctx.Version)
+			{
+				ScriptPosition.Message(MSG_ERROR, "%s not accessible to %s", sym->SymbolName.GetChars(), ctx.VersionString.GetChars());
+				delete object;
+				object = nullptr;
+				return nullptr;
+			}
+			if ((vsym->Flags & VARF_Deprecated) && sym->mVersion >= ctx.Version)
+			{
+				ScriptPosition.Message(MSG_WARNING, "Accessing deprecated member variable %s - deprecated since %d.%d.%d", sym->SymbolName.GetChars(), vsym->mVersion.major, vsym->mVersion.minor, vsym->mVersion.revision);
+				ScriptPosition.Message(MSG_WARNING, "Accessing deprecated member variable %s", vsym->SymbolName.GetChars());
+			}
 
 			// We have 4 cases to consider here:
-			// 1. The symbol is a static/meta member (not implemented yet) which is always accessible.
+			// 1. The symbol is a static/meta member which is always accessible.
 			// 2. This is a static function 
 			// 3. This is an action function with a restricted self pointer
 			// 4. This is a normal member or unrestricted action function.
-			if (vsym->Flags & VARF_Deprecated && !ctx.FromDecorate)
-			{
-				ScriptPosition.Message(MSG_WARNING, "Accessing deprecated member variable %s", vsym->SymbolName.GetChars());
-			}
 			if ((vsym->Flags & VARF_Private) && symtbl != &classctx->Symbols)
 			{
 				ScriptPosition.Message(MSG_ERROR, "Private member %s not accessible", vsym->SymbolName.GetChars());
+				delete object;
+				object = nullptr;
 				return nullptr;
+			}
+			PClass* cls_ctx = dyn_cast<PClass>(classctx);
+			PClass* cls_target = dyn_cast<PClass>(objtype);
+			// [ZZ] neither PSymbol, PField or PSymbolTable have the necessary information. so we need to do the more complex check here.
+			if (vsym->Flags & VARF_Protected)
+			{
+				// early break.
+				if (!cls_ctx || !cls_target)
+				{
+					ScriptPosition.Message(MSG_ERROR, "Protected member %s not accessible", vsym->SymbolName.GetChars());
+					delete object;
+					object = nullptr;
+					return nullptr;
+				}
+
+				// find the class that declared this field.
+				PClass* p = cls_target;
+				while (p)
+				{
+					if (&p->Symbols == symtbl)
+					{
+						cls_target = p;
+						break;
+					}
+
+					p = p->ParentClass;
+				}
+
+				if (!cls_ctx->IsDescendantOf(cls_target))
+				{
+					ScriptPosition.Message(MSG_ERROR, "Protected member %s not accessible", vsym->SymbolName.GetChars());
+					delete object;
+					object = nullptr;
+					return nullptr;
+				}
 			}
 
 			auto x = isclass ? new FxClassMember(object, vsym, ScriptPosition) : new FxStructMember(object, vsym, ScriptPosition);
@@ -6245,7 +6333,7 @@ FxExpression *FxLocalVariable::Resolve(FCompileContext &ctx)
 bool FxLocalVariable::RequestAddress(FCompileContext &ctx, bool *writable)
 {
 	AddressRequested = true;
-	if (writable != nullptr) *writable = !ctx.CheckReadOnly(Variable->VarFlags);
+	if (writable != nullptr) *writable = !ctx.CheckWritable(Variable->VarFlags);
 	return true;
 }
 	
@@ -6463,7 +6551,7 @@ FxGlobalVariable::FxGlobalVariable(PField* mem, const FScriptPosition &pos)
 bool FxGlobalVariable::RequestAddress(FCompileContext &ctx, bool *writable)
 {
 	AddressRequested = true;
-	if (writable != nullptr) *writable = AddressWritable && !ctx.CheckReadOnly(membervar->Flags);
+	if (writable != nullptr) *writable = AddressWritable && !ctx.CheckWritable(membervar->Flags);
 	return true;
 }
 
@@ -6653,7 +6741,7 @@ FxStackVariable::~FxStackVariable()
 bool FxStackVariable::RequestAddress(FCompileContext &ctx, bool *writable)
 {
 	AddressRequested = true;
-	if (writable != nullptr) *writable = AddressWritable && !ctx.CheckReadOnly(membervar->Flags);
+	if (writable != nullptr) *writable = AddressWritable && !ctx.CheckWritable(membervar->Flags);
 	return true;
 }
 
@@ -6751,8 +6839,28 @@ bool FxStructMember::RequestAddress(FCompileContext &ctx, bool *writable)
 		return false;
 	}
 	AddressRequested = true;
-	if (writable != nullptr) *writable = (AddressWritable && !ctx.CheckReadOnly(membervar->Flags) &&
-											(!classx->ValueType->IsKindOf(RUNTIME_CLASS(PPointer)) || !static_cast<PPointer*>(classx->ValueType)->IsConst));
+	if (writable != nullptr)
+	{
+		// [ZZ] original check.
+		bool bWritable = (AddressWritable && !ctx.CheckWritable(membervar->Flags) &&
+			(!classx->ValueType->IsKindOf(RUNTIME_CLASS(PPointer)) || !static_cast<PPointer*>(classx->ValueType)->IsConst));
+		// [ZZ] implement write barrier between different scopes
+		if (bWritable)
+		{
+			int outerflags = 0;
+			if (ctx.Function)
+			{
+				outerflags = ctx.Function->Variants[0].Flags;
+				if (((outerflags & (VARF_VirtualScope | VARF_Virtual)) == (VARF_VirtualScope | VARF_Virtual)) && ctx.Class)
+					outerflags = FScopeBarrier::FlagsFromSide(FScopeBarrier::SideFromObjectFlags(ctx.Class->ObjectFlags));
+			}
+			FScopeBarrier scopeBarrier(outerflags, FScopeBarrier::FlagsFromSide(BarrierSide), membervar->SymbolName.GetChars());
+			if (!scopeBarrier.writable)
+				bWritable = false;
+		}
+
+		*writable = bWritable;
+	}
 	return true;
 }
 
@@ -6772,7 +6880,7 @@ FxExpression *FxStructMember::Resolve(FCompileContext &ctx)
 		if (!classx->ValueType->IsKindOf(RUNTIME_CLASS(PPointer))
 			|| !static_cast<PPointer *>(classx->ValueType)->PointedType->IsKindOf(RUNTIME_CLASS(AActor)))
 		{
-			ScriptPosition.Message(MSG_ERROR, "'Default' requires an actor type.");
+			ScriptPosition.Message(MSG_ERROR, "'Default' requires an actor type");
 			delete this;
 			return nullptr;
 		}
@@ -6782,12 +6890,36 @@ FxExpression *FxStructMember::Resolve(FCompileContext &ctx)
 		return x->Resolve(ctx);
 	}
 
+	// [ZZ] support magic
+	int outerflags = 0;
+	if (ctx.Function)
+	{
+		outerflags = ctx.Function->Variants[0].Flags;
+		if (((outerflags & (VARF_VirtualScope | VARF_Virtual)) == (VARF_VirtualScope | VARF_Virtual)) && ctx.Class)
+			outerflags = FScopeBarrier::FlagsFromSide(FScopeBarrier::SideFromObjectFlags(ctx.Class->ObjectFlags));
+	}
+	FScopeBarrier scopeBarrier(outerflags, membervar->Flags, membervar->SymbolName.GetChars());
+	if (!scopeBarrier.readable)
+	{
+		ScriptPosition.Message(MSG_ERROR, "%s", scopeBarrier.readerror.GetChars());
+		delete this;
+		return nullptr;
+	}
+
+	BarrierSide = scopeBarrier.sidelast;
+	if (classx->ExprType == EFX_StructMember && ExprType == EFX_StructMember) // note: only do this for structs now
+	{
+		FxStructMember* pmember = (FxStructMember*)classx;
+		if (BarrierSide == FScopeBarrier::Side_PlainData && pmember)
+			BarrierSide = pmember->BarrierSide;
+	}
+
 	if (classx->ValueType->IsKindOf(RUNTIME_CLASS(PPointer)))
 	{
 		PPointer *ptrtype = dyn_cast<PPointer>(classx->ValueType);
 		if (ptrtype == nullptr || !ptrtype->PointedType->IsKindOf(RUNTIME_CLASS(PStruct)))
 		{
-			ScriptPosition.Message(MSG_ERROR, "Member variable requires a struct or class object.");
+			ScriptPosition.Message(MSG_ERROR, "Member variable requires a struct or class object");
 			delete this;
 			return nullptr;
 		}
@@ -6799,7 +6931,8 @@ FxExpression *FxStructMember::Resolve(FCompileContext &ctx)
 		{
 			auto parentfield = static_cast<FxMemberBase *>(classx)->membervar;
 			// PFields are garbage collected so this will be automatically taken care of later.
-			auto newfield = new PField(NAME_None, membervar->Type, membervar->Flags | parentfield->Flags, membervar->Offset + parentfield->Offset);
+			// [ZZ] call ChangeSideInFlags to ensure that we don't get ui+play
+			auto newfield = new PField(NAME_None, membervar->Type, FScopeBarrier::ChangeSideInFlags(membervar->Flags | parentfield->Flags, BarrierSide), membervar->Offset + parentfield->Offset);
 			newfield->BitValue = membervar->BitValue;
 			static_cast<FxMemberBase *>(classx)->membervar = newfield;
 			classx->isresolved = false;	// re-resolve the parent so it can also check if it can be optimized away.
@@ -6841,7 +6974,7 @@ FxExpression *FxStructMember::Resolve(FCompileContext &ctx)
 		{
 			if (!(classx->RequestAddress(ctx, &AddressWritable)))
 			{
-				ScriptPosition.Message(MSG_ERROR, "unable to dereference left side of %s", membervar->SymbolName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Unable to dereference left side of %s", membervar->SymbolName.GetChars());
 				delete this;
 				return nullptr;
 			}
@@ -7371,6 +7504,32 @@ FxExpression *FxFunctionCall::Resolve(FCompileContext& ctx)
 				return nullptr;
 			}
 
+			// [ZZ] validate call
+			PClass* cls = (PClass*)ctx.Class;
+			int outerflags = 0;
+			if (ctx.Function)
+			{
+				outerflags = ctx.Function->Variants[0].Flags;
+				if (((outerflags & (VARF_VirtualScope | VARF_Virtual)) == (VARF_VirtualScope | VARF_Virtual)) && ctx.Class)
+					outerflags = FScopeBarrier::FlagsFromSide(FScopeBarrier::SideFromObjectFlags(ctx.Class->ObjectFlags));
+			}
+			int innerflags = afd->Variants[0].Flags;
+			int innerside = FScopeBarrier::SideFromFlags(innerflags);
+			// [ZZ] check this at compile time. this would work for most legit cases.
+			if (innerside == FScopeBarrier::Side_Virtual)
+			{
+				innerside = FScopeBarrier::SideFromObjectFlags(cls->ObjectFlags);
+				innerflags = FScopeBarrier::FlagsFromSide(innerside);
+			}
+			FScopeBarrier scopeBarrier(outerflags, innerflags, MethodName.GetChars());
+			if (!scopeBarrier.callable)
+			{
+				ScriptPosition.Message(MSG_ERROR, "%s", scopeBarrier.callerror.GetChars());
+				delete this;
+				return nullptr;
+			}
+
+			// [ZZ] this is only checked for VARF_Methods in the other place. bug?
 			if (!CheckFunctionCompatiblity(ScriptPosition, ctx.Function, afd))
 			{
 				delete this;
@@ -7593,8 +7752,18 @@ FxExpression *FxFunctionCall::Resolve(FCompileContext& ctx)
 		break;
 
 	case NAME_New:
-		if (CheckArgSize(MethodName, ArgList, 1, 1, ScriptPosition))
+		if (CheckArgSize(MethodName, ArgList, 0, 1, ScriptPosition))
 		{
+			// [ZZ] allow implicit new() call to mean "create current class instance"
+			if (!ArgList.Size() && !ctx.Class->IsKindOf(RUNTIME_CLASS(PClass)))
+			{
+				ScriptPosition.Message(MSG_ERROR, "Cannot use implicit new() in a struct");
+				delete this;
+				return nullptr;
+			}
+			else if (!ArgList.Size())
+				ArgList.Push(new FxConstant((PClass*)ctx.Class, NewClassPointer((PClass*)ctx.Class), ScriptPosition));
+
 			func = new FxNew(ArgList[0]);
 			ArgList[0] = nullptr;
 		}
@@ -7651,13 +7820,14 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 	PStruct *cls;
 	bool staticonly = false;
 	bool novirtual = false;
+	bool isreadonly = false;
 
 	PStruct *ccls = nullptr;
 
 	if (ctx.Class == nullptr)
 	{
 		// There's no way that a member function call can resolve to a constant so abort right away.
-		ScriptPosition.Message(MSG_ERROR, "Expression is not constant.");
+		ScriptPosition.Message(MSG_ERROR, "Expression is not constant");
 		delete this;
 		return nullptr;
 	}
@@ -7666,7 +7836,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 	{
 		if (a == nullptr)
 		{
-			ScriptPosition.Message(MSG_ERROR, "Empty function argument.");
+			ScriptPosition.Message(MSG_ERROR, "Empty function argument");
 			delete this;
 			return nullptr;
 		}
@@ -7677,6 +7847,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 		auto id = static_cast<FxIdentifier *>(Self)->Identifier;
 		// If the left side is a class name for a static member function call it needs to be resolved manually 
 		// because the resulting value type would cause problems in nearly every other place where identifiers are being used.
+		// [ZZ] substitute ccls for String internal type.
 		if (id == NAME_String) ccls = TypeStringStruct;
 		else ccls = FindStructType(id, ctx);
 		if (ccls != nullptr) static_cast<FxIdentifier *>(Self)->noglobal = true;
@@ -7688,7 +7859,6 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 	{
 		if (ccls != nullptr)
 		{
-			// [ZZ] substitute ccls for String internal type.
 			if (!ccls->IsKindOf(RUNTIME_CLASS(PClass)) || static_cast<PClass *>(ccls)->bExported)
 			{
 				cls = ccls;
@@ -7717,6 +7887,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 								Self = new FxSelf(ScriptPosition);
 								Self->ValueType = NewPointer(cls);
 							}
+							else novirtual = false;
 						}
 					}
 				}
@@ -7757,7 +7928,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 		{
 			if (ArgList.Size() > 0)
 			{
-				ScriptPosition.Message(MSG_ERROR, "too many parameters in call to %s", MethodName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Too many parameters in call to %s", MethodName.GetChars());
 				delete this;
 				return nullptr;
 			}
@@ -7801,7 +7972,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 		{
 			if (ArgList.Size() > 0)
 			{
-				ScriptPosition.Message(MSG_ERROR, "too many parameters in call to %s", MethodName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Too many parameters in call to %s", MethodName.GetChars());
 				delete this;
 				return nullptr;
 			}
@@ -7895,7 +8066,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 		{
 			if (ArgList.Size() > 0)
 			{
-				ScriptPosition.Message(MSG_ERROR, "too many parameters in call to %s", MethodName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Too many parameters in call to %s", MethodName.GetChars());
 				delete this;
 				return nullptr;
 			}
@@ -7945,7 +8116,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 		auto x = new FxGetParentClass(Self);
 		return x->Resolve(ctx);
 	}
-	
+
 	if (Self->ValueType->IsKindOf(RUNTIME_CLASS(PPointer)) && !Self->ValueType->IsKindOf(RUNTIME_CLASS(PClassPointer)))
 	{
 		auto ptype = static_cast<PPointer *>(Self->ValueType)->PointedType;
@@ -7955,7 +8126,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 			{
 				if (ArgList.Size() > 0)
 				{
-					ScriptPosition.Message(MSG_ERROR, "too many parameters in call to %s", MethodName.GetChars());
+					ScriptPosition.Message(MSG_ERROR, "Too many parameters in call to %s", MethodName.GetChars());
 					delete this;
 					return nullptr;
 				}
@@ -7968,7 +8139,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 		}
 		else
 		{
-			ScriptPosition.Message(MSG_ERROR, "Left hand side of %s must point to a class object\n", MethodName.GetChars());
+			ScriptPosition.Message(MSG_ERROR, "Left hand side of %s must point to a class object", MethodName.GetChars());
 			delete this;
 			return nullptr;
 		}
@@ -7976,22 +8147,15 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 	else if (Self->ValueType->IsKindOf(RUNTIME_CLASS(PStruct)))
 	{
 		bool writable;
-		if (Self->RequestAddress(ctx, &writable) && writable)
-		{
-			cls = static_cast<PStruct*>(Self->ValueType);
-			Self->ValueType = NewPointer(Self->ValueType);
-		}
-		else
-		{
-			// Cannot be made writable so we cannot use its methods.
-			ScriptPosition.Message(MSG_ERROR, "Invalid expression on left hand side of %s\n", MethodName.GetChars());
-			delete this;
-			return nullptr;
-		}
+
+		// [ZZ] allow const method to be called on a readonly struct
+		isreadonly = !(Self->RequestAddress(ctx, &writable) && writable);
+		cls = static_cast<PStruct*>(Self->ValueType);
+		Self->ValueType = NewPointer(Self->ValueType);
 	}
 	else
 	{
-		ScriptPosition.Message(MSG_ERROR, "Invalid expression on left hand side of %s\n", MethodName.GetChars());
+		ScriptPosition.Message(MSG_ERROR, "Invalid expression on left hand side of %s", MethodName.GetChars());
 		delete this;
 		return nullptr;
 	}
@@ -8009,7 +8173,50 @@ isresolved:
 
 	if (afd == nullptr)
 	{
-		ScriptPosition.Message(MSG_ERROR, "Unknown function %s\n", MethodName.GetChars());
+		ScriptPosition.Message(MSG_ERROR, "Unknown function %s", MethodName.GetChars());
+		delete this;
+		return nullptr;
+	}
+
+	if (isreadonly && !(afd->Variants[0].Flags & VARF_ReadOnly))
+	{
+		// Cannot be made writable so we cannot use its methods.
+		// [ZZ] Why this esoteric message?
+		ScriptPosition.Message(MSG_ERROR, "Readonly struct on left hand side of %s not allowed", MethodName.GetChars());
+		delete this;
+		return nullptr;
+	}
+
+	// [ZZ] if self is a struct or a class member, check if it's valid to call this function at all.
+	//		implement more magic
+	int outerflags = 0;
+	if (ctx.Function)
+	{
+		outerflags = ctx.Function->Variants[0].Flags;
+		if (((outerflags & (VARF_VirtualScope | VARF_Virtual)) == (VARF_VirtualScope | VARF_Virtual)) && ctx.Class)
+			outerflags = FScopeBarrier::FlagsFromSide(FScopeBarrier::SideFromObjectFlags(ctx.Class->ObjectFlags));
+	}
+	int innerflags = afd->Variants[0].Flags;
+	int innerside = FScopeBarrier::SideFromFlags(innerflags);
+	// [ZZ] check this at compile time. this would work for most legit cases.
+	if (innerside == FScopeBarrier::Side_Virtual)
+	{
+		innerside = FScopeBarrier::SideFromObjectFlags(cls->ObjectFlags);
+		innerflags = FScopeBarrier::FlagsFromSide(innerside);
+	}
+	else if (innerside != FScopeBarrier::Side_Clear)
+	{
+		if (Self->ExprType == EFX_StructMember)
+		{
+			FxStructMember* pmember = (FxStructMember*)Self;
+			if (innerside == FScopeBarrier::Side_PlainData)
+				innerflags = FScopeBarrier::ChangeSideInFlags(innerflags, pmember->BarrierSide);
+		}
+	}
+	FScopeBarrier scopeBarrier(outerflags, innerflags, MethodName.GetChars());
+	if (!scopeBarrier.callable)
+	{
+		ScriptPosition.Message(MSG_ERROR, "%s", scopeBarrier.callerror.GetChars());
 		delete this;
 		return nullptr;
 	}
@@ -8022,14 +8229,14 @@ isresolved:
 			auto ccls = dyn_cast<PClass>(cls);
 			if (clstype == nullptr || ccls == nullptr || !clstype->IsDescendantOf(ccls))
 			{
-				ScriptPosition.Message(MSG_ERROR, "Cannot call non-static function %s::%s from here\n", cls->TypeName.GetChars(), MethodName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Cannot call non-static function %s::%s from here", cls->TypeName.GetChars(), MethodName.GetChars());
 				delete this;
 				return nullptr;
 			}
 			else
 			{
 				// Todo: If this is a qualified call to a parent class function, let it through (but this needs to disable virtual calls later.)
-				ScriptPosition.Message(MSG_ERROR, "Qualified member call to parent class %s::%s is not yet implemented\n", cls->TypeName.GetChars(), MethodName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Qualified member call to parent class %s::%s is not yet implemented", cls->TypeName.GetChars(), MethodName.GetChars());
 				delete this;
 				return nullptr;
 			}
@@ -8057,7 +8264,7 @@ isresolved:
 			// Functions with no Actor usage may not be called through a pointer because they will lose their context.
 			if (!(afd->Variants[0].UseFlags & SUF_ACTOR))
 			{
-				ScriptPosition.Message(MSG_ERROR, "Function %s cannot be used with a non-self object\n", afd->SymbolName.GetChars());
+				ScriptPosition.Message(MSG_ERROR, "Function %s cannot be used with a non-self object", afd->SymbolName.GetChars());
 				delete this;
 				return nullptr;
 			}
@@ -8264,6 +8471,7 @@ FxVMFunctionCall::FxVMFunctionCall(FxExpression *self, PFunction *func, FArgumen
 	ArgList = std::move(args);
 	EmitTail = false;
 	NoVirtual = novirtual;
+	CallingFunction = nullptr;
 }
 
 //==========================================================================
@@ -8288,19 +8496,44 @@ PPrototype *FxVMFunctionCall::ReturnProto()
 	return Function->Variants[0].Proto;
 }
 
+
+bool FxVMFunctionCall::CheckAccessibility(const VersionInfo &ver)
+{
+	if (Function->mVersion > ver && !(Function->Variants[0].Flags & VARF_Deprecated))
+	{
+		FString VersionString;
+		if (ver >= MakeVersion(2, 3))
+		{
+			VersionString.Format("ZScript version %d.%d.%d", ver.major, ver.minor, ver.revision);
+		}
+		else
+		{
+			VersionString = "DECORATE";
+		}
+		ScriptPosition.Message(MSG_ERROR, "%s not accessible to %s", Function->SymbolName.GetChars(), VersionString.GetChars());
+		return false;
+	}
+	if ((Function->Variants[0].Flags & VARF_Deprecated) && Function->mVersion >= ver)
+	{
+		ScriptPosition.Message(MSG_WARNING, "Accessing deprecated function %s - deprecated since %d.%d.%d", Function->SymbolName.GetChars(), Function->mVersion.major, Function->mVersion.minor, Function->mVersion.revision);
+		return false;
+	}
+	return true;
+}
 //==========================================================================
 //
 //
 //
 //==========================================================================
 
-VMFunction *FxVMFunctionCall::GetDirectFunction()
+VMFunction *FxVMFunctionCall::GetDirectFunction(const VersionInfo &ver)
 {
 	// If this return statement calls a non-virtual function with no arguments,
 	// then it can be a "direct" function. That is, the DECORATE
 	// definition can call that function directly without wrapping
 	// it inside VM code.
-	if (ArgList.Size() == 0 && !(Function->Variants[0].Flags & VARF_Virtual))
+
+	if (ArgList.Size() == 0 && !(Function->Variants[0].Flags & VARF_Virtual) && CheckAccessibility(ver))
 	{
 		unsigned imp = Function->GetImplicitArgs();
 		if (Function->Variants[0].ArgFlags.Size() > imp && !(Function->Variants[0].ArgFlags[imp] & VARF_Optional)) return nullptr;
@@ -8329,6 +8562,11 @@ FxExpression *FxVMFunctionCall::Resolve(FCompileContext& ctx)
 
 	int implicit = Function->GetImplicitArgs();
 
+	if (!CheckAccessibility(ctx.Version))
+	{
+		delete this;
+		return false;
+	}
 	// This should never happen.
 	if (Self == nullptr && (Function->Variants[0].Flags & VARF_Method))
 	{
@@ -8337,6 +8575,7 @@ FxExpression *FxVMFunctionCall::Resolve(FCompileContext& ctx)
 		return nullptr;
 	}
 
+	CallingFunction = ctx.Function;
 	if (ArgList.Size() > 0)
 	{
 		bool foundvarargs = false;
@@ -8537,13 +8776,24 @@ ExpEmit FxVMFunctionCall::Emit(VMFunctionBuilder *build)
 	}
 
 	VMFunction *vmfunc = Function->Variants[0].Implementation;
-	bool staticcall = (vmfunc->Final || vmfunc->VirtualIndex == ~0u || NoVirtual);
+	bool staticcall = ((vmfunc->VarFlags & VARF_Final) || vmfunc->VirtualIndex == ~0u || NoVirtual);
 
 	count = 0;
 	// Emit code to pass implied parameters
 	ExpEmit selfemit;
 	if (Function->Variants[0].Flags & VARF_Method)
 	{
+#if 0
+		// [ZZ]
+		if (Function->Variants[0].Implementation && Function->Variants[0].Implementation->BarrierSide == FScopeBarrier::Side_Virtual)
+		{
+			// pass this even before Self, because otherwise we can't silently advance the arguments.
+			// this is not even implicit arguments.
+			build->Emit(OP_PARAM, 0, REGT_POINTER | REGT_KONST, build->GetConstantAddress(Function, ATAG_OBJECT));
+			build->Emit(OP_PARAM, 0, REGT_POINTER | REGT_KONST, build->GetConstantAddress(CallingFunction, ATAG_OBJECT));
+			count += 2;
+		}
+#endif
 		assert(Self != nullptr);
 		selfemit = Self->Emit(build);
 		assert((selfemit.RegType == REGT_POINTER) || (selfemit.Fixed && selfemit.Target));
@@ -9153,11 +9403,11 @@ ExpEmit FxSequence::Emit(VMFunctionBuilder *build)
 //
 //==========================================================================
 
-VMFunction *FxSequence::GetDirectFunction()
+VMFunction *FxSequence::GetDirectFunction(const VersionInfo &ver)
 {
 	if (Expressions.Size() == 1)
 	{
-		return Expressions[0]->GetDirectFunction();
+		return Expressions[0]->GetDirectFunction(ver);
 	}
 	return nullptr;
 }
@@ -10139,11 +10389,11 @@ ExpEmit FxReturnStatement::Emit(VMFunctionBuilder *build)
 	return out;
 }
 
-VMFunction *FxReturnStatement::GetDirectFunction()
+VMFunction *FxReturnStatement::GetDirectFunction(const VersionInfo &ver)
 {
 	if (Args.Size() == 1)
 	{
-		return Args[0]->GetDirectFunction();
+		return Args[0]->GetDirectFunction(ver);
 	}
 	return nullptr;
 }

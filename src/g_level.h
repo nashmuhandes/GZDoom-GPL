@@ -223,7 +223,7 @@ enum ELevelFlags : unsigned int
 	
 	// More flags!
 	LEVEL3_FORCEFAKECONTRAST	= 0x00000001,	// forces fake contrast even with fog enabled
-	LEVEL3_RESETINVENTORY		= 0x00000002,	// kills all INVBAR items on map change.
+	LEVEL3_REMOVEITEMS		= 0x00000002,	// kills all INVBAR items on map change.
 };
 
 
@@ -315,6 +315,8 @@ struct level_info_t
 	FName		Intermission;
 	FName		deathsequence;
 	FName		slideshow;
+	DWORD		hazardcolor;
+	DWORD		hazardflash;
 
 	// Redirection: If any player is carrying the specified item, then
 	// you go to the RedirectMap instead of this one.
