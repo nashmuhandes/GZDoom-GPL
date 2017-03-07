@@ -40,6 +40,8 @@
 #include "p_local.h"
 #include "p_blockmap.h"
 #include "p_lnspec.h"
+#include "r_bsp.h"
+#include "r_segs.h"
 #include "c_cvars.h"
 #include "m_bbox.h"
 #include "p_tags.h"
