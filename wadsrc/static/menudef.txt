@@ -638,6 +638,7 @@ OptionValue PuffTypes
 {
 	0.0, "$OPTVAL_SPRITES"
 	1.0, "$OPTVAL_PARTICLES"
+	2.0, "$OPTVAL_SPRITESPARTICLES"
 }
 
 OptionValue Wipes
@@ -1013,7 +1014,7 @@ OptionValue MapBackTypes
 OptionValue MapTriggers
 {
 	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_NO_DOORS"
+	1, "$OPTVAL_NODOORS"
 	2, "$OPTVAL_ON"
 }
 
@@ -1669,11 +1670,6 @@ OptionMenu AdvSoundOptions
 {
 	Title "$ADVSNDMNU_TITLE"
 	Option "$ADVSNDMNU_SAMPLERATE",			"snd_samplerate", "SampleRates"
-	StaticText " "
-	StaticText "$ADVSNDMNU_OPLSYNTHESIS",	1
-	Slider "$ADVSNDMNU_OPLNUMCHIPS", 		"opl_numchips", 1, 8, 1, 0
-	Option "$ADVSNDMNU_OPLFULLPAN",			"opl_fullpan", "OnOff"
-	Option "$ADVSNDMNU_OPLCORES", 			"opl_core", "OplCores"
 	StaticText " "
 	StaticText "$ADVSNDMNU_GUSEMULATION",	1
 	TextField "$ADVSNDMNU_GUSCONFIG", 		"midi_config"

@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 // $Log:$
 //
@@ -2380,6 +2381,11 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 		SprayDecal(players[player].mo, s);
 		break;
 
+	case DEM_MDK:
+		s = ReadString(stream);
+		cht_DoMDK(&players[player], s);
+		break;
+
 	case DEM_PAUSE:
 		if (gamestate == GS_LEVEL)
 		{
@@ -2666,13 +2672,12 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 
 	case DEM_NETEVENT:
 		{
-			const char *ename = ReadString(stream);
+			s = ReadString(stream);
 			int argn = ReadByte(stream);
 			int arg[3] = { 0, 0, 0 };
 			for (int i = 0; i < 3; i++)
 				arg[i] = ReadLong(stream);
-			E_Console(player, ename, arg[0], arg[1], arg[2]);
-			delete[] ename;
+			E_Console(player, s, arg[0], arg[1], arg[2]);
 		}
 		break;
 
@@ -2723,7 +2728,7 @@ void Net_SkipCommand (int type, BYTE **stream)
 			break;
 
 		case DEM_NETEVENT:
-			skip = strlen((char *)(*stream)) + 13;
+			skip = strlen((char *)(*stream)) + 14;
 			break;
 
 		case DEM_SUMMON2:
@@ -2747,6 +2752,7 @@ void Net_SkipCommand (int type, BYTE **stream)
 		case DEM_SPRAY:
 		case DEM_MORPHEX:
 		case DEM_KILLCLASSCHEAT:
+		case DEM_MDK:
 			skip = strlen ((char *)(*stream)) + 1;
 			break;
 

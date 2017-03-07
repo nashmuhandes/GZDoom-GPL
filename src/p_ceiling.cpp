@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 // $Log:$
 //
@@ -581,4 +582,19 @@ bool EV_CeilingCrushStop (int tag, bool remove)
 	}
 
 	return rtn;
+}
+
+bool EV_StopCeiling(int tag)
+{
+	FSectorTagIterator it(tag);
+	while (int sec = it.Next())
+	{
+		if (level.sectors[sec].ceilingdata)
+		{
+			SN_StopSequence(&level.sectors[sec], CHAN_CEILING);
+			level.sectors[sec].ceilingdata->Destroy();
+			level.sectors[sec].ceilingdata = nullptr;
+		}
+	}
+	return true;
 }

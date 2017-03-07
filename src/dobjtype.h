@@ -37,6 +37,10 @@ enum
 	VARF_Transient		= (1<<17),  // don't auto serialize field.
 	VARF_Meta			= (1<<18),	// static class data (by necessity read only.)
 	VARF_VarArg			= (1<<19),  // [ZZ] vararg: don't typecheck values after ... in function signature
+	VARF_UI				= (1<<20),  // [ZZ] ui: object is ui-scope only (can't modify playsim)
+	VARF_Play			= (1<<21),  // [ZZ] play: object is playsim-scope only (can't access ui)
+	VARF_VirtualScope	= (1<<22),  // [ZZ] virtualscope: object should use the scope of the particular class it's being used with (methods only)
+	VARF_ClearScope		= (1<<23),  // [ZZ] clearscope: this method ignores the member access chain that leads to it and is always plain data.
 };
 
 // An action function -------------------------------------------------------
@@ -87,6 +91,7 @@ public:
 	PSymbolTable	Symbols;
 	bool			MemberOnly = false;		// type may only be used as a struct/class member but not as a local variable or function argument.
 	FString			mDescriptiveName;
+	VersionInfo		mVersion = { 0,0,0 };
 	BYTE loadOp, storeOp, moveOp, RegType, RegCount;
 
 	PType(unsigned int size = 1, unsigned int align = 1);
@@ -362,12 +367,25 @@ public:
 class PPointer : public PBasicType
 {
 	DECLARE_CLASS(PPointer, PBasicType);
+
 public:
+	typedef void(*WriteHandler)(FSerializer &ar, const char *key, const void *addr);
+	typedef bool(*ReadHandler)(FSerializer &ar, const char *key, void *addr);
+
 	PPointer();
 	PPointer(PType *pointsat, bool isconst = false);
 
 	PType *PointedType;
 	bool IsConst;
+
+	WriteHandler writer = nullptr;
+	ReadHandler reader = nullptr;
+
+	void InstallHandlers(WriteHandler w, ReadHandler r)
+	{
+		writer = w;
+		reader = r;
+	}
 
 	virtual bool IsMatch(intptr_t id1, intptr_t id2) const;
 	virtual void GetTypeIDs(intptr_t &id1, intptr_t &id2) const;
@@ -557,12 +575,13 @@ enum
 class PClass : public PNativeStruct
 {
 	DECLARE_CLASS(PClass, PNativeStruct);
-protected:
 	// We unravel _WITH_META here just as we did for PType.
-	TArray<FTypeAndOffset> SpecialInits;
+protected:
+	TArray<FTypeAndOffset> MetaInits;
 	void Derive(PClass *newclass, FName name);
-	void InitializeSpecials(void *addr, void *defaults) const;
+	void InitializeSpecials(void *addr, void *defaults, TArray<FTypeAndOffset> PClass::*Inits);
 	void SetSuper();
+	PField *AddMetaField(FName name, PType *type, DWORD flags);
 public:
 	void WriteValue(FSerializer &ar, const char *key,const void *addr) const override;
 	void WriteAllFields(FSerializer &ar, const void *addr) const;
@@ -577,11 +596,14 @@ public:
 	static void StaticBootstrap();
 
 	// Per-class information -------------------------------------
+	TArray<FTypeAndOffset> SpecialInits;
 	PClass				*ParentClass;	// the class this class derives from
 	const size_t		*Pointers;		// object pointers defined by this class *only*
 	const size_t		*FlatPointers;	// object pointers defined by this class and all its superclasses; not initialized by default
 	const size_t		*ArrayPointers;	// dynamic arrays containing object pointers.
 	BYTE				*Defaults;
+	BYTE				*Meta;			// Per-class static script data
+	unsigned			 MetaSize;
 	bool				 bRuntimeClass;	// class was defined at run-time, not compile-time
 	bool				 bExported;		// This type has been declared in a script
 	bool				 bDecorateClass;	// may be subject to some idiosyncracies due to DECORATE backwards compatibility
@@ -593,13 +615,14 @@ public:
 	PClass();
 	~PClass();
 	void InsertIntoHash();
-	DObject *CreateNew() const;
+	DObject *CreateNew();
 	PClass *CreateDerivedClass(FName name, unsigned int size);
 	PField *AddField(FName name, PType *type, DWORD flags=0) override;
 	void InitializeActorInfo();
 	void BuildFlatPointers();
 	void BuildArrayPointers();
-	void DestroySpecials(void *addr) const;
+	void InitMeta(); 
+	void DestroySpecials(void *addr);
 	const PClass *NativeClass() const;
 
 	// Returns true if this type is an ancestor of (or same as) the passed type.
@@ -723,6 +746,11 @@ inline int &DObject::IntVar(FName field)
 	return *(int*)ScriptVar(field, TypeSInt32);
 }
 
+inline FSoundID &DObject::SoundVar(FName field)
+{
+	return *(FSoundID*)ScriptVar(field, TypeSound);
+}
+
 inline PalEntry &DObject::ColorVar(FName field)
 {
 	return *(PalEntry*)ScriptVar(field, TypeColor);
@@ -736,6 +764,11 @@ inline FName &DObject::NameVar(FName field)
 inline double &DObject::FloatVar(FName field)
 {
 	return *(double*)ScriptVar(field, TypeFloat64);
+}
+
+inline FString &DObject::StringVar(FName field)
+{
+	return *(FString*)ScriptVar(field, TypeString);
 }
 
 template<class T>

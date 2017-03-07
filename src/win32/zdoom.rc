@@ -9,7 +9,8 @@
 //
 #include "afxres.h"
 #include "../version.h"
-#include "../gitinfo.h"
+#include "../gitinfo.h"
+
 
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
@@ -72,13 +73,13 @@ BEGIN
     "        BEGIN\r\n"
     "            VALUE ""Comments"", ""Thanks to id Software for creating DOOM and then releasing the source code. Thanks also to TeamTNT for creating BOOM, which ZDoom is partially based on. Includes code based on the Cajun Bot 0.97 by Martin Collberg.""\r\n"
     "            VALUE ""CompanyName"", "" ""\r\n"
-    "            VALUE ""FileDescription"", ""GZDoom""\r\n"
+    "            VALUE ""FileDescription"", ""GZDoom-GPL""\r\n"
     "            VALUE ""FileVersion"", RC_FILEVERSION2\r\n"
-    "            VALUE ""InternalName"", ""GZDoom""\r\n"
+    "            VALUE ""InternalName"", ""GZDoom-GPL""\r\n"
     "            VALUE ""LegalCopyright"", ""Copyright \\u00A9 1993-1996 id Software, 1998-2010 Randy Heit, 2002-2010 Christoph Oelckers, et al.""\r\n"
     "            VALUE ""LegalTrademarks"", ""DoomR is a Registered Trademark of id Software, Inc.""\r\n"
     "            VALUE ""OriginalFilename"", ""gzdoom.exe""\r\n"
-    "            VALUE ""ProductName"", ""GZDoom""\r\n"
+    "            VALUE ""ProductName"", ""GZDoom-GPL""\r\n"
     "            VALUE ""ProductVersion"", RC_PRODUCTVERSION2\r\n"
     "        END\r\n"
     "    END\r\n"
@@ -228,21 +229,21 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 FONT 8, "MS Shell Dlg"
 {
    CONTROL 101, IDC_STATIC, STATIC, SS_ICON | WS_CHILD | WS_VISIBLE, 7, 7, 21, 20
-   CONTROL "Welcome to GZDoom!", IDC_STATIC, STATIC, SS_LEFT | WS_CHILD | WS_VISIBLE | WS_GROUP, 42, 8, 180, 8
+   CONTROL "Welcome to GZDoom-GPL!", IDC_STATIC, STATIC, SS_LEFT | WS_CHILD | WS_VISIBLE | WS_GROUP, 42, 8, 180, 8
    CONTROL "<Version info>", IDC_WELCOME_VERSION, STATIC, SS_LEFT | WS_CHILD | WS_VISIBLE | WS_GROUP, 42, 18, 180, 8
    CONTROL "IWAD selection", IDC_STATIC, BUTTON, BS_GROUPBOX | WS_CHILD | WS_VISIBLE, 8, 32, 208, 117
    CONTROL "Select which game file (IWAD) to run.", IDC_STATIC, STATIC, SS_LEFT | WS_CHILD | WS_VISIBLE | WS_GROUP, 12, 44, 190, 8
    CONTROL "", IDC_IWADLIST, LISTBOX, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WS_TABSTOP, 12, 56, 200, 87
    CONTROL "Video settings", IDC_STATIC, BUTTON, BS_GROUPBOX | WS_CHILD | WS_VISIBLE, 8, 155, 109, 52
    CONTROL "Hardware (OpenGL)", IDC_WELCOME_OPENGL, BUTTON, BS_AUTORADIOBUTTON | WS_CHILD | WS_VISIBLE, 12, 170, 93, 10
-   CONTROL "Software (Doom)", IDC_WELCOME_SOFTWARE, BUTTON, BS_AUTORADIOBUTTON | WS_CHILD | WS_VISIBLE, 12, 180, 93, 10
+   CONTROL "Software (Doom)", IDC_WELCOME_SOFTWARE, BUTTON, BS_AUTORADIOBUTTON | WS_CHILD | WS_VISIBLE | WS_DISABLED, 12, 180, 93, 10
    CONTROL "Fullscreen", IDC_WELCOME_FULLSCREEN, BUTTON, BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 12, 190, 48, 10
    CONTROL "Resource settings", IDC_STATIC, BUTTON, BS_GROUPBOX | WS_CHILD | WS_VISIBLE, 123, 155, 95, 52
    CONTROL "Disable autoload", IDC_WELCOME_NOAUTOLOAD, BUTTON, BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 170, 65, 10
    CONTROL "Load lights", IDC_WELCOME_LIGHTS, BUTTON, BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 180, 51, 10
    CONTROL "Load brightmaps", IDC_WELCOME_BRIGHTMAPS, BUTTON, BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 190, 65, 10
    CONTROL "Don't ask me this again", IDC_DONTASKIWAD, BUTTON, BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 73, 211, 87, 10
-   CONTROL "Play GZDoom", IDOK, BUTTON, BS_DEFPUSHBUTTON | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 8, 228, 90, 14
+   CONTROL "Play GZDoom-GPL", IDOK, BUTTON, BS_DEFPUSHBUTTON | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 8, 228, 90, 14
    CONTROL "Exit", IDCANCEL, BUTTON, BS_PUSHBUTTON | WS_CHILD | WS_VISIBLE | WS_TABSTOP, 166, 228, 50, 14
 }
 
@@ -504,13 +505,13 @@ BEGIN
         BEGIN
             VALUE "Comments", "Thanks to id Software for creating DOOM and then releasing the source code. Thanks also to TeamTNT for creating BOOM, which ZDoom is partially based on. Includes code based on the Cajun Bot 0.97 by Martin Collberg."
             VALUE "CompanyName", " "
-            VALUE "FileDescription", "GZDoom"
+            VALUE "FileDescription", "GZDoom-GPL"
             VALUE "FileVersion", RC_FILEVERSION2
-            VALUE "InternalName", "GZDoom"
+            VALUE "InternalName", "GZDoom-GPL"
             VALUE "LegalCopyright", "Copyright \u00A9 1993-1996 id Software, 1998-2010 Randy Heit, 2002-2010 Christoph Oelckers, et al."
             VALUE "LegalTrademarks", "DoomR is a Registered Trademark of id Software, Inc."
             VALUE "OriginalFilename", "gzdoom.exe"
-            VALUE "ProductName", "GZDoom"
+            VALUE "ProductName", "GZDoom-GPL"
             VALUE "ProductVersion", RC_PRODUCTVERSION2
         END
     END

@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 // DESCRIPTION:
 //	all external data is defined here
@@ -262,8 +263,8 @@ struct mapseg_t
 
 struct mapseg4_t 
 {
-	SDWORD v1;
-	SDWORD v2;
+	int32_t v1;
+	int32_t v2;
 	SWORD angle;
 	WORD linedef;
 	SWORD side;
@@ -359,7 +360,7 @@ struct FMapThing
 	double		Alpha;
 	DWORD		fillcolor;
 	DVector2	Scale;
-	int			health;
+	double		Health;
 	int			score;
 	short		pitch;
 	short		roll;

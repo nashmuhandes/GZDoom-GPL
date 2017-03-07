@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 // DESCRIPTION:
 //
@@ -93,7 +94,7 @@ public:
 	virtual bool UpdateWaterLevel (bool splash) override;
 
 	bool ResetAirSupply (bool playgasp = true);
-	int GetMaxHealth() const;
+	int GetMaxHealth(bool withupgrades = false) const;
 	void TweakSpeeds (double &forwardmove, double &sidemove);
 	void MorphPlayerThink ();
 	void ActivateMorphWeapon ();
@@ -125,6 +126,8 @@ public:
 
 	int			crouchsprite;
 	int			MaxHealth;
+	int			BonusHealth;
+
 	int			MugShotMaxHealth;
 	int			RunHealth;
 	int			PlayerFlags;
@@ -159,8 +162,6 @@ public:
 	FNameNoInit Face;			// Doom status bar face (when used)
 	FNameNoInit Portrait;
 	FNameNoInit Slot[10];
-	FNameNoInit InvulMode;
-	FNameNoInit HealingRadiusType;
 	double HexenArmor[5];
 	BYTE ColorRangeStart;	// Skin color range
 	BYTE ColorRangeEnd;
@@ -529,6 +530,9 @@ public:
 	DPSprite *GetPSprite(PSPLayers layer);
 
 	bool GetPainFlash(FName type, PalEntry *color) const;
+
+	// [Nash] set player FOV
+	void SetFOV(float fov);
 };
 
 // Bookkeeping on players - state.

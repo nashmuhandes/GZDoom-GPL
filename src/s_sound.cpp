@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 //
 // DESCRIPTION:  none
@@ -490,6 +491,10 @@ void S_PrecacheLevel ()
 			{
 				actor->MarkPrecacheSounds();
 			}
+		}
+		for (auto i : gameinfo.PrecachedSounds)
+		{
+			level.info->PrecacheSounds[i].MarkUsed();
 		}
 		for (auto i : gameinfo.PrecachedSounds)
 		{
@@ -1400,7 +1405,7 @@ sfxinfo_t *S_LoadSound(sfxinfo_t *sfx)
 			FWadLump wlump = Wads.OpenLumpNum(sfx->lumpnum);
 			BYTE *sfxdata = new BYTE[size];
 			wlump.Read(sfxdata, size);
-			SDWORD dmxlen = LittleLong(((SDWORD *)sfxdata)[1]);
+			int32_t dmxlen = LittleLong(((int32_t *)sfxdata)[1]);
             std::pair<SoundHandle,bool> snd;
 
 			// If the sound is voc, use the custom loader.
@@ -1460,7 +1465,7 @@ static void S_LoadSound3D(sfxinfo_t *sfx)
     FWadLump wlump = Wads.OpenLumpNum(sfx->lumpnum);
     BYTE *sfxdata = new BYTE[size];
     wlump.Read(sfxdata, size);
-    SDWORD dmxlen = LittleLong(((SDWORD *)sfxdata)[1]);
+    int32_t dmxlen = LittleLong(((int32_t *)sfxdata)[1]);
     std::pair<SoundHandle,bool> snd;
 
     // If the sound is voc, use the custom loader.

@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 // $Log:$
 //
@@ -1741,7 +1742,7 @@ void P_LoadThings (MapData * map)
 		mti[i].ClassFilter = 0xffff;	// Doom map format doesn't have class flags so spawn for all player classes
 		mti[i].RenderStyle = STYLE_Count;
 		mti[i].Alpha = -1;
-		mti[i].health = 1;
+		mti[i].Health = 1;
 		mti[i].FloatbobPhase = -1;
 
 		mti[i].pos.X = LittleShort(mt->x);
@@ -1837,7 +1838,7 @@ void P_LoadThings2 (MapData * map)
 		mti[i].Gravity = 1;
 		mti[i].RenderStyle = STYLE_Count;
 		mti[i].Alpha = -1;
-		mti[i].health = 1;
+		mti[i].Health = 1;
 		mti[i].FloatbobPhase = -1;
 	}
 	delete[] mtp;

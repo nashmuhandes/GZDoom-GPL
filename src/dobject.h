@@ -41,6 +41,7 @@
 class PClass;
 class PType;
 class FSerializer;
+class FSoundID;
 
 class   DObject;
 /*
@@ -206,7 +207,9 @@ enum EObjectFlags
 	OF_Transient		= 1 << 11,		// Object should not be archived (references to it will be nulled on disk)
 	OF_Spawned			= 1 << 12,      // Thinker was spawned at all (some thinkers get deleted before spawning)
 	OF_Released			= 1 << 13,		// Object was released from the GC system and should not be processed by GC function
-	OF_Abstract			= 1 << 14,		// Marks a class that cannot be created with CreateNew
+	OF_Abstract			= 1 << 14,		// Marks a class that cannot be created with new() function at all
+	OF_UI				= 1 << 15,		// Marks a class that defaults to VARF_UI for it's fields/methods
+	OF_Play				= 1 << 16,		// Marks a class that defaults to VARF_Play for it's fields/methods
 };
 
 template<class T> class TObjPtr;
@@ -483,9 +486,11 @@ public:
 	// Add other types as needed.
 	bool &BoolVar(FName field);
 	int &IntVar(FName field);
+	FSoundID &SoundVar(FName field);
 	PalEntry &ColorVar(FName field);
 	FName &NameVar(FName field);
 	double &FloatVar(FName field);
+	FString &StringVar(FName field);
 	template<class T> T*& PointerVar(FName field);
 
 	// If you need to replace one object with another and want to

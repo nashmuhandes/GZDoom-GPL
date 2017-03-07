@@ -110,12 +110,13 @@ void SetImplicitArgs(TArray<PType *> *args, TArray<DWORD> *argflags, TArray<FNam
 	if (funcflags & VARF_Method)
 	{
 		// implied self pointer
-		if (args != nullptr)		args->Push(NewPointer(cls)); 
+		if (args != nullptr)		args->Push(NewPointer(cls, !!(funcflags & VARF_ReadOnly))); 
 		if (argflags != nullptr)	argflags->Push(VARF_Implicit | VARF_ReadOnly);
 		if (argnames != nullptr)	argnames->Push(NAME_self);
 	}
 	if (funcflags & VARF_Action)
 	{
+		assert(!(funcflags & VARF_ReadOnly));
 		// implied caller and callingstate pointers
 		if (args != nullptr)
 		{
@@ -163,6 +164,10 @@ PFunction *CreateAnonymousFunction(PClass *containingclass, PType *returntype, i
 	// Functions that only get flagged for actors do not need the additional two context parameters.
 	int fflags = (flags& (SUF_OVERLAY | SUF_WEAPON | SUF_ITEM)) ? VARF_Action | VARF_Method : VARF_Method;
 
+	// [ZZ] give anonymous functions the scope of their class 
+	//      (just give them VARF_Play, whatever)
+	fflags |= VARF_Play;
+
 	rets[0] = returntype != nullptr? returntype : TypeError;	// Use TypeError as placeholder if we do not know the return type yet.
 	SetImplicitArgs(&args, &argflags, &argnames, containingclass, fflags, flags);
 
@@ -190,14 +195,21 @@ PFunction *FindClassMemberFunction(PStruct *selfcls, PStruct *funccls, FName nam
 
 	if (symbol != nullptr)
 	{
+		PClass* cls_ctx = dyn_cast<PClass>(funccls);
+		PClass* cls_target = funcsym?dyn_cast<PClass>(funcsym->OwningClass):nullptr;
 		if (funcsym == nullptr)
 		{
 			sc.Message(MSG_ERROR, "%s is not a member function of %s", name.GetChars(), selfcls->TypeName.GetChars());
 		}
-		else if (funcsym->Variants[0].Flags & VARF_Private && symtable != &funccls->Symbols)
+		else if ((funcsym->Variants[0].Flags & VARF_Private) && symtable != &funccls->Symbols)
 		{
 			// private access is only allowed if the symbol table belongs to the class in which the current function is being defined.
 			sc.Message(MSG_ERROR, "%s is declared private and not accessible", symbol->SymbolName.GetChars());
+		}
+		else if ((funcsym->Variants[0].Flags & VARF_Protected) && (!cls_ctx || !cls_target || !cls_ctx->IsDescendantOf((PClass*)cls_target)))
+		{
+			sc.Message(MSG_ERROR, "%s is declared protected and not accessible", symbol->SymbolName.GetChars());
+			return nullptr;
 		}
 		else if (funcsym->Variants[0].Flags & VARF_Deprecated)
 		{
@@ -216,7 +228,7 @@ PFunction *FindClassMemberFunction(PStruct *selfcls, PStruct *funccls, FName nam
 //
 //==========================================================================
 
-void CreateDamageFunction(PNamespace *OutNamespace, PClassActor *info, AActor *defaults, FxExpression *id, bool fromDecorate, int lumpnum)
+void CreateDamageFunction(PNamespace *OutNamespace, const VersionInfo &ver, PClassActor *info, AActor *defaults, FxExpression *id, bool fromDecorate, int lumpnum)
 {
 	if (id == nullptr)
 	{
@@ -226,7 +238,7 @@ void CreateDamageFunction(PNamespace *OutNamespace, PClassActor *info, AActor *d
 	{
 		auto dmg = new FxReturnStatement(new FxIntCast(id, true), id->ScriptPosition);
 		auto funcsym = CreateAnonymousFunction(info, TypeSInt32, 0);
-		defaults->DamageFunc = FunctionBuildList.AddFunction(OutNamespace, funcsym, dmg, FStringf("%s.DamageFunction", info->TypeName.GetChars()), fromDecorate, -1, 0, lumpnum);
+		defaults->DamageFunc = FunctionBuildList.AddFunction(OutNamespace, ver, funcsym, dmg, FStringf("%s.DamageFunction", info->TypeName.GetChars()), fromDecorate, -1, 0, lumpnum);
 	}
 }
 

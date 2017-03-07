@@ -119,6 +119,7 @@ void ParseOldDecoration(FScanner &sc, EDefinitionType def, PNamespace *ns)
 	bag.Namespace = ns;
 	bag.Info = type;
 	bag.fromDecorate = true;
+	bag.Version = { 2, 0, 0 };
 #ifdef _DEBUG
 	bag.ClassName = type->TypeName;
 #endif
@@ -223,7 +224,7 @@ void ParseOldDecoration(FScanner &sc, EDefinitionType def, PNamespace *ns)
 				{
 					extra.DeathHeight = ((AActor*)(type->Defaults))->Height;
 				}
-				type->DeathHeight = extra.DeathHeight;
+				((AActor*)(type->Defaults))->FloatVar("DeathHeight") = extra.DeathHeight;
 			}
 			bag.statedef.SetStateLabel("Death", &type->OwnedStates[extra.DeathStart]);
 		}
@@ -262,7 +263,7 @@ void ParseOldDecoration(FScanner &sc, EDefinitionType def, PNamespace *ns)
 			}
 
 			if (extra.BurnHeight == 0) extra.BurnHeight = ((AActor*)(type->Defaults))->Height;
-			type->BurnHeight = extra.BurnHeight;
+			((AActor*)(type->Defaults))->FloatVar("BurnHeight") = extra.BurnHeight;
 
 			bag.statedef.SetStateLabel("Burn", &type->OwnedStates[extra.FireDeathStart]);
 		}
@@ -445,18 +446,18 @@ static void ParseInsideDecoration (Baggage &bag, AActor *defaults,
 		else if (def == DEF_Projectile && sc.Compare ("ExplosionRadius"))
 		{
 			sc.MustGetNumber ();
-			bag.Info->ExplosionRadius = sc.Number;
+			defaults->IntVar(NAME_ExplosionRadius) = sc.Number;
 			extra.bExplosive = true;
 		}
 		else if (def == DEF_Projectile && sc.Compare ("ExplosionDamage"))
 		{
 			sc.MustGetNumber ();
-			bag.Info->ExplosionDamage = sc.Number;
+			defaults->IntVar(NAME_ExplosionDamage) = sc.Number;
 			extra.bExplosive = true;
 		}
 		else if (def == DEF_Projectile && sc.Compare ("DoNotHurtShooter"))
 		{
-			bag.Info->DontHurtShooter = true;
+			defaults->BoolVar(NAME_DontHurtShooter) = true;
 		}
 		else if (def == DEF_Projectile && sc.Compare ("Damage"))
 		{
@@ -483,7 +484,7 @@ static void ParseInsideDecoration (Baggage &bag, AActor *defaults,
 		else if (sc.Compare ("Mass"))
 		{
 			sc.MustGetFloat ();
-			defaults->Mass = SDWORD(sc.Float);
+			defaults->Mass = int32_t(sc.Float);
 		}
 		else if (sc.Compare ("Translation1"))
 		{
@@ -541,11 +542,11 @@ static void ParseInsideDecoration (Baggage &bag, AActor *defaults,
 		else if (def == DEF_Pickup && sc.Compare ("PickupMessage"))
 		{
 			sc.MustGetString ();
-			bag.Info->PickupMsg = sc.String;
+			inv->StringVar(NAME_PickupMsg) = sc.String;
 		}
 		else if (def == DEF_Pickup && sc.Compare ("Respawns"))
 		{
-			inv->BoolVar("Respawnable") = true;
+			inv->BoolVar(NAME_Respawnable) = true;
 		}
 		else if (def == DEF_BreakableDecoration && sc.Compare ("SolidOnDeath"))
 		{

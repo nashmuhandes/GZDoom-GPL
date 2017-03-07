@@ -5,14 +5,15 @@
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 //
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
-// The source is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 //
 // $Log:$
 //
@@ -54,6 +55,22 @@
 // [RH] Actually handle the cheat. The cheat code in st_stuff.c now just
 // writes some bytes to the network data stream, and the network code
 // later calls us.
+
+void cht_DoMDK(player_t *player, const char *mod)
+{
+	if (player->mo == NULL)
+	{
+		Printf("What do you want to kill outside of a game?\n");
+	}
+	else if (!deathmatch)
+	{
+		// Don't allow this in deathmatch even with cheats enabled, because it's
+		// a very very cheap kill.
+		P_LineAttack(player->mo, player->mo->Angles.Yaw, PLAYERMISSILERANGE,
+			P_AimLineAttack(player->mo, player->mo->Angles.Yaw, PLAYERMISSILERANGE), TELEFRAG_DAMAGE,
+			mod, NAME_BulletPuff);
+	}
+}
 
 void cht_DoCheat (player_t *player, int cheat)
 {
@@ -671,6 +688,7 @@ CCMD (mdk)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_MDK);
+	const char *name = argv.argc() > 1 ? argv[1] : "";
+	Net_WriteByte (DEM_MDK);
+	Net_WriteString(name);
 }

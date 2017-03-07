@@ -69,6 +69,10 @@ EXTERN_CVAR(Bool, strictdecorate);
 
 PClassActor *DecoDerivedClass(const FScriptPosition &sc, PClassActor *parent, FName typeName)
 {
+	if (parent->mVersion > MakeVersion(2, 0))
+	{
+		sc.Message(MSG_ERROR, "Parent class %s of %s not accessible to DECORATE", parent->GetClass()->TypeName.GetChars(), typeName.GetChars());
+	}
 	PClassActor *type = static_cast<PClassActor *>(parent->CreateDerivedClass(typeName, parent->Size));
 	if (type == nullptr)
 	{
@@ -827,7 +831,7 @@ static void DispatchScriptProperty(FScanner &sc, PProperty *prop, AActor *defaul
 		if (i > 0) sc.MustGetStringName(",");
 		if (f->Flags & VARF_Meta)
 		{
-			addr = ((char*)bag.Info) + f->Offset;
+			addr = ((char*)bag.Info->Meta) + f->Offset;
 		}
 		else
 		{
@@ -867,7 +871,7 @@ static void DispatchScriptProperty(FScanner &sc, PProperty *prop, AActor *defaul
 		else if (f->Type->IsKindOf(RUNTIME_CLASS(PString)))
 		{
 			sc.MustGetString();
-			*(FString*)addr = sc.String;
+			*(FString*)addr = strbin1(sc.String);
 		}
 		else if (f->Type->IsKindOf(RUNTIME_CLASS(PClassPointer)))
 		{
@@ -1125,6 +1129,7 @@ static void ParseActor(FScanner &sc, PNamespace *ns)
 	Baggage bag;
 
 	bag.Namespace = ns;
+	bag.Version = { 2, 0, 0 };	
 	bag.fromDecorate = true;
 	info = ParseActorHeader(sc, &bag);
 	sc.MustGetToken('{');

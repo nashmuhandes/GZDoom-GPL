@@ -45,6 +45,7 @@
 #include "s_sound.h"
 #include "actor.h"
 #include "vmbuilder.h"
+#include "scopebarrier.h"
 
 
 #define CHECKRESOLVED() if (isresolved) return this; isresolved=true;
@@ -85,8 +86,10 @@ struct FCompileContext
 	bool Unsafe = false;
 	TDeletingArray<FxLocalVariableDeclaration *> FunctionArgs;
 	PNamespace *CurGlobals;
+	VersionInfo Version;
+	FString VersionString;
 
-	FCompileContext(PNamespace *spc, PFunction *func, PPrototype *ret, bool fromdecorate, int stateindex, int statecount, int lump);
+	FCompileContext(PNamespace *spc, PFunction *func, PPrototype *ret, bool fromdecorate, int stateindex, int statecount, int lump, const VersionInfo &ver);
 	FCompileContext(PNamespace *spc, PStruct *cls, bool fromdecorate);	// only to be used to resolve constants!
 
 	PSymbol *FindInClass(FName identifier, PSymbolTable *&symt);
@@ -95,7 +98,7 @@ struct FCompileContext
 
 	void HandleJumps(int token, FxExpression *handler);
 	void CheckReturn(PPrototype *proto, FScriptPosition &pos);
-	bool CheckReadOnly(int flags);
+	bool CheckWritable(int flags);
 	FxLocalVariableDeclaration *FindLocalVariable(FName name);
 };
 
@@ -321,7 +324,7 @@ public:
 	virtual bool isConstant() const;
 	virtual bool RequestAddress(FCompileContext &ctx, bool *writable);
 	virtual PPrototype *ReturnProto();
-	virtual VMFunction *GetDirectFunction();
+	virtual VMFunction *GetDirectFunction(const VersionInfo &ver);
 	virtual bool CheckReturn() { return false; }
 	virtual int GetBitValue() { return -1; }
 	bool IsNumeric() const { return ValueType->isNumeric(); }
@@ -1208,6 +1211,7 @@ private:
 class FxNew : public FxExpression
 {
 	FxExpression *val;
+	PFunction *CallingFunction;
 
 public:
 
@@ -1326,6 +1330,7 @@ public:
 	PField *membervar;
 	bool AddressRequested = false;
 	bool AddressWritable = true;
+	int BarrierSide = -1; // [ZZ] some magic
 	FxMemberBase(EFxType type, PField *f, const FScriptPosition &p);
 };
 
@@ -1707,13 +1712,16 @@ class FxVMFunctionCall : public FxExpression
 	// for multi assignment
 	int AssignCount = 0;
 	TArray<ExpEmit> ReturnRegs;
+	PFunction *CallingFunction;
+
+	bool CheckAccessibility(const VersionInfo &ver);
 
 public:
 	FxVMFunctionCall(FxExpression *self, PFunction *func, FArgumentList &args, const FScriptPosition &pos, bool novirtual);
 	~FxVMFunctionCall();
 	FxExpression *Resolve(FCompileContext&);
 	PPrototype *ReturnProto();
-	VMFunction *GetDirectFunction();
+	VMFunction *GetDirectFunction(const VersionInfo &ver);
 	ExpEmit Emit(VMFunctionBuilder *build);
 	bool CheckEmitCast(VMFunctionBuilder *build, bool returnit, ExpEmit &reg);
 	TArray<PType*> &GetReturnTypes() const
@@ -1738,7 +1746,7 @@ public:
 	FxExpression *Resolve(FCompileContext&);
 	ExpEmit Emit(VMFunctionBuilder *build);
 	void Add(FxExpression *expr) { if (expr != NULL) Expressions.Push(expr); expr->NeedResult = false; }
-	VMFunction *GetDirectFunction();
+	VMFunction *GetDirectFunction(const VersionInfo &ver);
 	bool CheckReturn();
 };
 
@@ -1945,7 +1953,7 @@ public:
 	~FxReturnStatement();
 	FxExpression *Resolve(FCompileContext&);
 	ExpEmit Emit(VMFunctionBuilder *build);
-	VMFunction *GetDirectFunction();
+	VMFunction *GetDirectFunction(const VersionInfo &ver);
 	bool CheckReturn() { return true; }
 };
 

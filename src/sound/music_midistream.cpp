@@ -207,10 +207,6 @@ void MIDIStreamer::CheckCaps(int tech)
 EMidiDevice MIDIStreamer::SelectMIDIDevice(EMidiDevice device)
 {
 	/* MIDI are played as:
-		- OPL: 
-			- if explicitly selected by $mididevice 
-			- when snd_mididevice  is -3 and no midi device is set for the song
-
 		- Timidity: 
 			- if explicitly selected by $mididevice 
 			- when snd_mididevice  is -2 and no midi device is set for the song
@@ -218,12 +214,12 @@ EMidiDevice MIDIStreamer::SelectMIDIDevice(EMidiDevice device)
 		- Sound System:
 			- if explicitly selected by $mididevice 
 			- when snd_mididevice  is -1 and no midi device is set for the song
-			- as fallback when both OPL and Timidity failed unless snd_mididevice is >= 0
+			- as fallback when Timidity has failed unless snd_mididevice is >= 0
 
 		- MMAPI (Win32 only):
 			- if explicitly selected by $mididevice (non-Win32 redirects this to Sound System)
 			- when snd_mididevice  is >= 0 and no midi device is set for the song
-			- as fallback when both OPL and Timidity failed and snd_mididevice is >= 0
+			- as fallback when Timidity has failed and snd_mididevice is >= 0
 	*/
 
 	// Choose the type of MIDI device we want.
@@ -278,18 +274,6 @@ MIDIDevice *MIDIStreamer::CreateMIDIDevice(EMidiDevice devtype) const
 	case MDEV_GUS:
 		return new TimidityMIDIDevice(Args);
 
-	case MDEV_OPL:
-		try
-		{
-			return new OPLMIDIDevice(Args);
-		}
-		catch (CRecoverableError &err)
-		{
-			// The creation of an OPL MIDI device can abort with an error if no GENMIDI lump can be found.
-			Printf("Unable to create OPL MIDI device: %s\nFalling back to Sound System playback", err.GetMessage());
-			return new SndSysMIDIDevice;
-		}
-
 	case MDEV_TIMIDITY:
 		return new TimidityPPMIDIDevice(Args);
 
@@ -323,11 +307,7 @@ void MIDIStreamer::Play(bool looping, int subsong)
 	devtype = SelectMIDIDevice(DeviceType);
 	if (DumpFilename.IsNotEmpty())
 	{
-		if (devtype == MDEV_OPL)
-		{
-			MIDI = new OPLDumperMIDIDevice(DumpFilename);
-		}
-		else if (devtype == MDEV_GUS)
+		if (devtype == MDEV_GUS)
 		{
 			MIDI = new TimidityWaveWriterMIDIDevice(DumpFilename, 0);
 		}
