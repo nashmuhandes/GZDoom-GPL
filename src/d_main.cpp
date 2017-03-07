@@ -698,8 +698,6 @@ void D_Display ()
 		}
 	}
 
-	RenderTarget = screen;
-
 	// change the view size if needed
 	if (setsizeneeded && StatusBar != NULL)
 	{
@@ -974,7 +972,6 @@ void D_ErrorCleanup ()
 		menuactive = MENU_Off;
 	}
 	insave = false;
-	Renderer->ErrorCleanup();
 }
 
 //==========================================================================
