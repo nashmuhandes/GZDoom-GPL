@@ -91,7 +91,7 @@
 
 // TYPES -------------------------------------------------------------------
 
-IMPLEMENT_CLASS(D3DFB)
+IMPLEMENT_CLASS(D3DFB, false, false)
 
 struct D3DFB::PackedTexture
 {
@@ -1094,6 +1094,7 @@ void D3DFB::Update ()
 			DrawRateStuff();
 			DrawPackedTextures(d3d_showpacks);
 			EndBatch();		// Make sure all batched primitives are drawn.
+			In2D = 0;
 			Flip();
 		}
 		In2D = 0;
@@ -1221,6 +1222,24 @@ void D3DFB::Flip()
 		// Flip the TempRenderTexture to the other one now.
 		CurrRenderTexture ^= RenderTextureToggle;
 		TempRenderTexture = RenderTexture[CurrRenderTexture];
+	}
+
+	if (Windowed)
+	{
+		RECT box;
+		GetClientRect(Window, &box);
+		if (box.right > 0 && box.right > 0 && (Width != box.right || Height != box.bottom))
+		{
+			Resize(box.right, box.bottom);
+
+			TrueHeight = Height;
+			PixelDoubling = 0;
+			LBOffsetI = 0;
+			LBOffset = 0.0f;
+			Reset();
+
+			V_OutputResized(Width, Height);
+		}
 	}
 }
 
@@ -1723,7 +1742,6 @@ void D3DFB::NewRefreshRate ()
 
 void D3DFB::Blank ()
 {
-	// Only used by movie player, which isn't working with D3D9 yet.
 }
 
 void D3DFB::SetBlendingRect(int x1, int y1, int x2, int y2)
@@ -3100,11 +3118,16 @@ void D3DFB::FlatFill(int left, int top, int right, int bottom, FTexture *src, bo
 //
 // Here, "simple" means that a simple triangle fan can draw it.
 //
+// Bottomclip is ignored by this implementation, since the hardware renderer
+// will unconditionally draw the status bar border every frame on top of the
+// polygons, so there's no need to waste time setting up a special scissor
+// rectangle here and needlessly forcing separate batches.
+//
 //==========================================================================
 
 void D3DFB::FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
 	double originx, double originy, double scalex, double scaley,
-	DAngle rotation, FDynamicColormap *colormap, int lightlevel)
+	DAngle rotation, FDynamicColormap *colormap, PalEntry flatcolor, int lightlevel, int bottomclip)
 {
 	// Use an equation similar to player sprites to determine shade
 	double fadelevel = clamp((swrenderer::LightVisibility::LightLevelToShade(lightlevel, true)/65536. - 12) / NUMCOLORMAPS, 0.0, 1.0);
@@ -3125,7 +3148,7 @@ void D3DFB::FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
 	}
 	if (In2D < 2)
 	{
-		Super::FillSimplePoly(texture, points, npoints, originx, originy, scalex, scaley, rotation, colormap, lightlevel);
+		Super::FillSimplePoly(texture, points, npoints, originx, originy, scalex, scaley, rotation, colormap, flatcolor, lightlevel, bottomclip);
 		return;
 	}
 	if (!InScene)

@@ -336,7 +336,7 @@ bool Win32Video::GoFullscreen (bool yes)
 	HRESULT hr[2];
 	int count;
 
-	// FIXME: Do this right for D3D. (This function is only called by the movie player when using D3D.)
+	// FIXME: Do this right for D3D.
 	if (D3D != NULL)
 	{
 		return yes;
@@ -372,7 +372,7 @@ bool Win32Video::GoFullscreen (bool yes)
 	return false;
 }
 
-// Flips to the GDI surface and clears it; used by the movie player
+// Flips to the GDI surface and clears it
 void Win32Video::BlankForGDI ()
 {
 	static_cast<BaseWinFB *> (screen)->Blank ();
@@ -389,6 +389,8 @@ void Win32Video::BlankForGDI ()
 
 void Win32Video::DumpAdapters()
 {
+	using OptWin32::GetMonitorInfoA;
+
 	if (D3D == NULL)
 	{
 		Printf("Multi-monitor support requires Direct3D.\n");
@@ -417,9 +419,8 @@ void Win32Video::DumpAdapters()
 		MONITORINFOEX mi;
 		mi.cbSize = sizeof(mi);
 
-		TOptWin32Proc<BOOL(WINAPI*)(HMONITOR, LPMONITORINFO)> GetMonitorInfo("user32.dll", "GetMonitorInfoW");
-		assert(GetMonitorInfo != NULL); // Missing in NT4, but so is D3D
-		if (GetMonitorInfo.Call(hm, &mi))
+		assert(GetMonitorInfo); // Missing in NT4, but so is D3D
+		if (GetMonitorInfo(hm, &mi))
 		{
 			mysnprintf(moreinfo, countof(moreinfo), " [%ldx%ld @ (%ld,%ld)]%s",
 				mi.rcMonitor.right - mi.rcMonitor.left,
@@ -639,6 +640,11 @@ DFrameBuffer *Win32Video::CreateFrameBuffer (int width, int height, bool bgra, b
 	BaseWinFB *fb;
 	PalEntry flashColor;
 	int flashAmount;
+
+	if (fullscreen)
+	{
+		I_ClosestResolution(&width, &height, D3D ? 32 : 8);
+	}
 
 	LOG4 ("CreateFB %d %d %d %p\n", width, height, fullscreen, old);
 
