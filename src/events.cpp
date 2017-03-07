@@ -117,7 +117,7 @@ bool E_UnregisterHandler(DStaticEventHandler* handler)
 	return true;
 }
 
-bool E_SendNetworkEvent(FString name, int arg1, int arg2, int arg3)
+bool E_SendNetworkEvent(FString name, int arg1, int arg2, int arg3, bool manual)
 {
 	if (gamestate != GS_LEVEL)
 		return false;
@@ -128,6 +128,7 @@ bool E_SendNetworkEvent(FString name, int arg1, int arg2, int arg3)
 	Net_WriteLong(arg1);
 	Net_WriteLong(arg2);
 	Net_WriteLong(arg3);
+	Net_WriteByte(manual);
 
 	return true;
 }
@@ -433,10 +434,10 @@ bool E_Responder(event_t* ev)
 	return false;
 }
 
-void E_Console(int player, FString name, int arg1, int arg2, int arg3)
+void E_Console(int player, FString name, int arg1, int arg2, int arg3, bool manual)
 {
 	for (DStaticEventHandler* handler = E_FirstEventHandler; handler; handler = handler->next)
-		handler->ConsoleProcess(player, name, arg1, arg2, arg3);
+		handler->ConsoleProcess(player, name, arg1, arg2, arg3, manual);
 }
 
 bool E_CheckUiProcessors()
@@ -472,57 +473,51 @@ IMPLEMENT_POINTER(prev)
 IMPLEMENT_POINTERS_END
 
 IMPLEMENT_CLASS(DEventHandler, false, false);
-IMPLEMENT_CLASS(DBaseEvent, false, false)
-IMPLEMENT_CLASS(DRenderEvent, false, false)
-IMPLEMENT_CLASS(DWorldEvent, false, false)
-IMPLEMENT_CLASS(DPlayerEvent, false, false)
-IMPLEMENT_CLASS(DUiEvent, false, false)
-IMPLEMENT_CLASS(DInputEvent, false, false)
-IMPLEMENT_CLASS(DConsoleEvent, false, false)
 
 DEFINE_FIELD_X(StaticEventHandler, DStaticEventHandler, Order);
 DEFINE_FIELD_X(StaticEventHandler, DStaticEventHandler, IsUiProcessor);
 DEFINE_FIELD_X(StaticEventHandler, DStaticEventHandler, RequireMouse);
 
-DEFINE_FIELD_X(RenderEvent, DRenderEvent, ViewPos);
-DEFINE_FIELD_X(RenderEvent, DRenderEvent, ViewAngle);
-DEFINE_FIELD_X(RenderEvent, DRenderEvent, ViewPitch);
-DEFINE_FIELD_X(RenderEvent, DRenderEvent, ViewRoll);
-DEFINE_FIELD_X(RenderEvent, DRenderEvent, FracTic);
-DEFINE_FIELD_X(RenderEvent, DRenderEvent, Camera);
+DEFINE_FIELD_X(RenderEvent, FRenderEvent, ViewPos);
+DEFINE_FIELD_X(RenderEvent, FRenderEvent, ViewAngle);
+DEFINE_FIELD_X(RenderEvent, FRenderEvent, ViewPitch);
+DEFINE_FIELD_X(RenderEvent, FRenderEvent, ViewRoll);
+DEFINE_FIELD_X(RenderEvent, FRenderEvent, FracTic);
+DEFINE_FIELD_X(RenderEvent, FRenderEvent, Camera);
 
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, IsSaveGame);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, IsReopen);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, Thing);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, Inflictor);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, Damage);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, DamageSource);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, DamageType);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, DamageFlags);
-DEFINE_FIELD_X(WorldEvent, DWorldEvent, DamageAngle);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, IsSaveGame);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, IsReopen);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, Thing);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, Inflictor);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, Damage);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, DamageSource);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, DamageType);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, DamageFlags);
+DEFINE_FIELD_X(WorldEvent, FWorldEvent, DamageAngle);
 
-DEFINE_FIELD_X(PlayerEvent, DPlayerEvent, PlayerNumber);
-DEFINE_FIELD_X(PlayerEvent, DPlayerEvent, IsReturn);
+DEFINE_FIELD_X(PlayerEvent, FPlayerEvent, PlayerNumber);
+DEFINE_FIELD_X(PlayerEvent, FPlayerEvent, IsReturn);
 
-DEFINE_FIELD_X(UiEvent, DUiEvent, Type);
-DEFINE_FIELD_X(UiEvent, DUiEvent, KeyString);
-DEFINE_FIELD_X(UiEvent, DUiEvent, KeyChar);
-DEFINE_FIELD_X(UiEvent, DUiEvent, MouseX);
-DEFINE_FIELD_X(UiEvent, DUiEvent, MouseY);
-DEFINE_FIELD_X(UiEvent, DUiEvent, IsShift);
-DEFINE_FIELD_X(UiEvent, DUiEvent, IsAlt);
-DEFINE_FIELD_X(UiEvent, DUiEvent, IsCtrl);
+DEFINE_FIELD_X(UiEvent, FUiEvent, Type);
+DEFINE_FIELD_X(UiEvent, FUiEvent, KeyString);
+DEFINE_FIELD_X(UiEvent, FUiEvent, KeyChar);
+DEFINE_FIELD_X(UiEvent, FUiEvent, MouseX);
+DEFINE_FIELD_X(UiEvent, FUiEvent, MouseY);
+DEFINE_FIELD_X(UiEvent, FUiEvent, IsShift);
+DEFINE_FIELD_X(UiEvent, FUiEvent, IsAlt);
+DEFINE_FIELD_X(UiEvent, FUiEvent, IsCtrl);
 
-DEFINE_FIELD_X(InputEvent, DInputEvent, Type);
-DEFINE_FIELD_X(InputEvent, DInputEvent, KeyScan);
-DEFINE_FIELD_X(InputEvent, DInputEvent, KeyString);
-DEFINE_FIELD_X(InputEvent, DInputEvent, KeyChar);
-DEFINE_FIELD_X(InputEvent, DInputEvent, MouseX);
-DEFINE_FIELD_X(InputEvent, DInputEvent, MouseY);
+DEFINE_FIELD_X(InputEvent, FInputEvent, Type);
+DEFINE_FIELD_X(InputEvent, FInputEvent, KeyScan);
+DEFINE_FIELD_X(InputEvent, FInputEvent, KeyString);
+DEFINE_FIELD_X(InputEvent, FInputEvent, KeyChar);
+DEFINE_FIELD_X(InputEvent, FInputEvent, MouseX);
+DEFINE_FIELD_X(InputEvent, FInputEvent, MouseY);
 
-DEFINE_FIELD_X(ConsoleEvent, DConsoleEvent, Player)
-DEFINE_FIELD_X(ConsoleEvent, DConsoleEvent, Name)
-DEFINE_FIELD_X(ConsoleEvent, DConsoleEvent, Args)
+DEFINE_FIELD_X(ConsoleEvent, FConsoleEvent, Player)
+DEFINE_FIELD_X(ConsoleEvent, FConsoleEvent, Name)
+DEFINE_FIELD_X(ConsoleEvent, FConsoleEvent, Args)
+DEFINE_FIELD_X(ConsoleEvent, FConsoleEvent, IsManual)
 
 DEFINE_ACTION_FUNCTION(DStaticEventHandler, SetOrder)
 {
@@ -545,7 +540,7 @@ DEFINE_ACTION_FUNCTION(DEventHandler, SendNetworkEvent)
 	PARAM_INT(arg3);
 	//
 
-	ACTION_RETURN_BOOL(E_SendNetworkEvent(name, arg1, arg2, arg3));
+	ACTION_RETURN_BOOL(E_SendNetworkEvent(name, arg1, arg2, arg3, false));
 }
 
 DEFINE_ACTION_FUNCTION(DEventHandler, Create)
@@ -717,19 +712,12 @@ void DStaticEventHandler::OnUnregister()
 	}
 }
 
-static DWorldEvent* E_SetupWorldEvent()
+static FWorldEvent E_SetupWorldEvent()
 {
-	static DWorldEvent* e = nullptr;
-	if (!e) e = (DWorldEvent*)RUNTIME_CLASS(DWorldEvent)->CreateNew();
-	e->IsSaveGame = savegamerestore;
-	e->IsReopen = level.FromSnapshot && !savegamerestore; // each one by itself isnt helpful, but with hub load we have savegamerestore==0 and level.FromSnapshot==1.
-	e->Thing = nullptr;
-	e->Inflictor = nullptr;
-	e->Damage = 0;
-	e->DamageAngle = 0.0;
-	e->DamageFlags = 0;
-	e->DamageSource = 0;
-	e->DamageType = NAME_None;
+	FWorldEvent e;
+	e.IsSaveGame = savegamerestore;
+	e.IsReopen = level.FromSnapshot && !savegamerestore; // each one by itself isnt helpful, but with hub load we have savegamerestore==0 and level.FromSnapshot==1.
+	e.DamageAngle = 0.0;
 	return e;
 }
 
@@ -740,8 +728,8 @@ void DStaticEventHandler::WorldLoaded()
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldLoaded_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -753,8 +741,8 @@ void DStaticEventHandler::WorldUnloaded()
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldUnloaded_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -766,9 +754,9 @@ void DStaticEventHandler::WorldThingSpawned(AActor* actor)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldThingSpawned_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		e->Thing = actor;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		e.Thing = actor;
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -780,10 +768,10 @@ void DStaticEventHandler::WorldThingDied(AActor* actor, AActor* inflictor)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldThingDied_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		e->Thing = actor;
-		e->Inflictor = inflictor;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		e.Thing = actor;
+		e.Inflictor = inflictor;
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -795,9 +783,9 @@ void DStaticEventHandler::WorldThingRevived(AActor* actor)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldThingRevived_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		e->Thing = actor;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		e.Thing = actor;
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -809,14 +797,14 @@ void DStaticEventHandler::WorldThingDamaged(AActor* actor, AActor* inflictor, AA
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldThingDamaged_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		e->Thing = actor;
-		e->Damage = damage;
-		e->DamageSource = source;
-		e->DamageType = mod;
-		e->DamageFlags = flags;
-		e->DamageAngle = angle;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		e.Thing = actor;
+		e.Damage = damage;
+		e.DamageSource = source;
+		e.DamageType = mod;
+		e.DamageFlags = flags;
+		e.DamageAngle = angle;
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -828,9 +816,9 @@ void DStaticEventHandler::WorldThingDestroyed(AActor* actor)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldThingDestroyed_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		e->Thing = actor;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		e.Thing = actor;
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -842,8 +830,8 @@ void DStaticEventHandler::WorldLightning()
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldLightning_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -855,22 +843,21 @@ void DStaticEventHandler::WorldTick()
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_WorldTick_VMPtr)
 			return;
-		DWorldEvent* e = E_SetupWorldEvent();
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FWorldEvent e = E_SetupWorldEvent();
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
 
-static DRenderEvent* E_SetupRenderEvent()
+static FRenderEvent E_SetupRenderEvent()
 {
-	static DRenderEvent* e = nullptr;
-	if (!e) e = (DRenderEvent*)RUNTIME_CLASS(DRenderEvent)->CreateNew();
-	e->ViewPos = ::ViewPos;
-	e->ViewAngle = ::ViewAngle;
-	e->ViewPitch = ::ViewPitch;
-	e->ViewRoll = ::ViewRoll;
-	e->FracTic = ::r_TicFracF;
-	e->Camera = ::camera;
+	FRenderEvent e;
+	e.ViewPos = ::ViewPos;
+	e.ViewAngle = ::ViewAngle;
+	e.ViewPitch = ::ViewPitch;
+	e.ViewRoll = ::ViewRoll;
+	e.FracTic = ::r_TicFracF;
+	e.Camera = ::camera;
 	return e;
 }
 
@@ -881,8 +868,8 @@ void DStaticEventHandler::RenderFrame()
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_RenderFrame_VMPtr)
 			return;
-		DRenderEvent* e = E_SetupRenderEvent();
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FRenderEvent e = E_SetupRenderEvent();
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -894,19 +881,10 @@ void DStaticEventHandler::RenderOverlay()
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_RenderOverlay_VMPtr)
 			return;
-		DRenderEvent* e = E_SetupRenderEvent();
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FRenderEvent e = E_SetupRenderEvent();
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
-}
-
-static DPlayerEvent* E_SetupPlayerEvent()
-{
-	static DPlayerEvent* e = nullptr;
-	if (!e) e = (DPlayerEvent*)RUNTIME_CLASS(DPlayerEvent)->CreateNew();
-	e->PlayerNumber = -1;
-	e->IsReturn = false;
-	return e;
 }
 
 void DStaticEventHandler::PlayerEntered(int num, bool fromhub)
@@ -916,10 +894,8 @@ void DStaticEventHandler::PlayerEntered(int num, bool fromhub)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_PlayerEntered_VMPtr)
 			return;
-		DPlayerEvent* e = E_SetupPlayerEvent();
-		e->IsReturn = fromhub;
-		e->PlayerNumber = num;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FPlayerEvent e = { num, fromhub };
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -931,9 +907,8 @@ void DStaticEventHandler::PlayerRespawned(int num)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_PlayerRespawned_VMPtr)
 			return;
-		DPlayerEvent* e = E_SetupPlayerEvent();
-		e->PlayerNumber = num;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FPlayerEvent e = { num, false };
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -945,9 +920,8 @@ void DStaticEventHandler::PlayerDied(int num)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_PlayerDied_VMPtr)
 			return;
-		DPlayerEvent* e = E_SetupPlayerEvent();
-		e->PlayerNumber = num;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FPlayerEvent e = { num, false };
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
@@ -959,25 +933,50 @@ void DStaticEventHandler::PlayerDisconnected(int num)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_PlayerDisconnected_VMPtr)
 			return;
-		DPlayerEvent* e = E_SetupPlayerEvent();
-		e->PlayerNumber = num;
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		FPlayerEvent e = { num, false };
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 	}
 }
 
-static DUiEvent* E_SetupUiEvent()
+FUiEvent::FUiEvent(event_t *ev)
 {
-	static DUiEvent* e = nullptr;
-	if (!e) e = (DUiEvent*)RUNTIME_CLASS(DUiEvent)->CreateNew();
-	e->Type = EV_GUI_None;
-	e->IsShift = false;
-	e->IsAlt = false;
-	e->IsCtrl = false;
-	e->MouseX = e->MouseY = 0;
-	e->KeyChar = 0;
-	e->KeyString = "";
-	return e;
+	Type = (EGUIEvent)ev->subtype;
+	KeyChar = 0;
+	IsShift = false;
+	IsAlt = false;
+	IsCtrl = false;
+	MouseX = 0;
+	MouseY = 0;
+	// we don't want the modders to remember what weird fields mean what for what events.
+	switch (ev->subtype)
+	{
+	case EV_GUI_None:
+		break;
+	case EV_GUI_KeyDown:
+	case EV_GUI_KeyRepeat:
+	case EV_GUI_KeyUp:
+		KeyChar = ev->data1;
+		KeyString = FString(char(ev->data1));
+		IsShift = !!(ev->data3 & GKM_SHIFT);
+		IsAlt = !!(ev->data3 & GKM_ALT);
+		IsCtrl = !!(ev->data3 & GKM_CTRL);
+		break;
+	case EV_GUI_Char:
+		KeyChar = ev->data1;
+		KeyString = FString(char(ev->data1));
+		IsAlt = !!ev->data2; // only true for Win32, not sure about SDL
+		break;
+	default: // mouse event
+			 // note: SDL input doesn't seem to provide these at all
+			 //Printf("Mouse data: %d, %d, %d, %d\n", ev->x, ev->y, ev->data1, ev->data2);
+		MouseX = ev->data1;
+		MouseY = ev->data2;
+		IsShift = !!(ev->data3 & GKM_SHIFT);
+		IsAlt = !!(ev->data3 & GKM_ALT);
+		IsCtrl = !!(ev->data3 & GKM_CTRL);
+		break;
+	}
 }
 
 bool DStaticEventHandler::UiProcess(event_t* ev)
@@ -987,43 +986,11 @@ bool DStaticEventHandler::UiProcess(event_t* ev)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_UiProcess_VMPtr)
 			return false;
-		DUiEvent* e = E_SetupUiEvent();
-
-		//
-		e->Type = (EGUIEvent)ev->subtype;
-		// we don't want the modders to remember what weird fields mean what for what events.
-		switch (e->Type)
-		{
-		case EV_GUI_None:
-			break;
-		case EV_GUI_KeyDown:
-		case EV_GUI_KeyRepeat:
-		case EV_GUI_KeyUp:
-			e->KeyChar = ev->data1;
-			e->KeyString.Format("%c", e->KeyChar);
-			e->IsShift = !!(ev->data3 & GKM_SHIFT);
-			e->IsAlt = !!(ev->data3 & GKM_ALT);
-			e->IsCtrl = !!(ev->data3 & GKM_CTRL);
-			break;
-		case EV_GUI_Char:
-			e->KeyChar = ev->data1;
-			e->KeyString.Format("%c", e->KeyChar);
-			e->IsAlt = !!ev->data2; // only true for Win32, not sure about SDL
-			break;
-		default: // mouse event
-			     // note: SDL input doesn't seem to provide these at all
-			//Printf("Mouse data: %d, %d, %d, %d\n", ev->x, ev->y, ev->data1, ev->data2);
-			e->MouseX = ev->data1;
-			e->MouseY = ev->data2;
-			e->IsShift = !!(ev->data3 & GKM_SHIFT);
-			e->IsAlt = !!(ev->data3 & GKM_ALT);
-			e->IsCtrl = !!(ev->data3 & GKM_CTRL);
-			break;
-		}
+		FUiEvent e = ev;
 
 		int processed;
 		VMReturn results[1] = { &processed };
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, results, 1, nullptr);
 		return !!processed;
 	}
@@ -1031,16 +998,31 @@ bool DStaticEventHandler::UiProcess(event_t* ev)
 	return false;
 }
 
-static DInputEvent* E_SetupInputEvent()
+FInputEvent::FInputEvent(event_t *ev)
 {
-	static DInputEvent* e = nullptr;
-	if (!e) e = (DInputEvent*)RUNTIME_CLASS(DInputEvent)->CreateNew();
-	e->Type = EV_None;
-	e->KeyScan = 0;
-	e->KeyChar = 0;
-	e->KeyString = "";
-	e->MouseX = e->MouseY = 0;
-	return e;
+	Type = (EGenericEvent)ev->type;
+	// we don't want the modders to remember what weird fields mean what for what events.
+	KeyScan = 0;
+	KeyChar = 0;
+	MouseX = 0;
+	MouseY = 0;
+	switch (Type)
+	{
+	case EV_None:
+		break;
+	case EV_KeyDown:
+	case EV_KeyUp:
+		KeyScan = ev->data1;
+		KeyChar = ev->data2;
+		KeyString = FString(char(ev->data1));
+		break;
+	case EV_Mouse:
+		MouseX = ev->x;
+		MouseY = ev->y;
+		break;
+	default:
+		break; // EV_DeviceChange = wat?
+	}
 }
 
 bool DStaticEventHandler::InputProcess(event_t* ev)
@@ -1050,32 +1032,13 @@ bool DStaticEventHandler::InputProcess(event_t* ev)
 		// don't create excessive DObjects if not going to be processed anyway
 		if (func == DStaticEventHandler_InputProcess_VMPtr)
 			return false;
-		DInputEvent* e = E_SetupInputEvent();
 
+		FInputEvent e = ev;
 		//
-		e->Type = (EGenericEvent)ev->type;
-		// we don't want the modders to remember what weird fields mean what for what events.
-		switch (e->Type)
-		{
-		case EV_None:
-			break;
-		case EV_KeyDown:
-		case EV_KeyUp:
-			e->KeyScan = ev->data1;
-			e->KeyChar = ev->data2;
-			e->KeyString.Format("%c", e->KeyChar);
-			break;
-		case EV_Mouse:
-			e->MouseX = ev->x;
-			e->MouseY = ev->y;
-			break;
-		default:
-			break; // EV_DeviceChange = wat?
-		}
 
 		int processed;
 		VMReturn results[1] = { &processed };
-		VMValue params[2] = { (DStaticEventHandler*)this, e };
+		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		GlobalVMStack.Call(func, params, 2, results, 1, nullptr);
 		return !!processed;
 	}
@@ -1083,18 +1046,7 @@ bool DStaticEventHandler::InputProcess(event_t* ev)
 	return false;
 }
 
-static DConsoleEvent* E_SetupConsoleEvent()
-{
-	static DConsoleEvent* e = nullptr;
-	if (!e) e = (DConsoleEvent*)RUNTIME_CLASS(DConsoleEvent)->CreateNew();
-	e->Player = -1;
-	e->Name = "";
-	for (size_t i = 0; i < countof(e->Args); i++)
-		e->Args[i] = 0;
-	return e;
-}
-
-void DStaticEventHandler::ConsoleProcess(int player, FString name, int arg1, int arg2, int arg3)
+void DStaticEventHandler::ConsoleProcess(int player, FString name, int arg1, int arg2, int arg3, bool manual)
 {
 	if (player < 0)
 	{
@@ -1103,16 +1055,17 @@ void DStaticEventHandler::ConsoleProcess(int player, FString name, int arg1, int
 			// don't create excessive DObjects if not going to be processed anyway
 			if (func == DStaticEventHandler_ConsoleProcess_VMPtr)
 				return;
-			DConsoleEvent* e = E_SetupConsoleEvent();
+			FConsoleEvent e;
 
 			//
-			e->Player = player;
-			e->Name = name;
-			e->Args[0] = arg1;
-			e->Args[1] = arg2;
-			e->Args[2] = arg3;
+			e.Player = player;
+			e.Name = name;
+			e.Args[0] = arg1;
+			e.Args[1] = arg2;
+			e.Args[2] = arg3;
+			e.IsManual = manual;
 
-			VMValue params[2] = { (DStaticEventHandler*)this, e };
+			VMValue params[2] = { (DStaticEventHandler*)this, &e };
 			GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 		}
 	}
@@ -1123,16 +1076,17 @@ void DStaticEventHandler::ConsoleProcess(int player, FString name, int arg1, int
 			// don't create excessive DObjects if not going to be processed anyway
 			if (func == DStaticEventHandler_NetworkProcess_VMPtr)
 				return;
-			DConsoleEvent* e = E_SetupConsoleEvent();
+			FConsoleEvent e;
 
 			//
-			e->Player = player;
-			e->Name = name;
-			e->Args[0] = arg1;
-			e->Args[1] = arg2;
-			e->Args[2] = arg3;
+			e.Player = player;
+			e.Name = name;
+			e.Args[0] = arg1;
+			e.Args[1] = arg2;
+			e.Args[2] = arg3;
+			e.IsManual = manual;
 
-			VMValue params[2] = { (DStaticEventHandler*)this, e };
+			VMValue params[2] = { (DStaticEventHandler*)this, &e };
 			GlobalVMStack.Call(func, params, 2, nullptr, 0, nullptr);
 		}
 	}
@@ -1162,7 +1116,7 @@ CCMD(event)
 		for (int i = 0; i < argn; i++)
 			arg[i] = atoi(argv[2 + i]);
 		// call locally
-		E_Console(-1, argv[1], arg[0], arg[1], arg[2]);
+		E_Console(-1, argv[1], arg[0], arg[1], arg[2], true);
 	}
 }
 
@@ -1187,6 +1141,6 @@ CCMD(netevent)
 		for (int i = 0; i < argn; i++)
 			arg[i] = atoi(argv[2 + i]);
 		// call networked
-		E_SendNetworkEvent(argv[1], arg[0], arg[1], arg[2]);
+		E_SendNetworkEvent(argv[1], arg[0], arg[1], arg[2], true);
 	}
 }
