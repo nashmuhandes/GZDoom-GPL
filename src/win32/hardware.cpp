@@ -47,7 +47,7 @@
 #include "doomstat.h"
 #include "m_argv.h"
 #include "version.h"
-#include "r_renderer.h"
+#include "r_swrenderer.h"
 
 EXTERN_CVAR (Bool, ticker)
 EXTERN_CVAR (Bool, fullscreen)
@@ -73,16 +73,22 @@ bool changerenderer;
 // [ZDoomGL]
 CUSTOM_CVAR (Int, vid_renderer, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
+	// 0: Software renderer
+	// 1: OpenGL renderer
+
 	if (self != currentrenderer)
 	{
 		switch (self)
 		{
+		case 0:
+			Printf("Switching to software renderer...\n");
+			break;
 		case 1:
 			Printf("Switching to OpenGL renderer...\n");
 			break;
 		default:
-			Printf("Unknown renderer (%d).  Falling back to the OpenGL renderer...\n", *vid_renderer);
-			self = 1; // make sure to actually switch to the OpenGL renderer
+			Printf("Unknown renderer (%d).  Falling back to software renderer...\n", *vid_renderer);
+			self = 0; // make sure to actually switch to the software renderer
 			break;
 		}
 		//changerenderer = true;
@@ -149,10 +155,11 @@ static void I_DeleteRenderer()
 
 void I_CreateRenderer()
 {
-	//currentrenderer = vid_renderer;
+	currentrenderer = vid_renderer;
 	if (Renderer == NULL)
 	{
-		Renderer = gl_CreateInterface();
+		if (currentrenderer==1) Renderer = gl_CreateInterface();
+		else Renderer = new FSoftwareRenderer;
 		atterm(I_DeleteRenderer);
 	}
 }
@@ -350,7 +357,7 @@ void I_RestoreWindowedPos ()
 
 extern int NewWidth, NewHeight, NewBits, DisplayBits;
 
-CUSTOM_CVAR (Bool, fullscreen, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+CUSTOM_CVAR (Bool, fullscreen, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
 {
 	NewWidth = screen->GetWidth();
 	NewHeight = screen->GetHeight();

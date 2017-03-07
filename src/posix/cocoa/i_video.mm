@@ -48,6 +48,7 @@
 #include "m_argv.h"
 #include "m_png.h"
 #include "r_renderer.h"
+#include "r_swrenderer.h"
 #include "st_console.h"
 #include "stats.h"
 #include "textures.h"
@@ -1312,13 +1313,15 @@ static void I_DeleteRenderer()
 
 void I_CreateRenderer()
 {
-	//s_currentRenderer = vid_renderer;
+	s_currentRenderer = vid_renderer;
 
 	if (NULL == Renderer)
 	{
 		extern FRenderer* gl_CreateInterface();
 
-		Renderer = gl_CreateInterface();
+		Renderer = 1 == s_currentRenderer
+			? gl_CreateInterface()
+			: new FSoftwareRenderer;
 		atterm(I_DeleteRenderer);
 	}
 }

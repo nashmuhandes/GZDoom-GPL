@@ -56,6 +56,7 @@ extern HANDLE FPSLimitEvent;
 
 class D3DTex;
 class D3DPal;
+struct FSoftwareRenderer;
 
 class Win32Video : public IVideo
 {

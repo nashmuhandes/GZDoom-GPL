@@ -11,6 +11,7 @@
 #include "stats.h"
 #include "v_palette.h"
 #include "sdlvideo.h"
+#include "r_swrenderer.h"
 #include "version.h"
 
 #include <SDL.h>
