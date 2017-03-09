@@ -289,7 +289,7 @@ void D_ProcessEvents (void)
 		if (M_Responder (ev))
 			continue;				// menu ate the event
 		// check events
-		if (E_Responder(ev)) // [ZZ] ZScript ate the event
+		if (ev->type != EV_Mouse && E_Responder(ev)) // [ZZ] ZScript ate the event // update 07.03.17: mouse events are handled directly
 			continue;
 		G_Responder (ev);
 	}
@@ -311,7 +311,7 @@ void D_PostEvent (const event_t *ev)
 		return;
 	}
 	events[eventhead] = *ev;
-	if (ev->type == EV_Mouse && !paused && menuactive == MENU_Off && ConsoleState != c_down && ConsoleState != c_falling && !E_CheckUiProcessors())
+	if (ev->type == EV_Mouse && menuactive == MENU_Off && ConsoleState != c_down && ConsoleState != c_falling && !E_Responder(ev) && !paused)
 	{
 		if (Button_Mlook.bDown || freelook)
 		{
@@ -389,14 +389,14 @@ CUSTOM_CVAR (Int, dmflags, 0, CVAR_SERVERINFO)
 	// If nofov is set, force everybody to the arbitrator's FOV.
 	if ((self & DF_NO_FOV) && consoleplayer == Net_Arbitrator)
 	{
-		BYTE fov;
+		uint8_t fov;
 
 		Net_WriteByte (DEM_FOV);
 
 		// If the game is started with DF_NO_FOV set, the arbitrator's
 		// DesiredFOV will not be set when this callback is run, so
 		// be sure not to transmit a 0 FOV.
-		fov = (BYTE)players[consoleplayer].DesiredFOV;
+		fov = (uint8_t)players[consoleplayer].DesiredFOV;
 		if (fov == 0)
 		{
 			fov = 90;
@@ -1937,7 +1937,7 @@ static FString CheckGameInfo(TArray<FString> & pwads)
 
 		if (resfile != NULL)
 		{
-			DWORD cnt = resfile->LumpCount();
+			uint32_t cnt = resfile->LumpCount();
 			for(int i=cnt-1; i>=0; i--)
 			{
 				FResourceLump *lmp = resfile->GetLump(i);

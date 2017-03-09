@@ -73,7 +73,7 @@ EXTERN_CVAR (Int, autosavecount)
 //#define SIMULATEERRORS		(RAND_MAX/3)
 #define SIMULATEERRORS			0
 
-extern BYTE		*demo_p;		// [RH] Special "ticcmds" get recorded in demos
+extern uint8_t		*demo_p;		// [RH] Special "ticcmds" get recorded in demos
 extern FString	savedescription;
 extern FString	savegamefile;
 
@@ -83,7 +83,7 @@ doomcom_t		doomcom;
 #define netbuffer (doomcom.data)
 
 enum { NET_PeerToPeer, NET_PacketServer };
-BYTE NetMode = NET_PeerToPeer;
+uint8_t NetMode = NET_PeerToPeer;
 
 
 
@@ -128,11 +128,11 @@ void D_ProcessEvents (void);
 void G_BuildTiccmd (ticcmd_t *cmd); 
 void D_DoAdvanceDemo (void);
 
-static void SendSetup (DWORD playersdetected[MAXNETNODES], BYTE gotsetup[MAXNETNODES], int len);
-static void RunScript(BYTE **stream, APlayerPawn *pawn, int snum, int argn, int always);
+static void SendSetup (uint32_t playersdetected[MAXNETNODES], uint8_t gotsetup[MAXNETNODES], int len);
+static void RunScript(uint8_t **stream, APlayerPawn *pawn, int snum, int argn, int always);
 
 int		reboundpacket;
-BYTE	reboundstore[MAX_MSGLEN];
+uint8_t	reboundstore[MAX_MSGLEN];
 
 int 	frameon;
 int 	frameskip[4];
@@ -186,9 +186,9 @@ static TArray<PacketStore> OutBuffer;
 // [RH] Special "ticcmds" get stored in here
 static struct TicSpecial
 {
-	BYTE *streams[BACKUPTICS];
+	uint8_t *streams[BACKUPTICS];
 	size_t used[BACKUPTICS];
-	BYTE *streamptr;
+	uint8_t *streamptr;
 	size_t streamoffs;
 	size_t specialsize;
 	int	  lastmaketic;
@@ -206,7 +206,7 @@ static struct TicSpecial
 
 		for (i = 0; i < BACKUPTICS; i++)
 		{
-			streams[i] = (BYTE *)M_Malloc (256);
+			streams[i] = (uint8_t *)M_Malloc (256);
 			used[i] = 0;
 		}
 		okay = true;
@@ -238,7 +238,7 @@ static struct TicSpecial
 		DPrintf (DMSG_NOTIFY, "Expanding special size to %zu\n", specialsize);
 
 		for (i = 0; i < BACKUPTICS; i++)
-			streams[i] = (BYTE *)M_Realloc (streams[i], specialsize);
+			streams[i] = (uint8_t *)M_Realloc (streams[i], specialsize);
 
 		streamptr = streams[(maketic/ticdup)%BACKUPTICS] + streamoffs;
 	}
@@ -266,7 +266,7 @@ static struct TicSpecial
 		streamoffs = 0;
 	}
 
-	TicSpecial &operator << (BYTE it)
+	TicSpecial &operator << (uint8_t it)
 	{
 		if (streamptr)
 		{
@@ -400,7 +400,7 @@ int NetbufferSize ()
 		return k + 3 * count * numtics;
 	}
 
-	BYTE *skipper = &netbuffer[k];
+	uint8_t *skipper = &netbuffer[k];
 	if ((netbuffer[0] & NCMD_EXIT) == 0)
 	{
 		while (count-- > 0)
@@ -447,13 +447,13 @@ void HSendPacket (int node, int len)
 		{
 			fprintf (debugfile,"%i/%i send %i = SETUP [%3i]", gametic, maketic, node, len);
 			for (i = 0; i < len; i++)
-				fprintf (debugfile," %2x", ((BYTE *)netbuffer)[i]);
+				fprintf (debugfile," %2x", ((uint8_t *)netbuffer)[i]);
 		}
 		else if (netbuffer[0] & NCMD_EXIT)
 		{
 			fprintf (debugfile,"%i/%i send %i = EXIT [%3i]", gametic, maketic, node, len);
 			for (i = 0; i < len; i++)
-				fprintf (debugfile," %2x", ((BYTE *)netbuffer)[i]);
+				fprintf (debugfile," %2x", ((uint8_t *)netbuffer)[i]);
 		}
 		else
 		{
@@ -481,7 +481,7 @@ void HSendPacket (int node, int len)
 					numtics, realretrans, len);
 			
 			for (i = 0; i < len; i++)
-				fprintf (debugfile, "%c%2x", i==k?'|':' ', ((BYTE *)netbuffer)[i]);
+				fprintf (debugfile, "%c%2x", i==k?'|':' ', ((uint8_t *)netbuffer)[i]);
 		}
 		fprintf (debugfile, " [[ ");
 		for (i = 0; i < doomcom.numnodes; ++i)
@@ -614,14 +614,14 @@ bool HGetPacket (void)
 		{
 			fprintf (debugfile,"%i/%i  get %i = SETUP [%3i]", gametic, maketic, doomcom.remotenode, doomcom.datalength);
 			for (i = 0; i < doomcom.datalength; i++)
-				fprintf (debugfile, " %2x", ((BYTE *)netbuffer)[i]);
+				fprintf (debugfile, " %2x", ((uint8_t *)netbuffer)[i]);
 			fprintf (debugfile, "\n");
 		}
 		else if (netbuffer[0] & NCMD_EXIT)
 		{
 			fprintf (debugfile,"%i/%i  get %i = EXIT [%3i]", gametic, maketic, doomcom.remotenode, doomcom.datalength);
 			for (i = 0; i < doomcom.datalength; i++)
-				fprintf (debugfile, " %2x", ((BYTE *)netbuffer)[i]);
+				fprintf (debugfile, " %2x", ((uint8_t *)netbuffer)[i]);
 			fprintf (debugfile, "\n");
 		}
 		else		{
@@ -649,7 +649,7 @@ bool HGetPacket (void)
 					numtics, realretrans, doomcom.datalength);
 			
 			for (i = 0; i < doomcom.datalength; i++)
-				fprintf (debugfile, "%c%2x", i==k?'|':' ', ((BYTE *)netbuffer)[i]);
+				fprintf (debugfile, "%c%2x", i==k?'|':' ', ((uint8_t *)netbuffer)[i]);
 			if (numtics)
 				fprintf (debugfile, " <<%4x>>\n",
 					consistancy[playerfornode[doomcom.remotenode]][nettics[doomcom.remotenode]%BACKUPTICS] & 0xFFFF);
@@ -741,7 +741,7 @@ void PlayerIsGone (int netnode, int netconsole)
 		G_CheckDemoStatus ();
 
 		//WriteByte (DEM_DROPPLAYER, &demo_p);
-		//WriteByte ((BYTE)netconsole, &demo_p);
+		//WriteByte ((uint8_t)netconsole, &demo_p);
 	}
 }
 
@@ -758,7 +758,7 @@ void GetPackets (void)
 	int numtics;
 	int retransmitfrom;
 	int k;
-	BYTE playerbytes[MAXNETNODES];
+	uint8_t playerbytes[MAXNETNODES];
 	int numplayers;
 								 
 	while ( HGetPacket() )
@@ -793,7 +793,7 @@ void GetPackets (void)
 				PlayerIsGone (netnode, netconsole);
 				if (NetMode == NET_PacketServer)
 				{
-					BYTE *foo = &netbuffer[2];
+					uint8_t *foo = &netbuffer[2];
 					for (int i = 0; i < MAXPLAYERS; ++i)
 					{
 						if (playeringame[i])
@@ -909,7 +909,7 @@ void GetPackets (void)
 
 		// update command store from the packet
 		{
-			BYTE *start;
+			uint8_t *start;
 			int i, tics;
 			remoteresend[netnode] = false;
 
@@ -943,7 +943,7 @@ void NetUpdate (void)
 	int 	newtics;
 	int 	i,j;
 	int 	realstart;
-	BYTE	*cmddata;
+	uint8_t	*cmddata;
 	bool	resendOnly;
 
 	GC::CheckGC();
@@ -1121,7 +1121,7 @@ void NetUpdate (void)
 
 	for (i = 0; i < doomcom.numnodes; i++)
 	{
-		BYTE playerbytes[MAXPLAYERS];
+		uint8_t playerbytes[MAXPLAYERS];
 
 		if (!nodeingame[i])
 		{
@@ -1266,7 +1266,7 @@ void NetUpdate (void)
 					else if (i != 0)
 					{
 						int len;
-						BYTE *spec;
+						uint8_t *spec;
 
 						WriteWord (netcmds[playerbytes[l]][start].consistancy, &cmddata);
 						spec = NetSpecs[playerbytes[l]][start].GetData (&len);
@@ -1406,15 +1406,15 @@ void NetUpdate (void)
 
 struct ArbitrateData
 {
-	DWORD playersdetected[MAXNETNODES];
-	BYTE  gotsetup[MAXNETNODES];
+	uint32_t playersdetected[MAXNETNODES];
+	uint8_t  gotsetup[MAXNETNODES];
 };
 
 bool DoArbitrate (void *userdata)
 {
 	ArbitrateData *data = (ArbitrateData *)userdata;
 	char *s;
-	BYTE *stream;
+	uint8_t *stream;
 	int version;
 	int node;
 	int i, j;
@@ -1491,7 +1491,7 @@ bool DoArbitrate (void *userdata)
 	if (consoleplayer == Net_Arbitrator)
 	{
 		for (i = 0; i < doomcom.numnodes; ++i)
-			if (data->playersdetected[i] != DWORD(1 << doomcom.numnodes) - 1 || !data->gotsetup[i])
+			if (data->playersdetected[i] != uint32_t(1 << doomcom.numnodes) - 1 || !data->gotsetup[i])
 				break;
 
 		if (i == doomcom.numnodes)
@@ -1538,7 +1538,7 @@ bool DoArbitrate (void *userdata)
 	if (consoleplayer == Net_Arbitrator)
 	{
 		netbuffer[0] = NCMD_SETUP+2;
-		netbuffer[1] = (BYTE)doomcom.ticdup;
+		netbuffer[1] = (uint8_t)doomcom.ticdup;
 		netbuffer[2] = NetMode;
 		stream = &netbuffer[3];
 		WriteString (startmap, &stream);
@@ -1632,7 +1632,7 @@ void D_ArbitrateNetStart (void)
 	StartScreen->NetDone();
 }
 
-static void SendSetup (DWORD playersdetected[MAXNETNODES], BYTE gotsetup[MAXNETNODES], int len)
+static void SendSetup (uint32_t playersdetected[MAXNETNODES], uint8_t gotsetup[MAXNETNODES], int len)
 {
 	if (consoleplayer != Net_Arbitrator)
 	{
@@ -1770,7 +1770,7 @@ void D_QuitNetGame (void)
 	k = 2;
 	if (NetMode == NET_PacketServer && consoleplayer == Net_Arbitrator)
 	{
-		BYTE *foo = &netbuffer[2];
+		uint8_t *foo = &netbuffer[2];
 
 		// Let the new arbitrator know what resendto counts to use
 
@@ -1999,7 +1999,7 @@ void Net_NewMakeTic (void)
 	specials.NewMakeTic ();
 }
 
-void Net_WriteByte (BYTE it)
+void Net_WriteByte (uint8_t it)
 {
 	specials << it;
 }
@@ -2024,7 +2024,7 @@ void Net_WriteString (const char *it)
 	specials << it;
 }
 
-void Net_WriteBytes (const BYTE *block, int len)
+void Net_WriteBytes (const uint8_t *block, int len)
 {
 	while (len--)
 		specials << *block++;
@@ -2052,12 +2052,12 @@ FDynamicBuffer::~FDynamicBuffer ()
 	m_Len = m_BufferLen = 0;
 }
 
-void FDynamicBuffer::SetData (const BYTE *data, int len)
+void FDynamicBuffer::SetData (const uint8_t *data, int len)
 {
 	if (len > m_BufferLen)
 	{
 		m_BufferLen = (len + 255) & ~255;
-		m_Data = (BYTE *)M_Realloc (m_Data, m_BufferLen);
+		m_Data = (uint8_t *)M_Realloc (m_Data, m_BufferLen);
 	}
 	if (data != NULL)
 	{
@@ -2070,7 +2070,7 @@ void FDynamicBuffer::SetData (const BYTE *data, int len)
 	}
 }
 
-BYTE *FDynamicBuffer::GetData (int *len)
+uint8_t *FDynamicBuffer::GetData (int *len)
 {
 	if (len)
 		*len = m_Len;
@@ -2129,9 +2129,9 @@ static int RemoveClass(const PClass *cls)
 // [RH] Execute a special "ticcmd". The type byte should
 //		have already been read, and the stream is positioned
 //		at the beginning of the command's actual data.
-void Net_DoCommand (int type, BYTE **stream, int player)
+void Net_DoCommand (int type, uint8_t **stream, int player)
 {
-	BYTE pos = 0;
+	uint8_t pos = 0;
 	char *s = NULL;
 	int i;
 
@@ -2140,7 +2140,7 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 	case DEM_SAY:
 		{
 			const char *name = players[player].userinfo.GetName();
-			BYTE who = ReadByte (stream);
+			uint8_t who = ReadByte (stream);
 
 			s = ReadString (stream);
 			CleanseString (s);
@@ -2271,7 +2271,7 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 	case DEM_INVUSE:
 	case DEM_INVDROP:
 		{
-			DWORD which = ReadLong (stream);
+			uint32_t which = ReadLong (stream);
 			int amt = -1;
 
 			if (type == DEM_INVDROP) amt = ReadLong(stream);
@@ -2309,8 +2309,8 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 		{
 			PClassActor *typeinfo;
 			int angle = 0;
-			SWORD tid = 0;
-			BYTE special = 0;
+			int16_t tid = 0;
+			uint8_t special = 0;
 			int args[5];
 
 			s = ReadString (stream);
@@ -2541,7 +2541,7 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 
 	case DEM_ADDCONTROLLER:
 		{
-			BYTE playernum = ReadByte (stream);
+			uint8_t playernum = ReadByte (stream);
 			players[playernum].settings_controller = true;
 
 			if (consoleplayer == playernum || consoleplayer == Net_Arbitrator)
@@ -2551,7 +2551,7 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 
 	case DEM_DELCONTROLLER:
 		{
-			BYTE playernum = ReadByte (stream);
+			uint8_t playernum = ReadByte (stream);
 			players[playernum].settings_controller = false;
 
 			if (consoleplayer == playernum || consoleplayer == Net_Arbitrator)
@@ -2692,7 +2692,7 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 }
 
 // Used by DEM_RUNSCRIPT, DEM_RUNSCRIPT2, and DEM_RUNNAMEDSCRIPT
-static void RunScript(BYTE **stream, APlayerPawn *pawn, int snum, int argn, int always)
+static void RunScript(uint8_t **stream, APlayerPawn *pawn, int snum, int argn, int always)
 {
 	int arg[4] = { 0, 0, 0, 0 };
 	int i;
@@ -2708,9 +2708,9 @@ static void RunScript(BYTE **stream, APlayerPawn *pawn, int snum, int argn, int 
 	P_StartScript(pawn, NULL, snum, level.MapName, arg, MIN<int>(countof(arg), argn), ACS_NET | always);
 }
 
-void Net_SkipCommand (int type, BYTE **stream)
+void Net_SkipCommand (int type, uint8_t **stream)
 {
-	BYTE t;
+	uint8_t t;
 	size_t skip;
 
 	switch (type)

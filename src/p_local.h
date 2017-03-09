@@ -408,7 +408,7 @@ const secplane_t * P_CheckSlopeWalk(AActor *actor, DVector2 &move);
 //
 // P_SETUP
 //
-extern BYTE*			rejectmatrix;	// for fast sight rejection
+extern uint8_t*			rejectmatrix;	// for fast sight rejection
 
 
 

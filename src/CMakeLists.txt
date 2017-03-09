@@ -605,6 +605,8 @@ file( GLOB HEADER_FILES
 	scripting/decorate/*.h
 	scripting/zscript/*.h
 	scripting/vm/*.h
+	timidity/*.h
+	wildmidi/*.h
 	xlat/*.h
 	swrenderer/*.h
 	swrenderer/drawers/*.h
@@ -774,6 +776,7 @@ set( FASTMATH_SOURCES
 	sound/music_timidity_mididevice.cpp
 	sound/music_wildmidi_mididevice.cpp
 	sound/music_win_mididevice.cpp
+	sound/music_audiotoolbox_mididevice.cpp
 	sound/oalsound.cpp
 	sound/sndfile_decoder.cpp
 	sound/music_pseudo_mididevice.cpp
@@ -1212,7 +1215,7 @@ endif()
 
 if( APPLE )
 	set_target_properties(zdoom PROPERTIES
-		LINK_FLAGS "-framework Carbon -framework Cocoa -framework IOKit -framework OpenGL"
+		LINK_FLAGS "-framework AudioToolbox -framework AudioUnit -framework Carbon -framework Cocoa -framework IOKit -framework OpenGL"
 		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/posix/osx/zdoom-info.plist" )
 endif()
 

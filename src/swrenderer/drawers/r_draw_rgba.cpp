@@ -39,10 +39,17 @@
 #include "gl/data/gl_matrix.h"
 #include "swrenderer/viewport/r_viewport.h"
 #include "swrenderer/scene/r_light.h"
+#ifdef NO_SSE
+#include "r_draw_wall32.h"
+#include "r_draw_sprite32.h"
+#include "r_draw_span32.h"
+#include "r_draw_sky32.h"
+#else
 #include "r_draw_wall32_sse2.h"
 #include "r_draw_sprite32_sse2.h"
 #include "r_draw_span32_sse2.h"
 #include "r_draw_sky32_sse2.h"
+#endif
 
 #include "gi.h"
 #include "stats.h"
@@ -503,10 +510,10 @@ namespace swrenderer
 			double endz = 1.f / iz;
 			double endu = uz*endz;
 			double endv = vz*endz;
-			uint32_t stepu = (uint32_t)(SQWORD((endu - startu) * INVSPAN));
-			uint32_t stepv = (uint32_t)(SQWORD((endv - startv) * INVSPAN));
-			uint32_t u = (uint32_t)(SQWORD(startu) + _pviewx);
-			uint32_t v = (uint32_t)(SQWORD(startv) + _pviewy);
+			uint32_t stepu = (uint32_t)(int64_t((endu - startu) * INVSPAN));
+			uint32_t stepv = (uint32_t)(int64_t((endv - startv) * INVSPAN));
+			uint32_t u = (uint32_t)(int64_t(startu) + _pviewx);
+			uint32_t v = (uint32_t)(int64_t(startv) + _pviewy);
 
 			for (int i = 0; i < SPANSIZE; i++)
 			{
@@ -534,8 +541,8 @@ namespace swrenderer
 			double endz = 1.f / iz;
 			startu = uz*endz;
 			startv = vz*endz;
-			uint32_t u = (uint32_t)(SQWORD(startu) + _pviewx);
-			uint32_t v = (uint32_t)(SQWORD(startv) + _pviewy);
+			uint32_t u = (uint32_t)(int64_t(startu) + _pviewx);
+			uint32_t v = (uint32_t)(int64_t(startv) + _pviewy);
 
 			uint32_t sx = ((u >> 16) * source_width) >> 16;
 			uint32_t sy = ((v >> 16) * source_height) >> 16;
