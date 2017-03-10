@@ -10,6 +10,7 @@ GZDoom-GPL is a GPL-compliant fork of GZDoom.
 * Randi Heit for ZDoom
 * Graf Zahl for GZDoom
 * LavenderMoon for the GPL relicense codebase
+* Magnus Norddahl and Rachael Alexanderson for QZDoom's software renderer
 
 Licenses
 --------
