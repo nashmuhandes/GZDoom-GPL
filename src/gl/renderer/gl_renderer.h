@@ -79,7 +79,8 @@ enum
 {
 	DM_MAINVIEW,
 	DM_OFFSCREEN,
-	DM_PORTAL
+	DM_PORTAL,
+	DM_SKYPORTAL
 };
 
 class FGLRenderer
@@ -210,9 +211,6 @@ public:
 
 	bool StartOffscreen();
 	void EndOffscreen();
-
-	void StartSimplePolys();
-	void FinishSimplePolys();
 
 	void FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
 		double originx, double originy, double scalex, double scaley,

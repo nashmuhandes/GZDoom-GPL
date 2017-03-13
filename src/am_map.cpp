@@ -91,7 +91,7 @@ CVAR (Bool,  am_customcolors,		true,		CVAR_ARCHIVE);
 CVAR (Int,   am_map_secrets,		1,			CVAR_ARCHIVE);
 CVAR (Int,	 am_drawmapback,		1,			CVAR_ARCHIVE);
 CVAR (Bool,  am_showkeys,			true,		CVAR_ARCHIVE);
-CVAR (Bool,  am_showtriggerlines,	false,		CVAR_ARCHIVE);
+CVAR (Int,   am_showtriggerlines,	0,			CVAR_ARCHIVE);
 CVAR (Int,   am_showthingsprites,		0,		CVAR_ARCHIVE);
 
 //=============================================================================
@@ -257,7 +257,7 @@ struct AMColorset
 			c[i].FromCVar(*values[i]);
 		}
 
-		DWORD ba = *(values[0]);
+		uint32_t ba = *(values[0]);
 
 		int r = RPART(ba) - 16;
 		int g = GPART(ba) - 16;
@@ -792,7 +792,7 @@ static bool stopped = true;
 static void AM_calcMinMaxMtoF();
 
 static void DrawMarker (FTexture *tex, double x, double y, int yadjust,
-	INTBOOL flip, double xscale, double yscale, int translation, double alpha, DWORD fillcolor, FRenderStyle renderstyle);
+	INTBOOL flip, double xscale, double yscale, int translation, double alpha, uint32_t fillcolor, FRenderStyle renderstyle);
 
 void AM_rotatePoint (double *x, double *y);
 void AM_rotate (double *x, double *y, DAngle an);
@@ -1902,7 +1902,6 @@ void AM_drawSubsectors()
 	PalEntry flatcolor;
 	mpoint_t originpt;
 
-	screen->StartSimplePolys();
 	for (int i = 0; i < numsubsectors; ++i)
 	{
 		if (subsectors[i].flags & SSECF_POLYORG)
@@ -1922,7 +1921,7 @@ void AM_drawSubsectors()
 
 		// Fill the points array from the subsector.
 		points.Resize(subsectors[i].numlines);
-		for (DWORD j = 0; j < subsectors[i].numlines; ++j)
+		for (uint32_t j = 0; j < subsectors[i].numlines; ++j)
 		{
 			mpoint_t pt = { subsectors[i].firstline[j].v1->fX(),
 							subsectors[i].firstline[j].v1->fY() };
@@ -2059,7 +2058,6 @@ void AM_drawSubsectors()
 				);
 		}
 	}
-	screen->FinishSimplePolys();
 }
 
 //=============================================================================
@@ -2284,58 +2282,47 @@ bool AM_checkSpecialBoundary (line_t &line, bool (*function)(int, int *), int *s
 	return (line.backsector && AM_checkSectorActions(line.backsector, function, specialptr, argsptr, false));
 }
 
-bool AM_isTeleportSpecial (int special, int *)
-{
-	return (special == Teleport ||
-		special == Teleport_NoFog ||
-		special == Teleport_ZombieChanger ||
-		special == Teleport_Line);
-}
-
 bool AM_isTeleportBoundary (line_t &line)
 {
-	return AM_checkSpecialBoundary(line, &AM_isTeleportSpecial);
-}
-
-bool AM_isExitSpecial (int special, int *)
-{
-	return (special == Teleport_NewMap ||
-		 special == Teleport_EndGame ||
-		 special == Exit_Normal ||
-		 special == Exit_Secret);
+	return AM_checkSpecialBoundary(line, [](int special, int *)
+	{
+		return (special == Teleport ||
+			special == Teleport_NoFog ||
+			special == Teleport_ZombieChanger ||
+			special == Teleport_Line);
+	});
 }
 
 bool AM_isExitBoundary (line_t& line)
 {
-	return AM_checkSpecialBoundary(line, &AM_isExitSpecial);
-}
-
-bool AM_isTriggerSpecial (int special, int *)
-{
-	FLineSpecial *spec = P_GetLineSpecialInfo(special);
-	return spec != NULL
-		&& spec->max_args >= 0
-		&& special != Door_Open
-		&& special != Door_Close
-		&& special != Door_CloseWaitOpen
-		&& special != Door_Raise
-		&& special != Door_Animated
-		&& special != Generic_Door;
+	return AM_checkSpecialBoundary(line, [](int special, int *)
+	{
+		return (special == Teleport_NewMap ||
+			special == Teleport_EndGame ||
+			special == Exit_Normal ||
+			special == Exit_Secret);
+	});
 }
 
 bool AM_isTriggerBoundary (line_t &line)
 {
-	return AM_checkSpecialBoundary(line, &AM_isTriggerSpecial);
-}
-
-bool AM_isLockSpecial (int special, int* args)
-{
-	return special == Door_LockedRaise
-		 || special == ACS_LockedExecute
-		 || special == ACS_LockedExecuteDoor
-		 || (special == Door_Animated && args[3] != 0)
-		 || (special == Generic_Door && args[4] != 0)
-		 || (special == FS_Execute && args[2] != 0);
+	return am_showtriggerlines == 1? AM_checkSpecialBoundary(line, [](int special, int *)
+	{
+		FLineSpecial *spec = P_GetLineSpecialInfo(special);
+		return spec != NULL
+			&& spec->max_args >= 0
+			&& special != Door_Open
+			&& special != Door_Close
+			&& special != Door_CloseWaitOpen
+			&& special != Door_Raise
+			&& special != Door_Animated
+			&& special != Generic_Door;
+	}) : AM_checkSpecialBoundary(line, [](int special, int *)
+	{
+		FLineSpecial *spec = P_GetLineSpecialInfo(special);
+		return spec != NULL
+			&& spec->max_args >= 0;
+	});
 }
 
 bool AM_isLockBoundary (line_t &line, int *lockptr = NULL)
@@ -2354,7 +2341,15 @@ bool AM_isLockBoundary (line_t &line, int *lockptr = NULL)
 
 	int special;
 	int *args;
-	bool result = AM_checkSpecialBoundary(line, &AM_isLockSpecial, &special, &args);
+	bool result = AM_checkSpecialBoundary(line, [](int special, int* args)
+	{
+		return special == Door_LockedRaise
+			|| special == ACS_LockedExecute
+			|| special == ACS_LockedExecuteDoor
+			|| (special == Door_Animated && args[3] != 0)
+			|| (special == Generic_Door && args[4] != 0)
+			|| (special == FS_Execute && args[2] != 0);
+	}, &special, &args);
 
 	if (result)
 	{
@@ -2917,7 +2912,7 @@ void AM_drawThings ()
 //=============================================================================
 
 static void DrawMarker (FTexture *tex, double x, double y, int yadjust,
-	INTBOOL flip, double xscale, double yscale, int translation, double alpha, DWORD fillcolor, FRenderStyle renderstyle)
+	INTBOOL flip, double xscale, double yscale, int translation, double alpha, uint32_t fillcolor, FRenderStyle renderstyle)
 {
 	if (tex == NULL || tex->UseType == FTexture::TEX_Null)
 	{
@@ -2938,7 +2933,7 @@ static void DrawMarker (FTexture *tex, double x, double y, int yadjust,
 		DTA_TranslationIndex, translation,
 		DTA_Alpha, alpha,
 		DTA_FillColor, fillcolor,
-		DTA_RenderStyle, DWORD(renderstyle),
+		DTA_RenderStyle, uint32_t(renderstyle),
 		TAG_DONE);
 }
 
@@ -2983,7 +2978,7 @@ void AM_drawAuthorMarkers ()
 
 		FTextureID picnum;
 		FTexture *tex;
-		WORD flip = 0;
+		uint16_t flip = 0;
 
 		if (mark->picnum.isValid())
 		{

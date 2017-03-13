@@ -83,7 +83,7 @@ OpenGLFrameBuffer::OpenGLFrameBuffer(void *hMonitor, int width, int height, int 
 {
 	// SetVSync needs to be at the very top to workaround a bug in Nvidia's OpenGL driver.
 	// If wglSwapIntervalEXT is called after glBindFramebuffer in a frame the setting is not changed!
-	SetVSync(vid_vsync);
+	Super::SetVSync(vid_vsync);
 
 	// Make sure all global variables tracking OpenGL context state are reset..
 	FHardwareTexture::InitGlobalState();
@@ -230,6 +230,27 @@ void OpenGLFrameBuffer::Swap()
 	mDebug->Update();
 }
 
+//==========================================================================
+//
+// Enable/disable vertical sync
+//
+//==========================================================================
+
+void OpenGLFrameBuffer::SetVSync(bool vsync)
+{
+	// Switch to the default frame buffer because some drivers associate the vsync state with the bound FB object.
+	GLint oldDrawFramebufferBinding = 0, oldReadFramebufferBinding = 0;
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldDrawFramebufferBinding);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldReadFramebufferBinding);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+	Super::SetVSync(vsync);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, oldDrawFramebufferBinding);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, oldReadFramebufferBinding);
+}
+
 //===========================================================================
 //
 // DoSetGamma
@@ -244,7 +265,7 @@ void OpenGLFrameBuffer::DoSetGamma()
 	bool useHWGamma = m_supportsGamma && ((vid_hwgamma == 0) || (vid_hwgamma == 2 && IsFullscreen()));
 	if (useHWGamma)
 	{
-		WORD gammaTable[768];
+		uint16_t gammaTable[768];
 
 		// This formula is taken from Doomsday
 		float gamma = clamp<float>(Gamma, 0.1f, 4.f);
@@ -260,7 +281,7 @@ void OpenGLFrameBuffer::DoSetGamma()
 			val += bright * 128;
 			if(gamma != 1) val = pow(val, invgamma) / norm;
 
-			gammaTable[i] = gammaTable[i + 256] = gammaTable[i + 512] = (WORD)clamp<double>(val*256, 0, 0xffff);
+			gammaTable[i] = gammaTable[i + 256] = gammaTable[i + 512] = (uint16_t)clamp<double>(val*256, 0, 0xffff);
 		}
 		SetGammaTable(gammaTable);
 

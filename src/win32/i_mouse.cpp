@@ -18,6 +18,7 @@
 #include "win32iface.h"
 #include "rawinput.h"
 #include "menu/menu.h"
+#include "events.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -281,6 +282,9 @@ void I_CheckNativeMouse(bool preferNative)
 				(!CaptureMode_InGame() || GUICapture ||	paused || demoplayback));
 		}
 	}
+
+	if (!want_native && E_CheckRequireMouse())
+		want_native = true;
 
 	//Printf ("%d %d %d\n", wantNative, preferNative, NativeMouse);
 
@@ -1055,7 +1059,7 @@ bool FWin32Mouse::WndProcHook(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 		// a single message. Winuser.h describes the button field as being filled with
 		// flags, which suggests that it could merge them. My testing
 		// indicates it does not, but I will assume it might in the future.
-		WORD xbuttons = GET_XBUTTON_WPARAM(wParam);
+		auto xbuttons = GET_XBUTTON_WPARAM(wParam);
 		event_t ev = { 0 };
 
 		ev.type = (message == WM_XBUTTONDOWN) ? EV_KeyDown : EV_KeyUp;

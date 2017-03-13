@@ -44,6 +44,7 @@
 #include "gl/gl_functions.h"
 #include "serializer.h"
 #include "g_levellocals.h"
+#include "events.h"
 
 #include "gl/dynlights/gl_lightbuffer.h"
 #include "gl/system/gl_interface.h"
@@ -490,7 +491,7 @@ void FGLRenderer::DrawScene(int drawmode)
 	{
 		ssao_portals_available = 0;
 	}
-	else if (ssao_portals_available > 0)
+	else if (drawmode == DM_PORTAL && ssao_portals_available > 0)
 	{
 		applySSAO = true;
 		ssao_portals_available--;
@@ -991,7 +992,7 @@ void FGLRenderer::WriteSavePic (player_t *player, FileWriter *file, int width, i
 	CopyToBackbuffer(&bounds, false);
 	glFlush();
 
-	byte * scr = (byte *)M_Malloc(width * height * 3);
+	uint8_t * scr = (uint8_t *)M_Malloc(width * height * 3);
 	glReadPixels(0,0,width, height,GL_RGB,GL_UNSIGNED_BYTE,scr);
 	M_CreatePNG (file, scr + ((height-1) * width * 3), NULL, SS_RGB, width, height, -width*3);
 	M_Free(scr);
@@ -1051,6 +1052,11 @@ void FGLInterface::PrecacheTexture(FTexture *tex, int cache)
 	{
 		FMaterial * gltex = FMaterial::ValidateTexture(tex, false);
 		if (gltex) gltex->Precache();
+	}
+	else
+	{
+		// make sure that software pixel buffers do not stick around for unneeded textures.
+		tex->Unload();
 	}
 }
 

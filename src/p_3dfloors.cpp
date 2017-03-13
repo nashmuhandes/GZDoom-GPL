@@ -247,7 +247,7 @@ static int P_Set3DFloor(line_t * line, int param, int param2, int alpha)
 						// The content list changed in r1783 of Vavoom to be unified
 						// among all its supported games, so it has now ten different
 						// values instead of just five.
-						static DWORD vavoomcolors[] = { VC_EMPTY,
+						static uint32_t vavoomcolors[] = { VC_EMPTY,
 							VC_WATER, VC_LAVA, VC_NUKAGE, VC_SLIME, VC_HELLSLIME,
 							VC_BLOOD, VC_SLUDGE, VC_HAZARD, VC_BOOMWATER };
 						flags |= FF_SWIMMABLE | FF_BOTHPLANES | FF_ALLSIDES | FF_FLOOD;
@@ -773,7 +773,7 @@ void P_LineOpening_XFloors (FLineOpening &open, AActor * thing, const line_t *li
 			int highestfloorterrain = -1;
 			FTextureID lowestceilingpic;
 			sector_t *lowestceilingsec = NULL, *highestfloorsec = NULL;
-			secplane_t *highestfloorplanes[2] = { NULL, NULL };
+			secplane_t *highestfloorplanes[2] = { &open.frontfloorplane, &open.backfloorplane };
 			
 			highestfloorpic.SetInvalid();
 			lowestceilingpic.SetInvalid();
@@ -800,13 +800,19 @@ void P_LineOpening_XFloors (FLineOpening &open, AActor * thing, const line_t *li
 						lowestceilingsec = j == 0 ? linedef->frontsector : linedef->backsector;
 					}
 					
-					if(ff_top > highestfloor && delta1 <= delta2 && (!restrict || thing->Z() >= ff_top))
+					if(delta1 <= delta2 && (!restrict || thing->Z() >= ff_top))
 					{
-						highestfloor = ff_top;
-						highestfloorpic = *rover->top.texture;
-						highestfloorterrain = rover->model->GetTerrain(rover->top.isceiling);
-						highestfloorsec = j == 0 ? linedef->frontsector : linedef->backsector;
-						highestfloorplanes[j] = rover->top.plane;
+						if (ff_top > highestfloor)
+						{
+							highestfloor = ff_top;
+							highestfloorpic = *rover->top.texture;
+							highestfloorterrain = rover->model->GetTerrain(rover->top.isceiling);
+							highestfloorsec = j == 0 ? linedef->frontsector : linedef->backsector;
+						}
+						if (ff_top > highestfloorplanes[j]->ZatPoint(x, y))
+						{
+							highestfloorplanes[j] = rover->top.plane;
+						}
 					}
 					if(ff_top > lowestfloor[j] && ff_top <= thing->Z() + thing->MaxStepHeight) lowestfloor[j] = ff_top;
 				}
@@ -818,18 +824,18 @@ void P_LineOpening_XFloors (FLineOpening &open, AActor * thing, const line_t *li
 				open.floorpic = highestfloorpic;
 				open.floorterrain = highestfloorterrain;
 				open.bottomsec = highestfloorsec;
-				if (highestfloorplanes[0])
-				{
-					open.frontfloorplane = *highestfloorplanes[0];
-					if (open.frontfloorplane.fC() < 0) open.frontfloorplane.FlipVert();
-				}
-				if (highestfloorplanes[1])
-				{
-					open.backfloorplane = *highestfloorplanes[1];
-					if (open.backfloorplane.fC() < 0) open.backfloorplane.FlipVert();
-				}
 			}
-			
+			if (highestfloorplanes[0] != &open.frontfloorplane)
+			{
+				open.frontfloorplane = *highestfloorplanes[0];
+				if (open.frontfloorplane.fC() < 0) open.frontfloorplane.FlipVert();
+			}
+			if (highestfloorplanes[1] != &open.backfloorplane)
+			{
+				open.backfloorplane = *highestfloorplanes[1];
+				if (open.backfloorplane.fC() < 0) open.backfloorplane.FlipVert();
+			}
+
 			if(lowestceiling < open.top) 
 			{
 				open.top = lowestceiling;

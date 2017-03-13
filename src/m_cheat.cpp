@@ -50,10 +50,27 @@
 #include "a_morph.h"
 #include "g_levellocals.h"
 #include "virtual.h"
+#include "events.h"
 
 // [RH] Actually handle the cheat. The cheat code in st_stuff.c now just
 // writes some bytes to the network data stream, and the network code
 // later calls us.
+
+void cht_DoMDK(player_t *player, const char *mod)
+{
+	if (player->mo == NULL)
+	{
+		Printf("What do you want to kill outside of a game?\n");
+	}
+	else if (!deathmatch)
+	{
+		// Don't allow this in deathmatch even with cheats enabled, because it's
+		// a very very cheap kill.
+		P_LineAttack(player->mo, player->mo->Angles.Yaw, PLAYERMISSILERANGE,
+			P_AimLineAttack(player->mo, player->mo->Angles.Yaw, PLAYERMISSILERANGE), TELEFRAG_DAMAGE,
+			mod, NAME_BulletPuff);
+	}
+}
 
 void cht_DoCheat (player_t *player, int cheat)
 {
@@ -336,7 +353,7 @@ void cht_DoCheat (player_t *player, int cheat)
 				player->mo->SetState (player->mo->SpawnState);
 				if (!(player->mo->flags2 & MF2_DONTTRANSLATE))
 				{
-					player->mo->Translation = TRANSLATION(TRANSLATION_Players, BYTE(player-players));
+					player->mo->Translation = TRANSLATION(TRANSLATION_Players, uint8_t(player-players));
 				}
 				if (player->ReadyWeapon != nullptr)
 				{
@@ -347,6 +364,12 @@ void cht_DoCheat (player_t *player, int cheat)
 				{
 					P_UndoPlayerMorph(player, player);
 				}
+
+				// player is now alive.
+				// fire E_PlayerRespawned and start the ACS SCRIPT_Respawn.
+				E_PlayerRespawned(int(player - players));
+				//
+				FBehavior::StaticStartTypedScripts(SCRIPT_Respawn, player->mo, true);
 
 			}
 		}
@@ -606,7 +629,7 @@ class DSuicider : public DThinker
 	DECLARE_CLASS(DSuicider, DThinker)
 	HAS_OBJECT_POINTERS;
 public:
-	TObjPtr<APlayerPawn> Pawn;
+	TObjPtr<APlayerPawn*> Pawn;
 
 	void Tick()
 	{
@@ -665,6 +688,7 @@ CCMD (mdk)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_MDK);
+	const char *name = argv.argc() > 1 ? argv[1] : "";
+	Net_WriteByte (DEM_MDK);
+	Net_WriteString(name);
 }

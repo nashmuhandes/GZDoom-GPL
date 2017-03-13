@@ -98,6 +98,15 @@ DEFINE_ACTION_FUNCTION(_Screen, GetHeight)
 	ACTION_RETURN_INT(screen->GetHeight());
 }
 
+DEFINE_ACTION_FUNCTION(_Screen, PaletteColor)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(index);
+	if (index < 0 || index > 255) index = 0;
+	else index = GPalette.BaseColors[index];
+	ACTION_RETURN_INT(index);
+}
+
 static int PalFromRGB(uint32 rgb)
 {
 	if (LastPal >= 0 && LastRGB == rgb)
@@ -484,12 +493,15 @@ static void ListEnd(VMVa_List &tags)
 
 int ListGetInt(VMVa_List &tags)
 {
-	if (tags.curindex < tags.numargs && tags.args[tags.curindex].Type == REGT_INT)
+	if (tags.curindex < tags.numargs)
 	{
-		return tags.args[tags.curindex++].i;
+		if (tags.args[tags.curindex].Type == REGT_INT)
+		{
+			return tags.args[tags.curindex++].i;
+		}
+		ThrowAbortException(X_OTHER, "Invalid parameter in draw function, int expected");
 	}
-	ThrowAbortException(X_OTHER, "Invalid parameter in draw function, int expected");
-	return 0;
+	return TAG_DONE;
 }
 
 static inline double ListGetDouble(VMVa_List &tags)
@@ -555,7 +567,7 @@ bool DCanvas::ParseDrawTextureTags(FTexture *img, double x, double y, DWORD tag,
 	parms->colorOverlay = 0;
 	parms->alphaChannel = false;
 	parms->flipX = false;
-	parms->shadowAlpha = 0;
+	//parms->shadowAlpha = 0;
 	parms->shadowColor = 0;
 	parms->virtWidth = this->GetWidth();
 	parms->virtHeight = this->GetHeight();
@@ -828,7 +840,7 @@ bool DCanvas::ParseDrawTextureTags(FTexture *img, double x, double y, DWORD tag,
 			break;
 
 		case DTA_ShadowAlpha:
-			parms->shadowAlpha = (float)MIN(1., ListGetDouble(tags));
+			//parms->shadowAlpha = (float)MIN(1., ListGetDouble(tags));
 			break;
 
 		case DTA_ShadowColor:
@@ -839,12 +851,12 @@ bool DCanvas::ParseDrawTextureTags(FTexture *img, double x, double y, DWORD tag,
 			boolval = ListGetInt(tags);
 			if (boolval)
 			{
-				parms->shadowAlpha = 0.5;
+				//parms->shadowAlpha = 0.5;
 				parms->shadowColor = 0;
 			}
 			else
 			{
-				parms->shadowAlpha = 0;
+				//parms->shadowAlpha = 0;
 			}
 			break;
 
@@ -1336,18 +1348,18 @@ void DCanvas::Clear (int left, int top, int right, int bottom, int palcolor, uin
 	}
 }
 
-//==========================================================================
-//
-// no-ops. This is so that renderer backends can better manage the
-// processing of the subsector drawing in the automap
-//
-//==========================================================================
-
-void DCanvas::StartSimplePolys()
-{}
-
-void DCanvas::FinishSimplePolys()
-{}
+DEFINE_ACTION_FUNCTION(_Screen, Clear)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(x1);
+	PARAM_INT(y1);
+	PARAM_INT(x2);
+	PARAM_INT(y2);
+	PARAM_INT(color);
+	PARAM_INT_DEF(palcol);
+	screen->Clear(x1, y1, x2, y2, palcol, color);
+	return 0;
+}
 
 //==========================================================================
 //
@@ -1697,6 +1709,17 @@ void V_DrawFrame (int left, int top, int width, int height)
 	screen->DrawTexture (TexMan[border->tr], left+width, top-offset, TAG_DONE);
 	screen->DrawTexture (TexMan[border->bl], left-offset, top+height, TAG_DONE);
 	screen->DrawTexture (TexMan[border->br], left+width, top+height, TAG_DONE);
+}
+
+DEFINE_ACTION_FUNCTION(_Screen, DrawFrame)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(x);
+	PARAM_INT(y);
+	PARAM_INT(w);
+	PARAM_INT(h);
+	V_DrawFrame(x, y, w, h);
+	return 0;
 }
 
 //==========================================================================

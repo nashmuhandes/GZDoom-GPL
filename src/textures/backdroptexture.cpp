@@ -1,8 +1,9 @@
 /*
-** playerdisplay.cpp
-** The player display for the player setup and class selection screen
+** backdroptexture.cpp
+** The player display background for the player setup and class selection screen
 **
 **---------------------------------------------------------------------------
+** Copyright 1999-2010 Randy Heit
 ** Copyright 2010 Christoph Oelckers
 ** All rights reserved.
 **
@@ -76,14 +77,14 @@ struct FBackdropTexture : public FTexture
 public:
 	FBackdropTexture();
 
-	const BYTE *GetColumn(unsigned int column, const Span **spans_out);
-	const BYTE *GetPixels();
+	const uint8_t *GetColumn(unsigned int column, const Span **spans_out);
+	const uint8_t *GetPixels();
 	void Unload();
 	bool CheckModified();
 
 protected:
 	uint32_t costab[COS_SIZE];
-	BYTE Pixels[144*160];
+	uint8_t *Pixels;
 	static const Span DummySpan[2];
 	int LastRenderTic;
 
@@ -96,7 +97,7 @@ protected:
 
 
 // A 32x32 cloud rendered with Photoshop, plus some other filters
-static BYTE pattern1[1024] =
+static uint8_t pattern1[1024] =
 {
 	 5, 9, 7,10, 9,15, 9, 7, 8,10, 5, 3, 5, 7, 9, 8,14, 8, 4, 7, 8, 9, 5, 7,14, 7, 0, 7,13,13, 9, 6,
 	 2, 7, 9, 7, 7,10, 8, 8,11,10, 6, 7,10, 7, 5, 6, 6, 4, 7,13,15,16,11,15,11, 8, 0, 4,13,22,17,11,
@@ -133,7 +134,7 @@ static BYTE pattern1[1024] =
 };
 
 // Just a 32x32 cloud rendered with the standard Photoshop filter
-static BYTE pattern2[1024] =
+static uint8_t pattern2[1024] =
 {
 	  9, 9, 8, 8, 8, 8, 6, 6,13,13,11,21,19,21,23,18,23,24,19,19,24,17,18,12, 9,14, 8,12,12, 5, 8, 6,
 	 11,10, 6, 7, 8, 8, 9,13,10,11,17,15,23,22,23,22,20,26,27,26,17,21,20,14,12, 8,11, 8,11, 7, 8, 7,
@@ -179,6 +180,7 @@ const FTexture::Span FBackdropTexture::DummySpan[2] = { { 0, 160 }, { 0, 0 } };
 
 FBackdropTexture::FBackdropTexture()
 {
+	Pixels = nullptr;
 	Width = 144;
 	Height = 160;
 	WidthBits = 8;
@@ -214,6 +216,8 @@ bool FBackdropTexture::CheckModified()
 
 void FBackdropTexture::Unload()
 {
+	if (Pixels != nullptr) delete[] Pixels;
+	Pixels = nullptr;
 }
 
 //=============================================================================
@@ -222,14 +226,14 @@ void FBackdropTexture::Unload()
 //
 //=============================================================================
 
-const BYTE *FBackdropTexture::GetColumn(unsigned int column, const Span **spans_out)
+const uint8_t *FBackdropTexture::GetColumn(unsigned int column, const Span **spans_out)
 {
 	if (LastRenderTic != gametic)
 	{
 		Render();
 	}
 	column = clamp(column, 0u, 143u);
-	if (spans_out != NULL)
+	if (spans_out != nullptr)
 	{
 		*spans_out = DummySpan;
 	}
@@ -242,7 +246,7 @@ const BYTE *FBackdropTexture::GetColumn(unsigned int column, const Span **spans_
 //
 //=============================================================================
 
-const BYTE *FBackdropTexture::GetPixels()
+const uint8_t *FBackdropTexture::GetPixels()
 {
 	if (LastRenderTic != gametic)
 	{
@@ -259,35 +263,36 @@ const BYTE *FBackdropTexture::GetPixels()
 
 void FBackdropTexture::Render()
 {
-	BYTE *from;
+	uint8_t *from;
 	int width, height, pitch;
 
+	if (Pixels == nullptr) Pixels = new uint8_t[160 * 144];
 	width = 160;
 	height = 144;
 	pitch = width;
 
 	int x, y;
 
-	const DWORD a1add = DEGREES(0.5);
-	const DWORD a2add = DEGREES(359);
-	const DWORD a3add = DEGREES(5 / 7.f);
-	const DWORD a4add = DEGREES(358.66666);
+	const uint32_t a1add = DEGREES(0.5);
+	const uint32_t a2add = DEGREES(359);
+	const uint32_t a3add = DEGREES(5 / 7.f);
+	const uint32_t a4add = DEGREES(358.66666);
 
-	const DWORD t1add = DEGREES(358);
-	const DWORD t2add = DEGREES(357.16666);
-	const DWORD t3add = DEGREES(2.285);
-	const DWORD t4add = DEGREES(359.33333);
-	const DWORD x1add = 5 * 524288;
-	const DWORD x2add = 0u - 13 * 524288;
-	const DWORD z1add = 3 * 524288;
-	const DWORD z2add = 4 * 524288;
+	const uint32_t t1add = DEGREES(358);
+	const uint32_t t2add = DEGREES(357.16666);
+	const uint32_t t3add = DEGREES(2.285);
+	const uint32_t t4add = DEGREES(359.33333);
+	const uint32_t x1add = 5 * 524288;
+	const uint32_t x2add = 0u - 13 * 524288;
+	const uint32_t z1add = 3 * 524288;
+	const uint32_t z2add = 4 * 524288;
 
 
-	DWORD a1, a2, a3, a4;
-	SDWORD c1, c2, c3, c4;
-	DWORD tx, ty, tc, ts;
-	DWORD ux, uy, uc, us;
-	DWORD ltx, lty, lux, luy;
+	uint32_t a1, a2, a3, a4;
+	int32_t c1, c2, c3, c4;
+	uint32_t tx, ty, tc, ts;
+	uint32_t ux, uy, uc, us;
+	uint32_t ltx, lty, lux, luy;
 
 	from = Pixels;
 
@@ -297,10 +302,10 @@ void FBackdropTexture::Render()
 	double z1 = (cos(TORAD(z2ang)) / 4 + 0.5) * (0x8000000);
 	double z2 = (cos(TORAD(z1ang)) / 4 + 0.75) * (0x8000000);
 
-	tc = SDWORD(cos(TORAD(t1ang)) * z1);
-	ts = SDWORD(sin(TORAD(t1ang)) * z1);
-	uc = SDWORD(cos(TORAD(t2ang)) * z2);
-	us = SDWORD(sin(TORAD(t2ang)) * z2);
+	tc = int32_t(cos(TORAD(t1ang)) * z1);
+	ts = int32_t(sin(TORAD(t1ang)) * z1);
+	uc = int32_t(cos(TORAD(t2ang)) * z2);
+	us = int32_t(sin(TORAD(t2ang)) * z2);
 	
 	ltx = -width / 2 * tc;
 	lty = -width / 2 * ts;
@@ -311,8 +316,8 @@ void FBackdropTexture::Render()
 	{
 		a1 = time1;
 		a2 = time2;
-		c3 = SDWORD(cos(TORAD(a3)) * 65536.0);
-		c4 = SDWORD(cos(TORAD(a4)) * 65536.0);
+		c3 = int32_t(cos(TORAD(a3)) * 65536.0);
+		c4 = int32_t(cos(TORAD(a4)) * 65536.0);
 		tx = ltx - (y - height / 2)*ts;
 		ty = lty + (y - height / 2)*tc;
 		ux = lux - (y - height / 2)*us;
@@ -348,273 +353,9 @@ void FBackdropTexture::Render()
 	LastRenderTic = gametic;
 }
 
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-IMPLEMENT_CLASS(DListMenuItemPlayerDisplay, false, false)
-DListMenuItemPlayerDisplay::DListMenuItemPlayerDisplay(FListMenuDescriptor *menu, int x, int y, PalEntry c1, PalEntry c2, bool np, FName action)
-: DMenuItemBase(x, y, action)
+FTexture *GetBackdropTexture()
 {
-	mOwner = menu;
-
-	FRemapTable *bdremap = translationtables[TRANSLATION_Players][MAXPLAYERS + 1];
-	for (int i = 0; i < 256; i++)
-	{
-		int r = c1.r + c2.r * i / 255;
-		int g = c1.g + c2.g * i / 255;
-		int b = c1.b + c2.b * i / 255;
-		bdremap->Remap[i] = ColorMatcher.Pick (r, g, b);
-		bdremap->Palette[i] = PalEntry(255, r, g, b);
-	}
-	mBackdrop = new FBackdropTexture;
-	mPlayerClass = NULL;
-	mPlayerState = NULL;
-	mNoportrait = np;
-	mMode = 0;
-	mRotation = 0;
-	mTranslate = false;
-	mSkin = 0;
-	mRandomClass = 0;
-	mRandomTimer = 0;
-	mClassNum = -1;
+	auto t = new FBackdropTexture;
+	t->Name = "PlayerBackdrop";
+	return t;
 }
-
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-void DListMenuItemPlayerDisplay::OnDestroy()
-{
-	delete mBackdrop;
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-void DListMenuItemPlayerDisplay::UpdateRandomClass()
-{
-	if (--mRandomTimer < 0)
-	{
-		if (++mRandomClass >= (int)PlayerClasses.Size ()) mRandomClass = 0;
-		mPlayerClass = &PlayerClasses[mRandomClass];
-		mPlayerState = GetDefaultByType (mPlayerClass->Type)->SeeState;
-		if (mPlayerState == NULL)
-		{ // No see state, so try spawn state.
-			mPlayerState = GetDefaultByType (mPlayerClass->Type)->SpawnState;
-		}
-		mPlayerTics = mPlayerState != NULL ? mPlayerState->GetTics() : -1;
-		mRandomTimer = 6;
-
-		// Since the newly displayed class may used a different translation
-		// range than the old one, we need to update the translation, too.
-		UpdateTranslation();
-	}
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-void DListMenuItemPlayerDisplay::UpdateTranslation()
-{
-	int PlayerColor = players[consoleplayer].userinfo.GetColor();
-	int	PlayerSkin = players[consoleplayer].userinfo.GetSkin();
-	int PlayerColorset = players[consoleplayer].userinfo.GetColorSet();
-
-	if (mPlayerClass != NULL)
-	{
-		PlayerSkin = R_FindSkin (skins[PlayerSkin].name, int(mPlayerClass - &PlayerClasses[0]));
-		R_GetPlayerTranslation(PlayerColor, GetColorSet(mPlayerClass->Type, PlayerColorset),
-			&skins[PlayerSkin], translationtables[TRANSLATION_Players][MAXPLAYERS]);
-	}
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-void DListMenuItemPlayerDisplay::SetPlayerClass(int classnum, bool force)
-{
-	if (classnum < 0 || classnum >= (int)PlayerClasses.Size ())
-	{
-		if (mClassNum != -1)
-		{
-			mClassNum = -1;
-			mRandomTimer = 0;
-			UpdateRandomClass();
-		}
-	}
-	else if (mPlayerClass != &PlayerClasses[classnum] || force)
-	{
-		mPlayerClass = &PlayerClasses[classnum];
-		mPlayerState = GetDefaultByType (mPlayerClass->Type)->SeeState;
-		if (mPlayerState == NULL)
-		{ // No see state, so try spawn state.
-			mPlayerState = GetDefaultByType (mPlayerClass->Type)->SpawnState;
-		}
-		mPlayerTics = mPlayerState != NULL ? mPlayerState->GetTics() : -1;
-		mClassNum = classnum;
-	}
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-bool DListMenuItemPlayerDisplay::UpdatePlayerClass()
-{
-	if (mOwner->mSelectedItem >= 0)
-	{
-		int classnum;
-		FName seltype = mOwner->mItems[mOwner->mSelectedItem]->GetAction(&classnum);
-
-		if (seltype != NAME_Episodemenu) return false;
-		if (PlayerClasses.Size() == 0) return false;
-
-		SetPlayerClass(classnum);
-		return true;
-	}
-	return false;
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-bool DListMenuItemPlayerDisplay::SetValue(int i, int value)
-{
-	switch (i)
-	{
-	case PDF_MODE:
-		mMode = value;
-		return true;
-
-	case PDF_ROTATION:
-		mRotation = value;
-		return true;
-
-	case PDF_TRANSLATE:
-		mTranslate = value;
-
-	case PDF_CLASS:
-		SetPlayerClass(value, true);
-		break;
-
-	case PDF_SKIN:
-		mSkin = value;
-		break;
-	}
-	return false;
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-void DListMenuItemPlayerDisplay::Ticker()
-{
-	if (mClassNum < 0) UpdateRandomClass();
-
-	if (mPlayerState != NULL && mPlayerState->GetTics () != -1 && mPlayerState->GetNextState () != NULL)
-	{
-		if (--mPlayerTics <= 0)
-		{
-			mPlayerState = mPlayerState->GetNextState();
-			mPlayerTics = mPlayerState->GetTics();
-		}
-	}
-}
-
-//=============================================================================
-//
-//
-//
-//=============================================================================
-
-void DListMenuItemPlayerDisplay::Drawer(bool selected)
-{
-	if (mMode == 0 && !UpdatePlayerClass())
-	{
-		return;
-	}
-
-	FName portrait = ((APlayerPawn*)GetDefaultByType(mPlayerClass->Type))->Portrait;
-
-	if (portrait != NAME_None && !mNoportrait)
-	{
-		FTextureID texid = TexMan.CheckForTexture(portrait.GetChars(), FTexture::TEX_MiscPatch);
-		if (texid.isValid())
-		{
-			FTexture *tex = TexMan(texid);
-			if (tex != NULL)
-			{
-				screen->DrawTexture (tex, mXpos, mYpos, DTA_Clean, true, TAG_DONE);
-				return;
-			}
-		}
-	}
-	int x = (mXpos - 160) * CleanXfac + (SCREENWIDTH>>1);
-	int y = (mYpos - 100) * CleanYfac + (SCREENHEIGHT>>1);
-
-	screen->DrawTexture(mBackdrop, x, y - 1,
-		DTA_DestWidth, 72 * CleanXfac,
-		DTA_DestHeight, 80 * CleanYfac,
-		DTA_TranslationIndex, TRANSLATION(TRANSLATION_Players, MAXPLAYERS + 1),
-		DTA_Masked, true,
-		TAG_DONE);
-
-	V_DrawFrame (x, y, 72*CleanXfac, 80*CleanYfac-1);
-
-	spriteframe_t *sprframe = NULL;
-	DVector2 Scale;
-
-	if (mPlayerState != NULL)
-	{
-		if (mSkin == 0)
-		{
-			sprframe = &SpriteFrames[sprites[mPlayerState->sprite].spriteframes + mPlayerState->GetFrame()];
-			Scale = GetDefaultByType(mPlayerClass->Type)->Scale;
-		}
-		else
-		{
-			sprframe = &SpriteFrames[sprites[skins[mSkin].sprite].spriteframes + mPlayerState->GetFrame()];
-			Scale = skins[mSkin].Scale;
-		}
-	}
-
-	if (sprframe != NULL)
-	{
-		FTexture *tex = TexMan(sprframe->Texture[mRotation]);
-		if (tex != NULL && tex->UseType != FTexture::TEX_Null)
-		{
-			int trans = mTranslate? TRANSLATION(TRANSLATION_Players, MAXPLAYERS) : 0;
-			screen->DrawTexture (tex,
-				x + 36*CleanXfac, y + 71*CleanYfac,
-				DTA_DestWidthF, tex->GetScaledWidthDouble() * CleanXfac * Scale.X,
-				DTA_DestHeightF, tex->GetScaledHeightDouble() * CleanYfac * Scale.Y,
-				DTA_TranslationIndex, trans,
-				DTA_FlipX, sprframe->Flip & (1 << mRotation),
-				TAG_DONE);
-		}
-	}
-}
-

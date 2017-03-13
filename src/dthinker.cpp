@@ -156,7 +156,7 @@ void DThinker::SaveList(FSerializer &arc, DThinker *node)
 void DThinker::SerializeThinkers(FSerializer &arc, bool hubLoad)
 {
 	//DThinker *thinker;
-	//BYTE stat;
+	//uint8_t stat;
 	//int statcount;
 	int i;
 
@@ -309,6 +309,7 @@ DEFINE_ACTION_FUNCTION(DThinker, PostBeginPlay)
 
 void DThinker::CallPostBeginPlay()
 {
+	ObjectFlags |= OF_Spawned;
 	IFVIRTUAL(DThinker, PostBeginPlay)
 	{
 		// Without the type cast this picks the 'void *' assignment...
@@ -421,7 +422,7 @@ void DThinker::DestroyAllThinkers ()
 
 	for (i = 0; i <= MAX_STATNUM; i++)
 	{
-		if (i != STAT_TRAVELLING)
+		if (i != STAT_TRAVELLING && i != STAT_STATIC)
 		{
 			DestroyThinkersInList (Thinkers[i]);
 			DestroyThinkersInList (FreshThinkers[i]);
@@ -708,7 +709,7 @@ DThinker *FThinkerIterator::Next (bool exact)
 
 class DThinkerIterator : public DObject, public FThinkerIterator
 {
-	DECLARE_CLASS(DThinkerIterator, DObject)
+	DECLARE_ABSTRACT_CLASS(DThinkerIterator, DObject)
 
 	DThinkerIterator()
 	{
@@ -721,7 +722,7 @@ public:
 	}
 };
 
-IMPLEMENT_CLASS(DThinkerIterator, false, false);
+IMPLEMENT_CLASS(DThinkerIterator, true, false);
 DEFINE_ACTION_FUNCTION(DThinkerIterator, Create)
 {
 	PARAM_PROLOGUE;

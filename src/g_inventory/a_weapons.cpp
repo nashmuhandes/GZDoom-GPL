@@ -230,7 +230,7 @@ bool AWeapon::CheckAmmo (int fireMode, bool autoSwitch, bool requireAmmo, int am
 	int enough, enoughmask;
 	int lAmmoUse1;
 
-	if ((dmflags & DF_INFINITE_AMMO) || (Owner->player->cheats & CF_INFINITEAMMO))
+	if ((dmflags & DF_INFINITE_AMMO) || (Owner->FindInventory (PClass::FindActor(NAME_PowerInfiniteAmmo), true) != nullptr))
 	{
 		return true;
 	}
@@ -311,7 +311,7 @@ DEFINE_ACTION_FUNCTION(AWeapon, CheckAmmo)
 
 bool AWeapon::DepleteAmmo (bool altFire, bool checkEnough, int ammouse)
 {
-	if (!((dmflags & DF_INFINITE_AMMO) || (Owner->player->cheats & CF_INFINITEAMMO)))
+	if (!((dmflags & DF_INFINITE_AMMO) || (Owner->FindInventory (PClass::FindActor(NAME_PowerInfiniteAmmo), true) != nullptr)))
 	{
 		if (checkEnough && !CheckAmmo (altFire ? AltFire : PrimaryFire, false, false, ammouse))
 		{
@@ -1487,7 +1487,7 @@ static int ntoh_cmp(const void *a, const void *b)
 //
 //===========================================================================
 
-void P_WriteDemoWeaponsChunk(BYTE **demo)
+void P_WriteDemoWeaponsChunk(uint8_t **demo)
 {
 	WriteWord(Weapons_ntoh.Size(), demo);
 	for (unsigned int i = 1; i < Weapons_ntoh.Size(); ++i)
@@ -1505,7 +1505,7 @@ void P_WriteDemoWeaponsChunk(BYTE **demo)
 //
 //===========================================================================
 
-void P_ReadDemoWeaponsChunk(BYTE **demo)
+void P_ReadDemoWeaponsChunk(uint8_t **demo)
 {
 	int count, i;
 	PClassActor *type;
@@ -1570,7 +1570,7 @@ void Net_WriteWeapon(PClassActor *type)
 //
 //===========================================================================
 
-PClassActor *Net_ReadWeapon(BYTE **stream)
+PClassActor *Net_ReadWeapon(uint8_t **stream)
 {
 	int index;
 

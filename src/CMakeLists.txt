@@ -49,55 +49,62 @@ if( WIN32 )
 
 	add_definitions( -D_WIN32 )
 
-	find_path( D3D_INCLUDE_DIR d3d9.h
-		PATHS ENV DXSDK_DIR
-		PATH_SUFFIXES Include )
-	if( NOT D3D_INCLUDE_DIR )
-		# Modern versions of the Windows SDK include d3d9.h. Unfortunately,
-		# CMake cannot find this file via find_path, so we check for it using
-		# CHECK_INCLUDE_FILE.
-		CHECK_INCLUDE_FILE( d3d9.h D3D9_H_FOUND )
-		if ( NOT D3D9_H_FOUND )
-			message( SEND_ERROR "Could not find DirectX 9 header files" )
-		endif()
-	else()
-		include_directories( ${D3D_INCLUDE_DIR} )
-	endif()
-
-	find_path( XINPUT_INCLUDE_DIR xinput.h
-		PATHS ENV DXSDK_DIR
-		PATH_SUFFIXES Include )
-	if( NOT XINPUT_INCLUDE_DIR )
-		# Modern versions of the Windows SDK include xinput.h. Unfortunately,
-		# CMake cannot find this file via find_path, so we check for it using
-		# CHECK_INCLUDE_FILES. windows.h must be included before xinput.h.
-		CHECK_INCLUDE_FILES( "windows.h;xinput.h" XINPUT_H_FOUND )
-		if( NOT XINPUT_H_FOUND )
-			message( WARNING "Could not find xinput.h. XInput will be disabled." )
-			add_definitions( -DNO_XINPUT )
-		endif()
-	else()
-		include_directories( ${XINPUT_INCLUDE_DIR} )
-	endif()
-
-	find_library( DX_dinput8_LIBRARY dinput8
-		PATHS ENV DXSDK_DIR
-		PATH_SUFFIXES Lib Lib/${XBITS} )
-	find_library( DX_dxguid_LIBRARY dxguid
-		PATHS ENV DXSDK_DIR
-		PATH_SUFFIXES Lib Lib/${XBITS} )
-
-	# Modern versions of the Windows SDK include dinput8.lib. Unfortunately,
-	# CMake cannot find these libraries via find_library.
-	if( NOT DX_dinput8_LIBRARY )
-		# If we got this far, assume dinput8.lib is in the system library path.
+	if( ( MSVC14 AND NOT CMAKE_GENERATOR_TOOLSET STREQUAL "v140_xp" ) OR	# For VS 2015.
+		( MSVC15 AND NOT CMAKE_GENERATOR_TOOLSET STREQUAL "v150_xp" ) )		# For VS 2017.
+		# for modern Windows SDKs the DirectX headers should be available by default.
 		set( DX_dinput8_LIBRARY dinput8 )
-	endif()
+	else()
+		
+		find_path( D3D_INCLUDE_DIR d3d9.h
+			PATHS ENV DXSDK_DIR
+			PATH_SUFFIXES Include )
+		if( NOT D3D_INCLUDE_DIR )
+			# Modern versions of the Windows SDK include d3d9.h. Unfortunately,
+			# CMake cannot find this file via find_path, so we check for it using
+			# CHECK_INCLUDE_FILE.
+			CHECK_INCLUDE_FILE( d3d9.h D3D9_H_FOUND )
+			if ( NOT D3D9_H_FOUND )
+				message( SEND_ERROR "Could not find DirectX 9 header files" )
+			endif()
+		else()
+			include_directories( ${D3D_INCLUDE_DIR} )
+		endif()
+		
+		find_path( XINPUT_INCLUDE_DIR xinput.h
+			PATHS ENV DXSDK_DIR
+			PATH_SUFFIXES Include )
+		if( NOT XINPUT_INCLUDE_DIR )
+			# Modern versions of the Windows SDK include xinput.h. Unfortunately,
+			# CMake cannot find this file via find_path, so we check for it using
+			# CHECK_INCLUDE_FILES. windows.h must be included before xinput.h.
+			CHECK_INCLUDE_FILES( "windows.h;xinput.h" XINPUT_H_FOUND )
+			if( NOT XINPUT_H_FOUND )
+				message( WARNING "Could not find xinput.h. XInput will be disabled." )
+				add_definitions( -DNO_XINPUT )
+			endif()
+		else()
+			include_directories( ${XINPUT_INCLUDE_DIR} )
+		endif()
 
-	# Modern versions of the Windows SDK do NOT include dxguid.lib. Its contents
-	# were moved to dinput8.lib.
-	if( NOT DX_dxguid_LIBRARY )
-		message( STATUS "Could not find dxguid.lib. Build may fail on old Windows SDKs.")
+		find_library( DX_dinput8_LIBRARY dinput8
+			PATHS ENV DXSDK_DIR
+			PATH_SUFFIXES Lib Lib/${XBITS} )
+		find_library( DX_dxguid_LIBRARY dxguid
+			PATHS ENV DXSDK_DIR
+			PATH_SUFFIXES Lib Lib/${XBITS} )
+
+		# Modern versions of the Windows SDK include dinput8.lib. Unfortunately,
+		# CMake cannot find these libraries via find_library.
+		if( NOT DX_dinput8_LIBRARY )
+			# If we got this far, assume dinput8.lib is in the system library path.
+			set( DX_dinput8_LIBRARY dinput8 )
+		endif()
+
+		# Modern versions of the Windows SDK do NOT include dxguid.lib. Its contents
+		# were moved to dinput8.lib.
+		if( NOT DX_dxguid_LIBRARY )
+			message( STATUS "Could not find dxguid.lib. Build may fail on old Windows SDKs.")
+		endif()
 	endif()
 
 	set( ZDOOM_LIBS
@@ -242,22 +249,6 @@ if (NOT ZDOOM_USE_SSE2)
 	endif()
 endif()
 
-if( SSE_MATTERS )
-	if( WIN32 )
-		set( BACKPATCH 1 CACHE BOOL "Enable backpatching." )
-	else()
-		CHECK_FUNCTION_EXISTS(mprotect HAVE_MPROTECT)
-		if( HAVE_MPROTECT )
-			set( BACKPATCH 1 CACHE BOOL "Enable backpatching." )
-		else()
-			set( BACKPATCH 0 )
-		endif()
-	endif()
-	set( SSE 1 CACHE BOOL "Build SSE and SSE2 versions of key code." )
-else()
-	set( BACKPATCH 0 )
-endif()
-
 if( X64 )
 	set( HAVE_MMX 1 )
 else( X64 )
@@ -273,6 +264,11 @@ else( X64 )
 
 	set( CMAKE_CXX_FLAGS ${SAFE_CMAKE_CXX_FLAGS} )
 endif( X64 )
+
+# Set up flags for MSVC
+if (MSVC)
+	set( CMAKE_CXX_FLAGS "/MP ${CMAKE_CXX_FLAGS}" )
+endif (MSVC)
 
 # Set up flags for GCC
 
@@ -331,6 +327,11 @@ if( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
 	endif()
 	set( CMAKE_C_FLAGS "-Wall -Wextra -Wno-unused -Wno-unused-parameter -Wno-missing-field-initializers -ffp-contract=off ${CMAKE_C_FLAGS}" )
 	set( CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused -Wno-unused-parameter -Wno-missing-field-initializers -ffp-contract=off ${CMAKE_CXX_FLAGS}" )
+
+	# ARM processors (Raspberry Pi, et al) - enable ARM NEON support.
+	if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm") 
+		set( CMAKE_CXX_FLAGS "-mfpu=neon ${CMAKE_CXX_FLAGS}" )
+	endif ()
 
 	# Use the highest C++ standard available since VS2015 compiles with C++14
 	# but we only require C++11.  The recommended way to do this in CMake is to
@@ -421,10 +422,6 @@ if( UNIX )
 endif()
 
 # Flags
-
-if( BACKPATCH )
-	add_definitions( -DBACKPATCH )
-endif()
 
 # Update gitinfo.h
 
@@ -567,18 +564,6 @@ add_custom_command( OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h
 
 include_directories( ${CMAKE_CURRENT_BINARY_DIR} )
 
-if( SSE_MATTERS )
-	if( SSE )
-		set( X86_SOURCES nodebuild_classify_sse2.cpp )
-		set_source_files_properties( nodebuild_classify_sse2.cpp PROPERTIES COMPILE_FLAGS "${SSE2_ENABLE}" )
-	else()
-		add_definitions( -DDISABLE_SSE )
-	endif()
-else()
-	add_definitions( -DDISABLE_SSE )
-	set( X86_SOURCES )
-endif()
-
 if( SNDFILE_FOUND )
     add_definitions( -DHAVE_SNDFILE )
 endif()
@@ -626,6 +611,8 @@ file( GLOB HEADER_FILES
 	scripting/decorate/*.h
 	scripting/zscript/*.h
 	scripting/vm/*.h
+	timidity/*.h
+	wildmidi/*.h
 	xlat/*.h
 	gl/*.h
 	gl/api/*.h
@@ -671,18 +658,13 @@ set( FASTMATH_PCH_SOURCES
 	SkylineBinPack.cpp
 	intermission/intermission.cpp
 	intermission/intermission_parse.cpp
-	menu/colorpickermenu.cpp
 	menu/joystickmenu.cpp
-	menu/listmenu.cpp
 	menu/loadsavemenu.cpp
 	menu/menu.cpp
 	menu/menudef.cpp
-	menu/menuinput.cpp
 	menu/messagebox.cpp
 	menu/optionmenu.cpp
-	menu/playerdisplay.cpp
 	menu/playermenu.cpp
-	menu/readthis.cpp
 	menu/videomenu.cpp
 	timidity/common.cpp
 	timidity/instrum.cpp
@@ -727,6 +709,7 @@ set( FASTMATH_SOURCES
 	sound/music_timidity_mididevice.cpp
 	sound/music_wildmidi_mididevice.cpp
 	sound/music_win_mididevice.cpp
+	sound/music_audiotoolbox_mididevice.cpp
 	sound/oalsound.cpp
 	sound/sndfile_decoder.cpp
 	sound/music_pseudo_mididevice.cpp
@@ -998,6 +981,7 @@ set (PCH_SOURCES
 	textures/pngtexture.cpp
 	textures/rawpagetexture.cpp
 	textures/emptytexture.cpp
+	textures/backdroptexture.cpp
 	textures/texture.cpp
 	textures/texturemanager.cpp
 	textures/tgatexture.cpp
@@ -1021,6 +1005,7 @@ set (PCH_SOURCES
 	scripting/thingdef_data.cpp
 	scripting/thingdef_properties.cpp
 	scripting/backend/codegen.cpp
+	scripting/backend/scopebarrier.cpp
 	scripting/backend/dynarrays.cpp
 	scripting/backend/vmbuilder.cpp
 	scripting/backend/vmdisasm.cpp
@@ -1034,6 +1019,7 @@ set (PCH_SOURCES
 	scripting/zscript/zcc_compile.cpp
 	scripting/zscript/zcc_parser.cpp
 	sfmt/SFMT.cpp
+	events.cpp
 )
 enable_precompiled_headers( g_pch.h PCH_SOURCES )
 
@@ -1155,7 +1141,7 @@ endif()
 
 if( APPLE )
 	set_target_properties(zdoom PROPERTIES
-		LINK_FLAGS "-framework Carbon -framework Cocoa -framework IOKit -framework OpenGL"
+		LINK_FLAGS "-framework AudioToolbox -framework AudioUnit -framework Carbon -framework Cocoa -framework IOKit -framework OpenGL"
 		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/posix/osx/zdoom-info.plist" )
 endif()
 

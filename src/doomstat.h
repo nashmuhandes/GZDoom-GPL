@@ -102,7 +102,7 @@ EXTERN_CVAR (Float, snd_musicvolume)	// maximum volume for music
 // Status flags for refresh.
 //
 
-enum EMenuState
+enum EMenuState : int
 {
 	MENU_Off,			// Menu is closed
 	MENU_On,			// Menu is opened
@@ -235,7 +235,7 @@ struct DehInfo
 	int KFAArmor;
 	int KFAAC;
 	char PlayerSprite[5];
-	BYTE ExplosionStyle;
+	uint8_t ExplosionStyle;
 	double ExplosionAlpha;
 	int NoAutofreeze;
 	int BFGCells;

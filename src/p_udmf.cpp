@@ -342,7 +342,7 @@ FUDMFKey *FUDMFKeys::Find(FName key)
 //
 //===========================================================================
 
-int GetUDMFInt(int type, int index, const char *key)
+int GetUDMFInt(int type, int index, FName key)
 {
 	assert(type >=0 && type <=3);
 
@@ -359,7 +359,16 @@ int GetUDMFInt(int type, int index, const char *key)
 	return 0;
 }
 
-double GetUDMFFloat(int type, int index, const char *key)
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetUDMFInt)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(type);
+	PARAM_INT(index);
+	PARAM_NAME(key);
+	ACTION_RETURN_INT(GetUDMFInt(type, index, key));
+}
+
+double GetUDMFFloat(int type, int index, FName key)
 {
 	assert(type >=0 && type <=3);
 
@@ -374,6 +383,41 @@ double GetUDMFFloat(int type, int index, const char *key)
 		}
 	}
 	return 0;
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetUDMFFloat)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(type);
+	PARAM_INT(index);
+	PARAM_NAME(key);
+	ACTION_RETURN_FLOAT(GetUDMFFloat(type, index, key));
+}
+
+FString GetUDMFString(int type, int index, FName key)
+{
+	assert(type >= 0 && type <= 3);
+
+	FUDMFKeys *pKeys = UDMFKeys[type].CheckKey(index);
+
+	if (pKeys != NULL)
+	{
+		FUDMFKey *pKey = pKeys->Find(key);
+		if (pKey != NULL)
+		{
+			return pKey->StringVal;
+		}
+	}
+	return "";
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetUDMFString)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(type);
+	PARAM_INT(index);
+	PARAM_NAME(key);
+	ACTION_RETURN_STRING(GetUDMFString(type, index, key));
 }
 
 
@@ -474,7 +518,7 @@ public:
 		th->Gravity = 1;
 		th->RenderStyle = STYLE_Count;
 		th->Alpha = -1;
-		th->health = 1;
+		th->Health = 1;
 		th->FloatbobPhase = -1;
 		sc.MustGetToken('{');
 		while (!sc.CheckToken('}'))
@@ -702,7 +746,7 @@ public:
 				break;
 
 			case NAME_Health:
-				th->health = CheckInt(key);
+				th->Health = CheckFloat(key);
 				break;
 
 			case NAME_Score:
@@ -1349,7 +1393,7 @@ public:
 				if (isTranslated) sec->special = P_TranslateSectorSpecial(sec->special);
 				else if (namespc == NAME_Hexen)
 				{
-					if (sec->special < 0 || sec->special > 255 || !HexenSectorSpecialOk[sec->special])
+					if (sec->special < 0 || sec->special > 140 || !HexenSectorSpecialOk[sec->special])
 						sec->special = 0;	// NULL all unknown specials
 				}
 				continue;
@@ -1614,6 +1658,10 @@ public:
 					sec->planes[sector_t::ceiling].GlowHeight = (float)CheckFloat(key);
 					break;
 
+				case NAME_Noattack:
+					Flag(sec->Flags, SECF_NOATTACK, key);
+					break;
+
 				case NAME_MoreIds:
 					// delay parsing of the tag string until parsing of the sector is complete
 					// This ensures that the ID is always the first tag in the list.
@@ -1810,7 +1858,7 @@ public:
 			intptr_t v1i = intptr_t(ParsedLines[i].v1);
 			intptr_t v2i = intptr_t(ParsedLines[i].v2);
 
-			if (v1i >= level.vertexes.Size() || v2i >= level.vertexes.Size() || v1i < 0 || v2i < 0)
+			if ((unsigned)v1i >= level.vertexes.Size() || (unsigned)v2i >= level.vertexes.Size())
 			{
 				I_Error ("Line %d has invalid vertices: %zd and/or %zd.\nThe map only contains %u vertices.", i+skipped, v1i, v2i, level.vertexes.Size());
 			}

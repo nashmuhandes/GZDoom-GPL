@@ -49,7 +49,6 @@
 #include "i_system.h"
 #include "gdtoa.h"
 #include "backend/vmbuilder.h"
-#include "version.h"
 
 static int GetIntConst(FxExpression *ex, FCompileContext &ctx)
 {
@@ -69,7 +68,7 @@ static FString GetStringConst(FxExpression *ex, FCompileContext &ctx)
 {
 	ex = new FxStringCast(ex);
 	ex = ex->Resolve(ctx);
-	return static_cast<FxConstant*>(ex)->GetValue().GetString();
+	return ex ? static_cast<FxConstant*>(ex)->GetValue().GetString() : FString();
 }
 
 int ZCCCompiler::IntConstFromNode(ZCC_TreeNode *node, PStruct *cls)
@@ -276,8 +275,8 @@ void ZCCCompiler::ProcessStruct(ZCC_Struct *cnode, PSymbolTreeNode *treenode, ZC
 //
 //==========================================================================
 
-ZCCCompiler::ZCCCompiler(ZCC_AST &ast, DObject *_outer, PSymbolTable &_symbols, PNamespace *_outnamespc, int lumpnum)
-	: Outer(_outer), GlobalTreeNodes(&_symbols), OutNamespace(_outnamespc), AST(ast), Lump(lumpnum)
+ZCCCompiler::ZCCCompiler(ZCC_AST &ast, DObject *_outer, PSymbolTable &_symbols, PNamespace *_outnamespc, int lumpnum, const VersionInfo &ver)
+	: Outer(_outer), GlobalTreeNodes(&_symbols), OutNamespace(_outnamespc), AST(ast), mVersion(ver), Lump(lumpnum)
 {
 	FScriptPosition::ResetErrorCounter();
 	// Group top-level nodes by type
@@ -496,6 +495,32 @@ void ZCCCompiler::CreateStructTypes()
 		{
 			s->strct->Type = NewStruct(s->NodeName(), outer);
 		}
+		if (s->strct->Flags & ZCC_Version)
+		{
+			s->strct->Type->mVersion = s->strct->Version;
+		}
+
+		if (mVersion >= MakeVersion(2, 4, 0))
+		{
+			if ((s->strct->Flags & (ZCC_UIFlag | ZCC_Play)) == (ZCC_UIFlag | ZCC_Play))
+			{
+				Error(s->strct, "Struct %s has incompatible flags", s->NodeName().GetChars());
+			}
+
+			if (outer != OutNamespace) s->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(s->Type()->ObjectFlags, FScopeBarrier::SideFromObjectFlags(outer->ObjectFlags));
+			else if (s->strct->Flags & ZCC_ClearScope) Warn(s->strct, "Useless 'ClearScope' on struct %s not inside a class", s->NodeName().GetChars());
+			if (s->strct->Flags & ZCC_UIFlag)
+				s->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(s->Type()->ObjectFlags, FScopeBarrier::Side_UI);
+			if (s->strct->Flags & ZCC_Play)
+				s->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(s->Type()->ObjectFlags, FScopeBarrier::Side_Play);
+			if (s->strct->Flags & ZCC_ClearScope)
+				s->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(s->Type()->ObjectFlags, FScopeBarrier::Side_PlainData); // don't inherit the scope from the outer class
+		}
+		else
+		{
+			// old versions force 'play'.
+			s->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(s->Type()->ObjectFlags, FScopeBarrier::Side_Play);
+		}
 		s->strct->Symbol = new PSymbolType(s->NodeName(), s->Type());
 		syms->AddSymbol(s->strct->Symbol);
 
@@ -584,11 +609,16 @@ void ZCCCompiler::CreateClassTypes()
 					// We will never get here if the name is a duplicate, so we can just do the assignment.
 					try
 					{
+						if (parent->mVersion > mVersion)
+						{
+							Error(c->cls, "Parent class %s of %s not accessible to ZScript version %d.%d.%d", parent->TypeName.GetChars(), c->NodeName().GetChars(), mVersion.major, mVersion.minor, mVersion.revision);
+						}
 						c->cls->Type = parent->CreateDerivedClass(c->NodeName(), TentativeClass);
 						if (c->Type() == nullptr)
 						{
 							Error(c->cls, "Class name %s already exists", c->NodeName().GetChars());
 						}
+						else DPrintf(DMSG_SPAMMY, "Created class %s with parent %s\n", c->Type()->TypeName.GetChars(), c->Type()->ParentClass->TypeName.GetChars());
 					}
 					catch (CRecoverableError &err)
 					{
@@ -598,6 +628,44 @@ void ZCCCompiler::CreateClassTypes()
 					}
 				}
 				if (c->Type() == nullptr) c->cls->Type = parent->FindClassTentative(c->NodeName());
+				if (c->cls->Flags & ZCC_Abstract)
+					c->Type()->ObjectFlags |= OF_Abstract;
+
+				if (c->cls->Flags & ZCC_Version)
+				{
+					c->Type()->mVersion = c->cls->Version;
+				}
+				// 
+				if (mVersion >= MakeVersion(2, 4, 0))
+				{
+					static int incompatible[] = { ZCC_UIFlag, ZCC_Play, ZCC_ClearScope };
+					int incompatiblecnt = 0;
+					for (size_t k = 0; k < countof(incompatible); k++)
+						if (incompatible[k] & c->cls->Flags) incompatiblecnt++;
+
+					if (incompatiblecnt > 1)
+					{
+						Error(c->cls, "Class %s has incompatible flags", c->NodeName().GetChars());
+					}
+
+					if (c->cls->Flags & ZCC_UIFlag)
+						c->Type()->ObjectFlags = (c->Type()->ObjectFlags&~OF_Play) | OF_UI;
+					if (c->cls->Flags & ZCC_Play)
+						c->Type()->ObjectFlags = (c->Type()->ObjectFlags&~OF_UI) | OF_Play;
+					if (parent->ObjectFlags & (OF_UI | OF_Play)) // parent is either ui or play
+					{
+						if (c->cls->Flags & (ZCC_UIFlag | ZCC_Play))
+						{
+							Error(c->cls, "Can't change class scope in class %s", c->NodeName().GetChars());
+						}
+						c->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(c->Type()->ObjectFlags, FScopeBarrier::SideFromObjectFlags(parent->ObjectFlags));
+					}
+				}
+				else
+				{
+					c->Type()->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(c->Type()->ObjectFlags, FScopeBarrier::Side_Play);
+				}
+
 				c->Type()->bExported = true;	// this class is accessible to script side type casts. (The reason for this flag is that types like PInt need to be skipped.)
 				c->cls->Symbol = new PSymbolType(c->NodeName(), c->Type());
 				OutNamespace->Symbols.AddSymbol(c->cls->Symbol);
@@ -1003,6 +1071,11 @@ void ZCCCompiler::CompileAllFields()
 					type->Size = Classes[i]->Type()->ParentClass->Size;
 				}
 			}
+			if (Classes[i]->Type()->ParentClass)
+				type->MetaSize = Classes[i]->Type()->ParentClass->MetaSize;
+			else
+				type->MetaSize = 0;
+
 			if (CompileFields(type, Classes[i]->Fields, nullptr, &Classes[i]->TreeNodes, false, !!HasNativeChildren.CheckKey(type)))
 			{
 				// Remove from the list if all fields got compiled.
@@ -1041,8 +1114,8 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 
 		// For structs only allow 'deprecated', for classes exclude function qualifiers.
 		int notallowed = forstruct? 
-			ZCC_Latent | ZCC_Final | ZCC_Action | ZCC_Static | ZCC_FuncConst | ZCC_Abstract | ZCC_Virtual | ZCC_Override | ZCC_Meta | ZCC_Extension :
-			ZCC_Latent | ZCC_Final | ZCC_Action | ZCC_Static | ZCC_FuncConst | ZCC_Abstract | ZCC_Virtual | ZCC_Override | ZCC_Extension;
+			ZCC_Latent | ZCC_Final | ZCC_Action | ZCC_Static | ZCC_FuncConst | ZCC_Abstract | ZCC_Virtual | ZCC_Override | ZCC_Meta | ZCC_Extension | ZCC_VirtualScope | ZCC_ClearScope :
+			ZCC_Latent | ZCC_Final | ZCC_Action | ZCC_Static | ZCC_FuncConst | ZCC_Abstract | ZCC_Virtual | ZCC_Override | ZCC_Extension | ZCC_VirtualScope | ZCC_ClearScope;
 
 		if (field->Flags & notallowed)
 		{
@@ -1057,20 +1130,49 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 		if (field->Flags & ZCC_Deprecated) varflags |= VARF_Deprecated;
 		if (field->Flags & ZCC_ReadOnly) varflags |= VARF_ReadOnly;
 		if (field->Flags & ZCC_Transient) varflags |= VARF_Transient;
+		if (mVersion >= MakeVersion(2, 4, 0))
+		{
+			if (type->ObjectFlags & OF_UI)
+				varflags |= VARF_UI;
+			if (type->ObjectFlags & OF_Play)
+				varflags |= VARF_Play;
+			if (field->Flags & ZCC_UIFlag)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_UI);
+			if (field->Flags & ZCC_Play)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_Play);
+			if (field->Flags & ZCC_ClearScope)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_PlainData);
+		}
+		else
+		{
+			varflags |= VARF_Play;
+		}
 
 		if (field->Flags & ZCC_Native)
 		{
 			varflags |= VARF_Native | VARF_Transient;
 		}
 
+		static int excludescope[] = { ZCC_UIFlag, ZCC_Play, ZCC_ClearScope };
+		int excludeflags = 0;
+		int fc = 0;
+		for (size_t i = 0; i < countof(excludescope); i++)
+		{
+			if (field->Flags & excludescope[i])
+			{
+				fc++;
+				excludeflags |= excludescope[i];
+			}
+		}
+		if (fc > 1)
+		{
+			Error(field, "Invalid combination of scope qualifiers %s on field %s", FlagsToString(excludeflags).GetChars(), FName(field->Names->Name).GetChars());
+			varflags &= ~(VARF_UI | VARF_Play); // make plain data
+		}
+
 		if (field->Flags & ZCC_Meta)
 		{
 			varflags |= VARF_Meta | VARF_Static | VARF_ReadOnly;	// metadata implies readonly
-			if (!(field->Flags & ZCC_Native))
-			{
-				// Non-native meta data is not implemented yet and requires some groundwork in the class copy code.
-				Error(field, "Metadata member %s must be native", FName(field->Names->Name).GetChars());
-			}
 		}
 
 		if (field->Type->ArraySize != nullptr)
@@ -1091,31 +1193,39 @@ bool ZCCCompiler::CompileFields(PStruct *type, TArray<ZCC_VarDeclarator *> &Fiel
 				
 				if (varflags & VARF_Native)
 				{
-					auto querytype = (varflags & VARF_Meta) ? type->GetClass() : type;
-					fd = FindField(querytype, FName(name->Name).GetChars());
-					if (fd == nullptr)
+					if (varflags & VARF_Meta)
 					{
-						Error(field, "The member variable '%s.%s' has not been exported from the executable.", type->TypeName.GetChars(), FName(name->Name).GetChars());
+						Error(field, "Native meta variable %s not allowed", FName(name->Name).GetChars());
 					}
-					else if (thisfieldtype->Size != fd->FieldSize && fd->BitValue == 0)
-					{
-						Error(field, "The member variable '%s.%s' has mismatching sizes in internal and external declaration. (Internal = %d, External = %d)", type->TypeName.GetChars(), FName(name->Name).GetChars(), fd->FieldSize, thisfieldtype->Size);
-					}
-					// Q: Should we check alignment, too? A mismatch may be an indicator for bad assumptions.
 					else
 					{
-						// for bit fields the type must point to the source variable.
-						if (fd->BitValue != 0) thisfieldtype = fd->FieldSize == 1 ? TypeUInt8 : fd->FieldSize == 2 ? TypeUInt16 : TypeUInt32;
-						type->AddNativeField(name->Name, thisfieldtype, fd->FieldOffset, varflags, fd->BitValue);
+						fd = FindField(type, FName(name->Name).GetChars());
+						if (fd == nullptr)
+						{
+							Error(field, "The member variable '%s.%s' has not been exported from the executable.", type->TypeName.GetChars(), FName(name->Name).GetChars());
+						}
+						else if (thisfieldtype->Size != fd->FieldSize && fd->BitValue == 0)
+						{
+							Error(field, "The member variable '%s.%s' has mismatching sizes in internal and external declaration. (Internal = %d, External = %d)", type->TypeName.GetChars(), FName(name->Name).GetChars(), fd->FieldSize, thisfieldtype->Size);
+						}
+						// Q: Should we check alignment, too? A mismatch may be an indicator for bad assumptions.
+						else
+						{
+							// for bit fields the type must point to the source variable.
+							if (fd->BitValue != 0) thisfieldtype = fd->FieldSize == 1 ? TypeUInt8 : fd->FieldSize == 2 ? TypeUInt16 : TypeUInt32;
+							auto f = type->AddNativeField(name->Name, thisfieldtype, fd->FieldOffset, varflags, fd->BitValue);
+							if (field->Flags & (ZCC_Version | ZCC_Deprecated)) f->mVersion = field->Version;
+						}
 					}
 				}
 				else if (hasnativechildren)
 				{
-					Error(field, "Cannot add field %s to %s. %s has native children which means it size may not change.", FName(name->Name).GetChars(), type->TypeName.GetChars(), type->TypeName.GetChars());
+					Error(field, "Cannot add field %s to %s. %s has native children which means it size may not change", FName(name->Name).GetChars(), type->TypeName.GetChars(), type->TypeName.GetChars());
 				}
 				else
 				{
-					type->AddField(name->Name, thisfieldtype, varflags);
+					auto f = type->AddField(name->Name, thisfieldtype, varflags);
+					if (field->Flags & (ZCC_Version | ZCC_Deprecated)) f->mVersion = field->Version;
 				}
 			}
 			name = static_cast<ZCC_VarName*>(name->SiblingNext);
@@ -1184,8 +1294,10 @@ bool ZCCCompiler::CompileProperties(PClass *type, TArray<ZCC_Property *> &Proper
 		FString qualifiedname;
 		// Store the full qualified name and prepend some 'garbage' to the name so that no conflicts with other symbol types can happen.
 		// All these will be removed from the symbol table after the compiler finishes to free up the allocated space.
-		if (prefix == NAME_None) qualifiedname.Format("@property@%s", FName(p->NodeName).GetChars());
-		else qualifiedname.Format("@property@%s.%s", prefix.GetChars(), FName(p->NodeName).GetChars());
+		FName name = FName(p->NodeName);
+		if (prefix == NAME_None) qualifiedname.Format("@property@%s", name.GetChars());
+		else qualifiedname.Format("@property@%s.%s", prefix.GetChars(), name.GetChars());
+
 		fields.ShrinkToFit();
 		if (!type->Symbols.AddSymbol(new PProperty(qualifiedname, fields)))
 		{
@@ -1206,7 +1318,7 @@ bool ZCCCompiler::CompileProperties(PClass *type, TArray<ZCC_Property *> &Proper
 FString ZCCCompiler::FlagsToString(uint32_t flags)
 {
 
-	const char *flagnames[] = { "native", "static", "private", "protected", "latent", "final", "meta", "action", "deprecated", "readonly", "funcconst", "abstract", "extension", "virtual", "override", "transient", "vararg" };
+	const char *flagnames[] = { "native", "static", "private", "protected", "latent", "final", "meta", "action", "deprecated", "readonly", "const", "abstract", "extend", "virtual", "override", "transient", "vararg", "ui", "play", "clearscope", "virtualscope" };
 	FString build;
 
 	for (size_t i = 0; i < countof(flagnames); i++)
@@ -1356,22 +1468,19 @@ PType *ZCCCompiler::DetermineType(PType *outertype, ZCC_TreeNode *field, FName n
 		break;
 
 	case AST_DynArrayType:
-		if (allowarraytypes)
+	{
+		auto atype = static_cast<ZCC_DynArrayType *>(ztype);
+		auto ftype = DetermineType(outertype, field, name, atype->ElementType, false, true);
+		if (ftype->GetRegType() == REGT_NIL || ftype->GetRegCount() > 1)
 		{
-			auto atype = static_cast<ZCC_DynArrayType *>(ztype);
-			auto ftype = DetermineType(outertype, field, name, atype->ElementType, false, true);
-			if (ftype->GetRegType() == REGT_NIL || ftype->GetRegCount() > 1)
-			{
-				Error(field, "%s: Base type  for dynamic array types nust be integral, but got %s", name.GetChars(), ftype->DescriptiveName());
-			}
-			else
-			{
-				retval = NewDynArray(ftype);
-			}
-			break;
+			Error(field, "%s: Base type  for dynamic array types nust be integral, but got %s", name.GetChars(), ftype->DescriptiveName());
+		}
+		else
+		{
+			retval = NewDynArray(ftype);
 		}
 		break;
-
+	}
 	case AST_ClassType:
 	{
 		auto ctype = static_cast<ZCC_ClassType *>(ztype);
@@ -1397,6 +1506,11 @@ PType *ZCCCompiler::DetermineType(PType *outertype, ZCC_TreeNode *field, FName n
 			if (typesym == nullptr || !typesym->Type->IsKindOf(RUNTIME_CLASS(PClass)))
 			{
 				Error(field, "%s does not represent a class type", FName(ctype->Restriction->Id).GetChars());
+				return TypeError;
+			}
+			if (typesym->Type->mVersion > mVersion)
+			{
+				Error(field, "Class %s not accessible to ZScript version %d.%d.%d", FName(ctype->Restriction->Id).GetChars(), mVersion.major, mVersion.minor, mVersion.revision);
 				return TypeError;
 			}
 			retval = NewClassPointer(static_cast<PClass *>(typesym->Type));
@@ -1432,6 +1546,12 @@ PType *ZCCCompiler::ResolveUserType(ZCC_BasicType *type, PSymbolTable *symt)
 	if (sym != nullptr && sym->IsKindOf(RUNTIME_CLASS(PSymbolType)))
 	{
 		auto ptype = static_cast<PSymbolType *>(sym)->Type;
+		if (ptype->mVersion > mVersion)
+		{
+			Error(type, "Type %s not accessible to ZScript version %d.%d.%d", FName(type->UserType->Id).GetChars(), mVersion.major, mVersion.minor, mVersion.revision);
+			return TypeError;
+		}
+
 		if (ptype->IsKindOf(RUNTIME_CLASS(PEnum)))
 		{
 			return TypeSInt32;	// hack this to an integer until we can resolve the enum mess.
@@ -1691,7 +1811,7 @@ void ZCCCompiler::DispatchScriptProperty(PProperty *prop, ZCC_PropertyStmt *prop
 
 		if (f->Flags & VARF_Meta)
 		{
-			addr = ((char*)bag.Info) + f->Offset;
+			addr = ((char*)bag.Info->Meta) + f->Offset;
 		}
 		else
 		{
@@ -1715,7 +1835,19 @@ void ZCCCompiler::DispatchScriptProperty(PProperty *prop, ZCC_PropertyStmt *prop
 		{
 			static_cast<PBool*>(f->Type)->SetValue(addr, !!GetIntConst(ex, ctx));
 		}
-		if (f->Type->IsKindOf(RUNTIME_CLASS(PInt)))
+		else if (f->Type == TypeName)
+		{
+			*(FName*)addr = GetStringConst(ex, ctx);
+		}
+		else if (f->Type == TypeSound)
+		{
+			*(FSoundID*)addr = GetStringConst(ex, ctx);
+		}
+		else if (f->Type == TypeColor && ex->ValueType == TypeString)	// colors can also be specified as ints.
+		{
+			*(PalEntry*)addr = V_GetColor(nullptr, GetStringConst(ex, ctx).GetChars(), &ex->ScriptPosition);
+		}
+		else if (f->Type->IsKindOf(RUNTIME_CLASS(PInt)))
 		{
 			static_cast<PInt*>(f->Type)->SetValue(addr, GetIntConst(ex, ctx));
 		}
@@ -1766,7 +1898,7 @@ void ZCCCompiler::ProcessDefaultProperty(PClassActor *cls, ZCC_PropertyStmt *pro
 		if (namenode->Id == NAME_DamageFunction)
 		{
 			auto x = ConvertNode(prop->Values);
-			CreateDamageFunction(OutNamespace, cls, (AActor *)bag.Info->Defaults, x, false, Lump);
+			CreateDamageFunction(OutNamespace, mVersion, cls, (AActor *)bag.Info->Defaults, x, false, Lump);
 			((AActor *)bag.Info->Defaults)->DamageVal = -1;
 			return;
 		}
@@ -1921,6 +2053,7 @@ void ZCCCompiler::InitDefaults()
 			#ifdef _DEBUG
 				bag.ClassName = c->Type()->TypeName;
 			#endif
+				bag.Version = mVersion;
 				bag.Namespace = OutNamespace;
 				bag.Info = ti;
 				bag.DropItemSet = false;
@@ -1996,7 +2129,7 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 			} while (t != f->Type);
 		}
 
-		int notallowed = ZCC_Latent | ZCC_Meta | ZCC_ReadOnly | ZCC_FuncConst | ZCC_Abstract;
+		int notallowed = ZCC_Latent | ZCC_Meta | ZCC_ReadOnly | ZCC_Abstract;
 
 		if (f->Flags & notallowed)
 		{
@@ -2043,12 +2176,44 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 		if (f->Flags & ZCC_Virtual) varflags |= VARF_Virtual;
 		if (f->Flags & ZCC_Override) varflags |= VARF_Override;
 		if (f->Flags & ZCC_VarArg) varflags |= VARF_VarArg;
+		if (f->Flags & ZCC_FuncConst) varflags |= VARF_ReadOnly; // FuncConst method is internally marked as VARF_ReadOnly
+		if (mVersion >= MakeVersion(2, 4, 0))
+		{
+			if (c->Type()->ObjectFlags & OF_UI)
+				varflags |= VARF_UI;
+			if (c->Type()->ObjectFlags & OF_Play)
+				varflags |= VARF_Play;
+			//if (f->Flags & ZCC_FuncConst)
+			//	varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_PlainData); // const implies clearscope. this is checked a bit later to also not have ZCC_Play/ZCC_UIFlag.
+			if (f->Flags & ZCC_UIFlag)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_UI);
+			if (f->Flags & ZCC_Play)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_Play);
+			if (f->Flags & ZCC_ClearScope)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_Clear);
+			if (f->Flags & ZCC_VirtualScope)
+				varflags = FScopeBarrier::ChangeSideInFlags(varflags, FScopeBarrier::Side_Virtual);
+		}
+		else
+		{
+			varflags |= VARF_Play;
+		}
+
 		if ((f->Flags & ZCC_VarArg) && !(f->Flags & ZCC_Native))
 		{
 			Error(f, "'VarArg' can only be used with native methods");
 		}
 		if (f->Flags & ZCC_Action)
 		{
+			if (varflags & VARF_ReadOnly)
+			{
+				Error(f, "Action functions cannot be declared const");
+				varflags &= ~VARF_ReadOnly;
+			}
+			if (varflags & VARF_UI)
+			{
+				Error(f, "Action functions cannot be declared UI");
+			}
 			// Non-Actors cannot have action functions.
 			if (!c->Type()->IsKindOf(RUNTIME_CLASS(PClassActor)))
 			{
@@ -2068,28 +2233,54 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 		}
 		if (f->Flags & ZCC_Static) varflags = (varflags & ~VARF_Method) | VARF_Final, implicitargs = 0;	// Static implies Final.
 
-
 		if (varflags & VARF_Override) varflags &= ~VARF_Virtual;	// allow 'virtual override'.
 																	// Only one of these flags may be used.
 		static int exclude[] = { ZCC_Virtual, ZCC_Override, ZCC_Action, ZCC_Static };
-		static const char * print[] = { "virtual", "override", "action", "static" };
+		int excludeflags = 0;
 		int fc = 0;
-		FString build;
-		for (int i = 0; i < 4; i++)
+		for (size_t i = 0; i < countof(exclude); i++)
 		{
 			if (f->Flags & exclude[i])
 			{
 				fc++;
-				if (build.Len() > 0) build += ", ";
-				build += print[i];
+				excludeflags |= exclude[i];
 			}
 		}
 		if (fc > 1)
 		{
-			Error(f, "Invalid combination of qualifiers %s on function %s.", FName(f->Name).GetChars(), build.GetChars());
+			Error(f, "Invalid combination of qualifiers %s on function %s", FlagsToString(excludeflags).GetChars(), FName(f->Name).GetChars());
 			varflags |= VARF_Method;
 		}
 		if (varflags & VARF_Override) varflags |= VARF_Virtual;	// Now that the flags are checked, make all override functions virtual as well.
+
+		// [ZZ] this doesn't make sense either.
+		if ((varflags&(VARF_ReadOnly | VARF_Method)) == VARF_ReadOnly) // non-method const function
+		{
+			Error(f, "'Const' on a static method is not supported");
+		}
+
+		// [ZZ] neither this
+		if ((varflags&(VARF_VirtualScope | VARF_Method)) == VARF_VirtualScope) // non-method virtualscope function
+		{
+			Error(f, "'VirtualScope' on a static method is not supported");
+		}
+
+		static int excludescope[] = { ZCC_UIFlag, ZCC_Play, ZCC_ClearScope, ZCC_VirtualScope };
+		excludeflags = 0;
+		fc = 0;
+		for (size_t i = 0; i < countof(excludescope); i++)
+		{
+			if (f->Flags & excludescope[i])
+			{
+				fc++;
+				excludeflags |= excludescope[i];
+			}
+		}
+		if (fc > 1)
+		{
+			Error(f, "Invalid combination of scope qualifiers %s on function %s", FlagsToString(excludeflags).GetChars(), FName(f->Name).GetChars());
+			varflags &= ~(VARF_UI | VARF_Play); // make plain data
+		}
 
 		if (f->Flags & ZCC_Native)
 		{
@@ -2097,11 +2288,11 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 			afd = FindFunction(c->Type(), FName(f->Name).GetChars());
 			if (afd == nullptr)
 			{
-				Error(f, "The function '%s.%s' has not been exported from the executable.", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars());
+				Error(f, "The function '%s.%s' has not been exported from the executable", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars());
 			}
 			else
 			{
-				(*afd->VMPointer)->ImplicitArgs = BYTE(implicitargs);
+				(*afd->VMPointer)->ImplicitArgs = uint8_t(implicitargs);
 			}
 		}
 		SetImplicitArgs(&args, &argflags, &argnames, c->Type(), varflags, useflags);
@@ -2118,7 +2309,7 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 				{
 					auto type = DetermineType(c->Type(), p, f->Name, p->Type, false, false);
 					int flags = 0;
-					if (type->IsA(RUNTIME_CLASS(PStruct)) && type != TypeVector2 && type != TypeVector3)
+					if ((type->IsA(RUNTIME_CLASS(PStruct)) && type != TypeVector2 && type != TypeVector3) || type->IsA(RUNTIME_CLASS(PDynArray)))
 					{
 						// Structs are being passed by pointer, but unless marked 'out' that pointer must be readonly.
 						type = NewPointer(type /*, !(p->Flags & ZCC_Out)*/);
@@ -2211,7 +2402,7 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 					}
 					else if (hasoptionals)
 					{
-						Error(p, "All arguments after the first optional one need also be optional.");
+						Error(p, "All arguments after the first optional one need also be optional");
 					}
 					// TBD: disallow certain types? For now, let everything pass that isn't an array.
 					args.Push(type);
@@ -2244,6 +2435,14 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 			if (imp != nullptr) vindex = imp->VirtualIndex;
 			else Error(f, "Virtual base function %s not found in %s", FName(f->Name).GetChars(), cls->ParentClass->TypeName.GetChars());
 		}
+		if (f->Flags & (ZCC_Version | ZCC_Deprecated))
+		{
+			sym->mVersion = f->Version;
+			if (varflags & VARF_Override)
+			{
+				Error(f, "Overridden function %s may not alter version restriction in %s", FName(f->Name).GetChars(), cls->ParentClass->TypeName.GetChars());
+			}
+		}
 
 		if (!(f->Flags & ZCC_Native))
 		{
@@ -2257,7 +2456,7 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 				auto code = ConvertAST(c->Type(), f->Body);
 				if (code != nullptr)
 				{
-					FunctionBuildList.AddFunction(OutNamespace, sym, code, FStringf("%s.%s", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars()), false, -1, 0, Lump);
+					FunctionBuildList.AddFunction(OutNamespace, mVersion, sym, code, FStringf("%s.%s", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars()), false, -1, 0, Lump);
 				}
 			}
 		}
@@ -2266,18 +2465,21 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 			sym->Variants[0].Implementation->DefaultArgs = std::move(argdefaults);
 		}
 
+		if (sym->Variants[0].Implementation != nullptr)
+		{
+			// [ZZ] unspecified virtual function inherits old scope. virtual function scope can't be changed.
+			sym->Variants[0].Implementation->VarFlags = sym->Variants[0].Flags;
+		}
+
 		PClass *clstype = static_cast<PClass *>(c->Type());
 		if (varflags & VARF_Virtual)
 		{
 			if (sym->Variants[0].Implementation == nullptr)
 			{
-				Error(f, "Virtual function %s.%s not present.", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars());
+				Error(f, "Virtual function %s.%s not present", c->Type()->TypeName.GetChars(), FName(f->Name).GetChars());
 				return;
 			}
-			if (varflags & VARF_Final)
-			{
-				sym->Variants[0].Implementation->Final = true;
-			}
+
 			if (forclass)
 			{
 				int vindex = clstype->FindVirtualIndex(sym->SymbolName, sym->Variants[0].Proto);
@@ -2291,12 +2493,41 @@ void ZCCCompiler::CompileFunction(ZCC_StructWork *c, ZCC_FuncDeclarator *f, bool
 					else
 					{
 						auto oldfunc = clstype->Virtuals[vindex];
-						if (oldfunc->Final)
+						auto parentfunc = dyn_cast<PFunction>(clstype->ParentClass->Symbols.FindSymbol(sym->SymbolName, true));
+						if (parentfunc && parentfunc->mVersion > mVersion)
+						{
+							Error(f, "Attempt to override function %s which is incompatible with version %d.%d.%d", FName(f->Name).GetChars(), mVersion.major, mVersion.minor, mVersion.revision);
+						}
+						if (oldfunc->VarFlags & VARF_Final)
 						{
 							Error(f, "Attempt to override final function %s", FName(f->Name).GetChars());
 						}
+						// you can't change ui/play/clearscope for a virtual method.
+						if (f->Flags & (ZCC_UIFlag|ZCC_Play|ZCC_ClearScope|ZCC_VirtualScope))
+						{
+							Error(f, "Attempt to change scope for virtual function %s", FName(f->Name).GetChars());
+						}
+						// you can't change const qualifier for a virtual method
+						if ((sym->Variants[0].Implementation->VarFlags & VARF_ReadOnly) && !(oldfunc->VarFlags & VARF_ReadOnly))
+						{
+							Error(f, "Attempt to add const qualifier to virtual function %s", FName(f->Name).GetChars());
+						}
+						// you can't change protected qualifier for a virtual method (i.e. putting private), because this cannot be reliably checked without runtime stuff
+						if (f->Flags & (ZCC_Private | ZCC_Protected))
+						{
+							Error(f, "Attempt to change private/protected qualifiers for virtual function %s", FName(f->Name).GetChars());
+						}
+						// inherit scope of original function if override not specified
+						sym->Variants[0].Flags = FScopeBarrier::ChangeSideInFlags(sym->Variants[0].Flags, FScopeBarrier::SideFromFlags(oldfunc->VarFlags));
+						// inherit const from original function
+						if (oldfunc->VarFlags & VARF_ReadOnly)
+							sym->Variants[0].Flags |= VARF_ReadOnly;
+						if (oldfunc->VarFlags & VARF_Protected)
+							sym->Variants[0].Flags |= VARF_Protected;
+													
 						clstype->Virtuals[vindex] = sym->Variants[0].Implementation;
 						sym->Variants[0].Implementation->VirtualIndex = vindex;
+						sym->Variants[0].Implementation->VarFlags = sym->Variants[0].Flags;
 					}
 				}
 				else
@@ -2549,7 +2780,7 @@ void ZCCCompiler::CompileStates()
 						state.Misc1 = IntConstFromNode(sl->Offset, c->Type());
 						state.Misc2 = IntConstFromNode(static_cast<ZCC_Expression *>(sl->Offset->SiblingNext), c->Type());
 					}
-#ifdef DYNLIGHT
+
 					if (sl->Lights != nullptr)
 					{
 						auto l = sl->Lights;
@@ -2559,7 +2790,6 @@ void ZCCCompiler::CompileStates()
 							l = static_cast<decltype(l)>(l->SiblingNext);
 						} while (l != sl->Lights);
 					}
-#endif
 
 					if (sl->Action != nullptr)
 					{
@@ -2567,7 +2797,7 @@ void ZCCCompiler::CompileStates()
 						if (code != nullptr)
 						{
 							auto funcsym = CreateAnonymousFunction(c->Type(), nullptr, state.UseFlags);
-							state.ActionFunc = FunctionBuildList.AddFunction(OutNamespace, funcsym, code, FStringf("%s.StateFunction.%d", c->Type()->TypeName.GetChars(), statedef.GetStateCount()), false, statedef.GetStateCount(), (int)sl->Frames->Len(), Lump);
+							state.ActionFunc = FunctionBuildList.AddFunction(OutNamespace, mVersion, funcsym, code, FStringf("%s.StateFunction.%d", c->Type()->TypeName.GetChars(), statedef.GetStateCount()), false, statedef.GetStateCount(), (int)sl->Frames->Len(), Lump);
 						}
 					}
 
@@ -2593,7 +2823,7 @@ void ZCCCompiler::CompileStates()
 						statename << FName(part->Id) << '.';
 						part = static_cast<decltype(part)>(part->SiblingNext);
 					} while (part != sg->Label);
-					statename.Truncate((long)statename.Len() - 1);	// remove the last '.' in the label name
+					statename.Truncate(statename.Len() - 1);	// remove the last '.' in the label name
 					if (sg->Offset != nullptr)
 					{
 						int offset = IntConstFromNode(sg->Offset, c->Type());

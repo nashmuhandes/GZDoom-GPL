@@ -33,7 +33,7 @@
 struct ticcmd_t
 {
 	usercmd_t	ucmd;
-	SWORD		consistancy;	// checks for net game
+	int16_t		consistancy;	// checks for net game
 };
 
 #endif	// __D_TICCMD_H__

@@ -211,7 +211,7 @@ enum
 
 struct Sample
 {
-	SDWORD
+	int32_t
 		loop_start, loop_end, data_length,
 		sample_rate;
 	float
@@ -233,20 +233,20 @@ struct Sample
 		} sf2;
 	} envelope;
 	sample_t *data;
-	SDWORD 
+	int32_t
 		tremolo_sweep_increment, tremolo_phase_increment,
 		vibrato_sweep_increment, vibrato_control_ratio;
 	BYTE
 		tremolo_depth, vibrato_depth,
 		low_vel, high_vel,
 		 type;
-	WORD
+	uint16_t
 		modes;
-	SWORD
+	int16_t
 		panning;
-	WORD
+	uint16_t
 		scale_factor, key_group;
-	SWORD
+	int16_t
 		scale_note;
 	bool
 		self_nonexclusive;
@@ -254,7 +254,7 @@ struct Sample
 		left_offset, right_offset;
 
 	// SF2 stuff
-	SWORD tune;
+	int16_t tune;
 	SBYTE velocity;
 
 	float initial_attenuation;
@@ -432,7 +432,7 @@ struct Channel
 		volume, expression;
 	SBYTE
 		panning;
-	WORD
+	uint16_t
 		rpn, nrpn;
 	bool
 		nrpn_mode;

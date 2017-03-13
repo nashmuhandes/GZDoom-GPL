@@ -47,6 +47,7 @@
 #include "doomdef.h"
 #include "doomstat.h"
 #include "v_video.h"
+#include "events.h"
 
 #undef Class
 
@@ -90,9 +91,15 @@ size_t s_skipMouseMoves;
 
 void CheckGUICapture()
 {
-	const bool wantCapture = (MENU_Off == menuactive)
+	bool wantCapture = (MENU_Off == menuactive)
 		? (c_down == ConsoleState || c_falling == ConsoleState || chatmodeon)
 		: (MENU_On == menuactive || MENU_OnNoPause == menuactive);
+
+	// [ZZ] check active event handlers that want the UI processing
+	if (!wantCapture && E_CheckUiProcessors())
+	{
+		wantCapture = true;
+	}
 
 	if (wantCapture != GUICapture)
 	{
@@ -180,6 +187,9 @@ void CheckNativeMouse()
 		wantNative = m_use_mouse
 			&& (MENU_On == menuactive || MENU_OnNoPause == menuactive);
 	}
+
+	if (!wantNative && E_CheckRequireMouse())
+		wantNative = true;
 
 	I_SetNativeMouse(wantNative);
 }
@@ -307,7 +317,7 @@ uint8_t ModifierToDIK(const uint32_t modifier)
 	return 0;
 }
 
-SWORD ModifierFlagsToGUIKeyModifiers(NSEvent* theEvent)
+int16_t ModifierFlagsToGUIKeyModifiers(NSEvent* theEvent)
 {
 	const NSUInteger modifiers([theEvent modifierFlags] & NSDeviceIndependentModifierFlagsMask);
 	return ((modifiers & NSShiftKeyMask    ) ? GKM_SHIFT : 0)
@@ -680,7 +690,10 @@ void ProcessMouseButtonEvent(NSEvent* theEvent)
 
 void ProcessMouseWheelEvent(NSEvent* theEvent)
 {
-	const CGFloat delta    = [theEvent deltaY];
+	const int16_t modifiers = ModifierFlagsToGUIKeyModifiers(theEvent);
+	const CGFloat delta   = (modifiers & GKM_SHIFT)
+		? [theEvent deltaX]
+		: [theEvent deltaY];
 	const bool isZeroDelta = fabs(delta) < 1.0E-5;
 
 	if (isZeroDelta && GUICapture)
@@ -694,7 +707,7 @@ void ProcessMouseWheelEvent(NSEvent* theEvent)
 	{
 		event.type    = EV_GUI_Event;
 		event.subtype = delta > 0.0f ? EV_GUI_WheelUp : EV_GUI_WheelDown;
-		event.data3   = ModifierFlagsToGUIKeyModifiers(theEvent);
+		event.data3   = modifiers;
 	}
 	else
 	{

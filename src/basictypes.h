@@ -7,9 +7,7 @@ typedef int8_t					SBYTE;
 typedef uint8_t					BYTE;
 typedef int16_t					SWORD;
 typedef uint16_t				WORD;
-typedef int32_t					SDWORD;
 typedef uint32_t				uint32;
-typedef int64_t					SQWORD;
 typedef uint64_t				QWORD;
 
 // windef.h, included by windows.h, has its own incompatible definition
@@ -24,23 +22,14 @@ typedef uint32					DWORD;
 typedef uint32					BITFIELD;
 typedef int						INTBOOL;
 
-// a 64-bit constant
-#ifdef __GNUC__
-#define CONST64(v) (v##LL)
-#define UCONST64(v) (v##ULL)
-#else
-#define CONST64(v) ((SQWORD)(v))
-#define UCONST64(v) ((QWORD)(v))
-#endif
-
 #if !defined(GUID_DEFINED)
 #define GUID_DEFINED
 typedef struct _GUID
 {
     DWORD	Data1;
-    WORD	Data2;
-    WORD	Data3;
-    BYTE	Data4[8];
+    uint16_t Data2;
+	uint16_t Data3;
+    uint8_t	Data4[8];
 } GUID;
 #endif
 
@@ -63,7 +52,7 @@ union QWORD_UNION
 #define FRACBITS						16
 #define FRACUNIT						(1<<FRACBITS)
 
-typedef SDWORD							fixed_t;
+typedef int32_t							fixed_t;
 typedef DWORD							dsfixed_t;				// fixedpt used by span drawer
 
 #define FIXED_MAX						(signed)(0x7fffffff)

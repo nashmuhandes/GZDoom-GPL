@@ -37,6 +37,7 @@
 #include "a_pickups.h"
 #include "d_player.h"
 #include "g_levellocals.h"
+#include "events.h"
 
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_framebuffer.h"
@@ -664,7 +665,7 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 	bool isPicnumOverride = thing->picnum.isValid();
 
 	// Don't waste time projecting sprites that are definitely not visible.
-	if ((thing->sprite == 0 && !isPicnumOverride) || !thing->IsVisibleToPlayer() || !thing->IsInsideVisibleAngles())
+	if ((thing->sprite == 0 && !isPicnumOverride) || !thing->IsVisibleToPlayer() ||  ((thing->renderflags & RF_MASKROTATION) && !thing->IsInsideVisibleAngles()))
 	{
 		return;
 	}
@@ -893,7 +894,7 @@ void GLSprite::Process(AActor* thing, sector_t * sector, int thruportal)
 			rendersector->GetCeilingLight() : rendersector->GetFloorLight());
 	foglevel = (BYTE)clamp<short>(rendersector->lightlevel, 0, 255);
 
-	lightlevel = (byte)gl_CheckSpriteGlow(rendersector, lightlevel, thingpos);
+	lightlevel = gl_CheckSpriteGlow(rendersector, lightlevel, thingpos);
 
 	ThingColor = (thing->RenderStyle.Flags & STYLEF_ColorIsFixed) ? thing->fillcolor : 0xffffff;
 	ThingColor.a = 255;

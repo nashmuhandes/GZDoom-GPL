@@ -132,7 +132,7 @@ FSoundChan *Channels;
 FSoundChan *FreeChannels;
 
 FRolloffInfo S_Rolloff;
-BYTE *S_SoundCurve;
+uint8_t *S_SoundCurve;
 int S_SoundCurveSize;
 
 FBoolCVar noisedebug ("noise", false, 0);	// [RH] Print sound debugging info?
@@ -302,7 +302,7 @@ void S_Init ()
 	if (curvelump >= 0)
 	{
 		S_SoundCurveSize = Wads.LumpLength (curvelump);
-		S_SoundCurve = new BYTE[S_SoundCurveSize];
+		S_SoundCurve = new uint8_t[S_SoundCurveSize];
 		Wads.ReadLump(curvelump, S_SoundCurve);
 	}
 
@@ -697,6 +697,7 @@ static void CalcPosVel(int type, const AActor *actor, const sector_t *sector,
 		else
 		{
 			listenpos.Zero();
+			pos->Zero();
 			pgroup = 0;
 		}
 
@@ -716,7 +717,6 @@ static void CalcPosVel(int type, const AActor *actor, const sector_t *sector,
 			{
 			case SOURCE_None:
 			default:
-				pos->Zero();
 				break;
 
 			case SOURCE_Actor:
@@ -1261,6 +1261,7 @@ DEFINE_ACTION_FUNCTION(DObject, S_Sound)
 	PARAM_INT(channel);
 	PARAM_FLOAT_DEF(volume);
 	PARAM_FLOAT_DEF(attn);
+	S_Sound(channel, id, static_cast<float>(volume), static_cast<float>(attn));
 	return 0;
 }
 
@@ -1402,9 +1403,9 @@ sfxinfo_t *S_LoadSound(sfxinfo_t *sfx)
 		if (size > 0)
 		{
 			FWadLump wlump = Wads.OpenLumpNum(sfx->lumpnum);
-			BYTE *sfxdata = new BYTE[size];
+			uint8_t *sfxdata = new uint8_t[size];
 			wlump.Read(sfxdata, size);
-			SDWORD dmxlen = LittleLong(((SDWORD *)sfxdata)[1]);
+			int32_t dmxlen = LittleLong(((int32_t *)sfxdata)[1]);
             std::pair<SoundHandle,bool> snd;
 
 			// If the sound is voc, use the custom loader.
@@ -1418,9 +1419,9 @@ sfxinfo_t *S_LoadSound(sfxinfo_t *sfx)
 				snd = GSnd->LoadSoundRaw(sfxdata, size, sfx->RawRate, 1, 8, sfx->LoopStart);
 			}
 			// Otherwise, try the sound as DMX format.
-			else if (((BYTE *)sfxdata)[0] == 3 && ((BYTE *)sfxdata)[1] == 0 && dmxlen <= size - 8)
+			else if (((uint8_t *)sfxdata)[0] == 3 && ((uint8_t *)sfxdata)[1] == 0 && dmxlen <= size - 8)
 			{
-				int frequency = LittleShort(((WORD *)sfxdata)[1]);
+				int frequency = LittleShort(((uint16_t *)sfxdata)[1]);
 				if (frequency == 0) frequency = 11025;
 				snd = GSnd->LoadSoundRaw(sfxdata+8, dmxlen, frequency, 1, 8, sfx->LoopStart);
 			}
@@ -1462,9 +1463,9 @@ static void S_LoadSound3D(sfxinfo_t *sfx)
     if(size <= 0) return;
 
     FWadLump wlump = Wads.OpenLumpNum(sfx->lumpnum);
-    BYTE *sfxdata = new BYTE[size];
+    uint8_t *sfxdata = new uint8_t[size];
     wlump.Read(sfxdata, size);
-    SDWORD dmxlen = LittleLong(((SDWORD *)sfxdata)[1]);
+    int32_t dmxlen = LittleLong(((int32_t *)sfxdata)[1]);
     std::pair<SoundHandle,bool> snd;
 
     // If the sound is voc, use the custom loader.
@@ -1478,9 +1479,9 @@ static void S_LoadSound3D(sfxinfo_t *sfx)
         snd = GSnd->LoadSoundRaw(sfxdata, size, sfx->RawRate, 1, 8, sfx->LoopStart, true);
     }
     // Otherwise, try the sound as DMX format.
-    else if (((BYTE *)sfxdata)[0] == 3 && ((BYTE *)sfxdata)[1] == 0 && dmxlen <= size - 8)
+    else if (((uint8_t *)sfxdata)[0] == 3 && ((uint8_t *)sfxdata)[1] == 0 && dmxlen <= size - 8)
     {
-        int frequency = LittleShort(((WORD *)sfxdata)[1]);
+        int frequency = LittleShort(((uint16_t *)sfxdata)[1]);
         if (frequency == 0) frequency = 11025;
         snd = GSnd->LoadSoundRaw(sfxdata+8, dmxlen, frequency, 1, 8, sfx->LoopStart, -1, true);
     }

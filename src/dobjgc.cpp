@@ -78,6 +78,7 @@
 #include "menu/menu.h"
 #include "intermission/intermission.h"
 #include "g_levellocals.h"
+#include "events.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -149,7 +150,7 @@ DObject *Gray;
 DObject *Root;
 DObject *SoftRoots;
 DObject **SweepPos;
-DWORD CurrentWhite = OF_White0 | OF_Fixed;
+uint32_t CurrentWhite = OF_White0 | OF_Fixed;
 EGCState State = GCS_Pause;
 int Pause = DEFAULT_GCPAUSE;
 int StepMul = DEFAULT_GCMUL;
@@ -254,14 +255,6 @@ static DObject **SweepList(DObject **p, size_t count, size_t *finalize_count)
 
 				curr->Destroy();
 			}
-			/*
-			if (curr->IsKindOf(RUNTIME_CLASS(PSymbol)))
-				Printf("Collecting %s, name = %s\n", curr->GetClass()->TypeName.GetChars(), static_cast<PSymbol*>(curr)->SymbolName.GetChars());
-			else if (curr->IsKindOf(RUNTIME_CLASS(PType)))
-				Printf("Collecting %s, name = %s\n", curr->GetClass()->TypeName.GetChars(), static_cast<PType*>(curr)->DescriptiveName());
-			else
-				Printf("Collecting %s\n", curr->GetClass()->TypeName.GetChars());
-			*/
 			curr->ObjectFlags |= OF_Cleanup;
 			delete curr;
 			finalized++;
@@ -339,6 +332,8 @@ static void MarkRoot()
 	DThinker::MarkRoots();
 	FCanvasTextureInfo::Mark();
 	Mark(DACSThinker::ActiveThinker);
+	Mark(E_FirstEventHandler);
+	Mark(E_LastEventHandler);
 	for (auto &s : level.sectorPortals)
 	{
 		Mark(s.mSkybox);
@@ -552,7 +547,6 @@ void FullGC()
 
 void Barrier(DObject *pointing, DObject *pointed)
 {
-	assert(pointed->GetClass() < (void*)0x1000000000000000);
 	assert(pointing == NULL || (pointing->IsBlack() && !pointing->IsDead()));
 	assert(pointed->IsWhite() && !pointed->IsDead());
 	assert(State != GCS_Finalize && State != GCS_Pause);

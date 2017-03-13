@@ -111,6 +111,7 @@
 #include "autosegs.h"
 #include "fragglescript/t_fs.h"
 #include "g_levellocals.h"
+#include "events.h"
 
 EXTERN_CVAR(Bool, hud_althud)
 void DrawHUD();
@@ -287,6 +288,9 @@ void D_ProcessEvents (void)
 			continue;				// console ate the event
 		if (M_Responder (ev))
 			continue;				// menu ate the event
+		// check events
+		if (ev->type != EV_Mouse && E_Responder(ev)) // [ZZ] ZScript ate the event // update 07.03.17: mouse events are handled directly
+			continue;
 		G_Responder (ev);
 	}
 }
@@ -307,8 +311,7 @@ void D_PostEvent (const event_t *ev)
 		return;
 	}
 	events[eventhead] = *ev;
-	if (ev->type == EV_Mouse && !paused && menuactive == MENU_Off && ConsoleState != c_down && ConsoleState != c_falling
-		)
+	if (ev->type == EV_Mouse && menuactive == MENU_Off && ConsoleState != c_down && ConsoleState != c_falling && !E_Responder(ev) && !paused)
 	{
 		if (Button_Mlook.bDown || freelook)
 		{
@@ -386,14 +389,14 @@ CUSTOM_CVAR (Int, dmflags, 0, CVAR_SERVERINFO)
 	// If nofov is set, force everybody to the arbitrator's FOV.
 	if ((self & DF_NO_FOV) && consoleplayer == Net_Arbitrator)
 	{
-		BYTE fov;
+		uint8_t fov;
 
 		Net_WriteByte (DEM_FOV);
 
 		// If the game is started with DF_NO_FOV set, the arbitrator's
 		// DesiredFOV will not be set when this callback is run, so
 		// be sure not to transmit a 0 FOV.
-		fov = (BYTE)players[consoleplayer].DesiredFOV;
+		fov = (uint8_t)players[consoleplayer].DesiredFOV;
 		if (fov == 0)
 		{
 			fov = 90;
@@ -776,6 +779,9 @@ void D_Display ()
 			screen->SetBlendingRect(viewwindowx, viewwindowy,
 				viewwindowx + viewwidth, viewwindowy + viewheight);
 
+			// [ZZ] execute event hook that we just started the frame
+			//E_RenderFrame();
+			//
 			Renderer->RenderView(&players[consoleplayer]);
 
 			if ((hw2d = screen->Begin2D(viewactive)))
@@ -805,6 +811,10 @@ void D_Display ()
 			{
 				StatusBar->DrawBottomStuff (HUD_AltHud);
 				if (DrawFSHUD || automapactive) DrawHUD();
+				if (players[consoleplayer].camera && players[consoleplayer].camera->player && !automapactive)
+				{
+					StatusBar->DrawCrosshair();
+				}
 				StatusBar->Draw (HUD_AltHud);
 				StatusBar->DrawTopStuff (HUD_AltHud);
 			}
@@ -894,6 +904,8 @@ void D_Display ()
 	{
 		NetUpdate ();			// send out any new accumulation
 		// normal update
+		// draw ZScript UI stuff
+		//E_RenderOverlay();
 		C_DrawConsole (hw2d);	// draw console
 		M_Drawer ();			// menu is drawn even on top of everything
 		FStat::PrintStat ();
@@ -1928,7 +1940,7 @@ static FString CheckGameInfo(TArray<FString> & pwads)
 
 		if (resfile != NULL)
 		{
-			DWORD cnt = resfile->LumpCount();
+			uint32_t cnt = resfile->LumpCount();
 			for(int i=cnt-1; i>=0; i--)
 			{
 				FResourceLump *lmp = resfile->GetLump(i);
@@ -2524,7 +2536,10 @@ void D_DoomMain (void)
 
 		// Create replacements for dehacked pickups
 		FinishDehPatch();
-		
+
+		if (!batchrun) Printf("M_Init: Init menus.\n");
+		M_Init();
+
 		// clean up the compiler symbols which are not needed any longer.
 		RemoveUnusedSymbols();
 
@@ -2541,9 +2556,6 @@ void D_DoomMain (void)
 		}
 		bglobal.spawn_tries = 0;
 		bglobal.wanted_botnum = bglobal.getspawned.Size();
-
-		if (!batchrun) Printf ("M_Init: Init menus.\n");
-		M_Init ();
 
 		if (!batchrun) Printf ("P_Init: Init Playloop state.\n");
 		StartScreen->LoadingStatus ("Init game engine", 0x3f);
@@ -2681,6 +2693,7 @@ void D_DoomMain (void)
 			// These calls from inside V_Init2 are still necessary
 			C_NewModeAdjust();
 			M_InitVideoModesMenu();
+			Renderer->RemapVoxels();
 			D_StartTitle ();				// start up intro loop
 			setmodeneeded = false;			// This may be set to true here, but isn't needed for a restart
 		}
@@ -2701,6 +2714,7 @@ void D_DoomMain (void)
 		// clean up game state
 		ST_Clear();
 		D_ErrorCleanup ();
+		DThinker::DestroyThinkersInList(STAT_STATIC);
 		P_FreeLevelData();
 		P_FreeExtraLevelData();
 
@@ -2831,3 +2845,10 @@ void FStartupScreen::NetMessage(char const *,...) {}
 void FStartupScreen::NetDone(void) {}
 bool FStartupScreen::NetLoop(bool (*)(void *),void *) { return false; }
 
+DEFINE_FIELD_X(InputEventData, event_t, type)
+DEFINE_FIELD_X(InputEventData, event_t, subtype)
+DEFINE_FIELD_X(InputEventData, event_t, data1)
+DEFINE_FIELD_X(InputEventData, event_t, data2)
+DEFINE_FIELD_X(InputEventData, event_t, data3)
+DEFINE_FIELD_X(InputEventData, event_t, x)
+DEFINE_FIELD_X(InputEventData, event_t, y)

@@ -73,6 +73,7 @@ FRenderer *Renderer;
 
 IMPLEMENT_CLASS(DCanvas, true, false)
 IMPLEMENT_CLASS(DFrameBuffer, true, false)
+EXTERN_CVAR (Bool, fullscreen)
 
 #if defined(_DEBUG) && defined(_M_IX86) && !defined(__MINGW32__)
 #define DBGBREAK	{ __asm int 3 }
@@ -398,6 +399,20 @@ void DCanvas::Dim (PalEntry color, float damount, int x1, int y1, int w, int h)
 		spot += gap;
 	}
 }
+
+DEFINE_ACTION_FUNCTION(_Screen, Dim)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(color);
+	PARAM_FLOAT(amount);
+	PARAM_INT(x1);
+	PARAM_INT(y1);
+	PARAM_INT(w);
+	PARAM_INT(h);
+	screen->Dim(color, float(amount), x1, y1, w, h);
+	return 0;
+}
+
 
 //==========================================================================
 //
@@ -1475,6 +1490,9 @@ CCMD (vid_setmode)
 	{
 		goodmode = true;
 	}
+
+	if (!fullscreen)
+		goodmode = true;
 
 	if (goodmode)
 	{

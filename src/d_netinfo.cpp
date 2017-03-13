@@ -228,7 +228,7 @@ void D_PickRandomTeam (int player)
 {
 	static char teamline[8] = "\\team\\X";
 
-	BYTE *foo = (BYTE *)teamline;
+	uint8_t *foo = (uint8_t *)teamline;
 	teamline[6] = (char)D_PickRandomTeam() + '0';
 	D_ReadUserInfoStrings (player, &foo, teamplay);
 }
@@ -538,7 +538,7 @@ void D_UserInfoChanged (FBaseCVar *cvar)
 	Net_WriteString (foo);
 }
 
-static const char *SetServerVar (char *name, ECVarType type, BYTE **stream, bool singlebit)
+static const char *SetServerVar (char *name, ECVarType type, uint8_t **stream, bool singlebit)
 {
 	FBaseCVar *var = FindCVar (name, NULL);
 	UCVarValue value;
@@ -619,8 +619,8 @@ void D_SendServerInfoChange (const FBaseCVar *cvar, UCVarValue value, ECVarType 
 	namelen = strlen (cvar->GetName ());
 
 	Net_WriteByte (DEM_SINFCHANGED);
-	Net_WriteByte ((BYTE)(namelen | (type << 6)));
-	Net_WriteBytes ((BYTE *)cvar->GetName (), (int)namelen);
+	Net_WriteByte ((uint8_t)(namelen | (type << 6)));
+	Net_WriteBytes ((uint8_t *)cvar->GetName (), (int)namelen);
 	switch (type)
 	{
 	case CVAR_Bool:		Net_WriteByte (value.Bool);		break;
@@ -638,12 +638,12 @@ void D_SendServerFlagChange (const FBaseCVar *cvar, int bitnum, bool set)
 	namelen = (int)strlen (cvar->GetName ());
 
 	Net_WriteByte (DEM_SINFCHANGEDXOR);
-	Net_WriteByte ((BYTE)namelen);
-	Net_WriteBytes ((BYTE *)cvar->GetName (), namelen);
-	Net_WriteByte (BYTE(bitnum | (set << 5)));
+	Net_WriteByte ((uint8_t)namelen);
+	Net_WriteBytes ((uint8_t *)cvar->GetName (), namelen);
+	Net_WriteByte (uint8_t(bitnum | (set << 5)));
 }
 
-void D_DoServerInfoChange (BYTE **stream, bool singlebit)
+void D_DoServerInfoChange (uint8_t **stream, bool singlebit)
 {
 	const char *value;
 	char name[64];
@@ -679,7 +679,7 @@ static int namesortfunc(const void *a, const void *b)
 	return stricmp(name1->GetChars(), name2->GetChars());
 }
 
-void D_WriteUserInfoStrings (int pnum, BYTE **stream, bool compact)
+void D_WriteUserInfoStrings (int pnum, uint8_t **stream, bool compact)
 {
 	if (pnum >= MAXPLAYERS)
 	{
@@ -729,7 +729,7 @@ void D_WriteUserInfoStrings (int pnum, BYTE **stream, bool compact)
 			break;
 
 		case NAME_Skin:
-			*stream += sprintf(*((char **)stream), "\\%s", D_EscapeUserInfo(skins[info->GetSkin()].name).GetChars());
+			*stream += sprintf(*((char **)stream), "\\%s", D_EscapeUserInfo(Skins[info->GetSkin()].Name).GetChars());
 			break;
 
 		default:
@@ -741,7 +741,7 @@ void D_WriteUserInfoStrings (int pnum, BYTE **stream, bool compact)
 	*(*stream)++ = '\0';
 }
 
-void D_ReadUserInfoStrings (int pnum, BYTE **stream, bool update)
+void D_ReadUserInfoStrings (int pnum, uint8_t **stream, bool update)
 {
 	userinfo_t *info = &players[pnum].userinfo;
 	TArray<FName> compact_names(info->CountUsed());
@@ -828,7 +828,7 @@ void D_ReadUserInfoStrings (int pnum, BYTE **stream, bool update)
 						players[pnum].mo->state->sprite ==
 						GetDefaultByType (players[pnum].cls)->SpawnState->sprite)
 					{ // Only change the sprite if the player is using a standard one
-						players[pnum].mo->sprite = skins[info->GetSkin()].sprite;
+						players[pnum].mo->sprite = Skins[info->GetSkin()].sprite;
 					}
 				}
 				// Rebuild translation in case the new skin uses a different range
@@ -898,7 +898,7 @@ void WriteUserInfo(FSerializer &arc, userinfo_t &info)
 			switch (pair->Key.GetIndex())
 			{
 			case NAME_Skin:
-				string = skins[info.GetSkin()].name;
+				string = Skins[info.GetSkin()].Name;
 				break;
 
 			case NAME_PlayerClass:
@@ -986,7 +986,7 @@ CCMD (playerinfo)
 		// Print special info
 		Printf("%20s: %s\n",      "Name", ui->GetName());
 		Printf("%20s: %s (%d)\n", "Team", ui->GetTeam() == TEAM_NONE ? "None" : Teams[ui->GetTeam()].GetName(), ui->GetTeam());
-		Printf("%20s: %s (%d)\n", "Skin", skins[ui->GetSkin()].name, ui->GetSkin());
+		Printf("%20s: %s (%d)\n", "Skin", Skins[ui->GetSkin()].Name.GetChars(), ui->GetSkin());
 		Printf("%20s: %s (%d)\n", "Gender", GenderNames[ui->GetGender()], ui->GetGender());
 		Printf("%20s: %s (%d)\n", "PlayerClass",
 			ui->GetPlayerClassNum() == -1 ? "Random" : ui->GetPlayerClassType()->DisplayName.GetChars(),

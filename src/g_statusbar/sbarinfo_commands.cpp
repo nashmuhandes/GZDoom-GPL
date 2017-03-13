@@ -344,7 +344,7 @@ class CommandDrawImage : public SBarInfoCommandFlowControl
 		int					maxheight;
 		double				spawnScaleX;
 		double				spawnScaleY;
-		DWORD				flags;
+		uint32_t				flags;
 		bool				applyscale; //Set remotely from from GetInventoryIcon when selected sprite comes from Spawn state
 		// I'm using imgx/imgy here so that I can inherit drawimage with drawnumber for some commands.
 		SBarInfoCoordinate	imgx;
@@ -1442,7 +1442,7 @@ class CommandDrawNumber : public CommandDrawString
 					int retv;
 					VMReturn ret(&retv);
 					GlobalVMStack.Call(func, params, 2, &ret, 1);
-					num = retv / TICRATE + 1;
+					num = retv < 0? 0 :  retv / TICRATE + 1;
 					break;
 				}
 				case INVENTORY:
@@ -2132,7 +2132,7 @@ class CommandDrawShader : public SBarInfoCommand
 				DummySpan[1].TopOffset = 0;
 				DummySpan[1].Length = 0;
 			}
-			const BYTE *GetColumn(unsigned int column, const Span **spans_out)
+			const uint8_t *GetColumn(unsigned int column, const Span **spans_out)
 			{
 				if (spans_out != NULL)
 				{
@@ -2140,10 +2140,10 @@ class CommandDrawShader : public SBarInfoCommand
 				}
 				return Pixels + ((column & WidthMask) << HeightBits);
 			}
-			const BYTE *GetPixels() { return Pixels; }
+			const uint8_t *GetPixels() { return Pixels; }
 			void Unload() {}
 		private:
-			BYTE Pixels[512];
+			uint8_t Pixels[512];
 			Span DummySpan[2];
 		};
 
@@ -2744,7 +2744,7 @@ class CommandDrawBar : public SBarInfoCommand
 							max = 0;
 					}
 					else //default to the class's health
-						max = statusBar->CPlayer->mo->GetMaxHealth() + statusBar->CPlayer->mo->stamina;
+						max = statusBar->CPlayer->mo->GetMaxHealth(true);
 					break;
 				case ARMOR:
 					value = statusBar->armor != NULL ? statusBar->armor->Amount : 0;
@@ -3251,7 +3251,7 @@ class CommandDrawGem : public SBarInfoCommand
 		void	Tick(const SBarInfoMainBlock *block, const DSBarInfo *statusBar, bool hudChanged)
 		{
 			goalValue = armor ? (statusBar->armor ? statusBar->armor->Amount : 0) : statusBar->CPlayer->mo->health;
-			int max = armor ? 100 : statusBar->CPlayer->mo->GetMaxHealth() + statusBar->CPlayer->mo->stamina;
+			int max = armor ? 100 : statusBar->CPlayer->mo->GetMaxHealth(true);
 			if(max != 0 && goalValue > 0)
 			{
 				goalValue = (goalValue*100)/max;

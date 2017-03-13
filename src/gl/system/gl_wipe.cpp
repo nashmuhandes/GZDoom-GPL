@@ -47,18 +47,6 @@
 #include "gl/data/gl_vertexbuffer.h"
 #include "gl/renderer/gl_2ddrawer.h"
 
-#ifndef _WIN32
-struct POINT {
-  SDWORD x; 
-  SDWORD y; 
-};
-struct RECT {
-  SDWORD left; 
-  SDWORD top; 
-  SDWORD right; 
-  SDWORD bottom; 
-}; 
-#endif
 
 //===========================================================================
 // 
@@ -143,17 +131,26 @@ bool OpenGLFrameBuffer::WipeStartScreen(int type)
 	glFinish();
 	wipestartscreen->Bind(0, false, false);
 
+	const auto copyPixels = [&viewport]()
+	{
+		glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport.left, viewport.top, viewport.width, viewport.height);
+	};
+
 	if (FGLRenderBuffers::IsEnabled())
 	{
 		GLRenderer->mBuffers->BindCurrentFB();
-		glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport.left, viewport.top, viewport.width, viewport.height);
+		copyPixels();
+	}
+	else if (gl.legacyMode)
+	{
+		copyPixels();
 	}
 	else
 	{
 		GLint readbuffer = 0;
 		glGetIntegerv(GL_READ_BUFFER, &readbuffer);
 		glReadBuffer(GL_FRONT);
-		glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport.left, viewport.top, viewport.width, viewport.height);
+		copyPixels();
 		glReadBuffer(readbuffer);
 	}
 
@@ -405,10 +402,19 @@ int OpenGLFrameBuffer::Wiper_Melt::MakeVBO(int ticks, OpenGLFrameBuffer *fb, boo
 			}
 			if (ticks == 0)
 			{
+				struct {
+					int32_t x;
+					int32_t y;
+				} dpt;
+				struct {
+					int32_t left;
+					int32_t top;
+					int32_t right;
+					int32_t bottom;
+				} rect;
+
 				// Only draw for the final tick.
 				// No need for optimization. Wipes won't ever be drawn with anything else.
-				RECT rect;
-				POINT dpt;
 
 				dpt.x = i * fb->Width / WIDTH;
 				dpt.y = MAX(0, y[i] * fb->Height / HEIGHT);

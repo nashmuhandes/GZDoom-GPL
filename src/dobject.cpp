@@ -404,7 +404,7 @@ size_t DObject::PropagateMark()
 		}
 		while (*offsets != ~(size_t)0)
 		{
-			GC::Mark((DObject **)((BYTE *)this + *offsets));
+			GC::Mark((DObject **)((uint8_t *)this + *offsets));
 			offsets++;
 		}
 
@@ -416,7 +416,7 @@ size_t DObject::PropagateMark()
 		}
 		while (*offsets != ~(size_t)0)
 		{
-			auto aray = (TArray<DObject*>*)((BYTE *)this + *offsets);
+			auto aray = (TArray<DObject*>*)((uint8_t *)this + *offsets);
 			for (auto &p : *aray)
 			{
 				GC::Mark(&p);
@@ -447,9 +447,9 @@ size_t DObject::PointerSubstitution (DObject *old, DObject *notOld)
 	}
 	while (*offsets != ~(size_t)0)
 	{
-		if (*(DObject **)((BYTE *)this + *offsets) == old)
+		if (*(DObject **)((uint8_t *)this + *offsets) == old)
 		{
-			*(DObject **)((BYTE *)this + *offsets) = notOld;
+			*(DObject **)((uint8_t *)this + *offsets) = notOld;
 			changed++;
 		}
 		offsets++;
@@ -463,7 +463,7 @@ size_t DObject::PointerSubstitution (DObject *old, DObject *notOld)
 	}
 	while (*offsets != ~(size_t)0)
 	{
-		auto aray = (TArray<DObject*>*)((BYTE *)this + *offsets);
+		auto aray = (TArray<DObject*>*)((uint8_t *)this + *offsets);
 		for (auto &p : *aray)
 		{
 			if (p == old)
@@ -542,7 +542,7 @@ size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld, bool s
 	for (auto &sec : level.sectors)
 	{
 #define SECTOR_CHECK(f,t) \
-if (sec.f.p == static_cast<t *>(old)) { sec.f = static_cast<t *>(notOld); changed++; }
+if (sec.f.pp == static_cast<t *>(old)) { sec.f = static_cast<t *>(notOld); changed++; }
 		SECTOR_CHECK( SoundTarget, AActor );
 		SECTOR_CHECK( SecActTarget, AActor );
 		SECTOR_CHECK( floordata, DSectorEffect );
@@ -552,9 +552,9 @@ if (sec.f.p == static_cast<t *>(old)) { sec.f = static_cast<t *>(notOld); change
 	}
 
 	// Go through bot stuff.
-	if (bglobal.firstthing.p == (AActor *)old)		bglobal.firstthing = (AActor *)notOld, ++changed;
-	if (bglobal.body1.p == (AActor *)old)			bglobal.body1 = (AActor *)notOld, ++changed;
-	if (bglobal.body2.p == (AActor *)old)			bglobal.body2 = (AActor *)notOld, ++changed;
+	if (bglobal.firstthing.pp == (AActor *)old)		bglobal.firstthing = (AActor *)notOld, ++changed;
+	if (bglobal.body1.pp == (AActor *)old)			bglobal.body1 = (AActor *)notOld, ++changed;
+	if (bglobal.body2.pp == (AActor *)old)			bglobal.body2 = (AActor *)notOld, ++changed;
 
 	return changed;
 }
@@ -616,15 +616,27 @@ DEFINE_ACTION_FUNCTION(DObject, GetClassName)
 	ACTION_RETURN_INT(self->GetClass()->TypeName);
 }
 
+DEFINE_ACTION_FUNCTION(DObject, MSTime)
+{
+	ACTION_RETURN_INT(I_MSTime());
+}
 
 void *DObject::ScriptVar(FName field, PType *type)
 {
-	auto sym = dyn_cast<PField>(GetClass()->Symbols.FindSymbol(field, true));
+	auto cls = GetClass();
+	auto sym = dyn_cast<PField>(cls->Symbols.FindSymbol(field, true));
 	if (sym && (sym->Type == type || type == nullptr))
 	{
-		return (((char*)this) + sym->Offset);
+		if (!(sym->Flags & VARF_Meta))
+		{
+			return (((char*)this) + sym->Offset);
+		}
+		else
+		{
+			return (cls->Meta + sym->Offset);
+		}
 	}
 	// This is only for internal use so I_Error is fine.
-	I_Error("Variable %s not found in %s\n", field.GetChars(), GetClass()->TypeName.GetChars());
+	I_Error("Variable %s not found in %s\n", field.GetChars(), cls->TypeName.GetChars());
 	return nullptr;
 }

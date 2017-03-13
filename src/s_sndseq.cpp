@@ -34,8 +34,8 @@
 // MACROS ------------------------------------------------------------------
 
 #define GetCommand(a)		((a) & 255)
-#define GetData(a)			(SDWORD(a) >> 8 )
-#define GetFloatData(a)		float((SDWORD(a) >> 8 )/65536.f)
+#define GetData(a)			(int32_t(a) >> 8 )
+#define GetFloatData(a)		float((int32_t(a) >> 8 )/65536.f)
 #define MakeCommand(a,b)	((a) | ((b) << 8))
 #define HexenPlatSeq(a)		(a)
 #define HexenDoorSeq(a)		((a) | 0x40)
@@ -97,7 +97,7 @@ typedef enum
 struct hexenseq_t
 {
 	ENamedName	Name;
-	BYTE		Seqs[4];
+	uint8_t		Seqs[4];
 };
 
 class DSeqActorNode : public DSeqNode
@@ -126,7 +126,7 @@ public:
 	}
 private:
 	DSeqActorNode() {}
-	TObjPtr<AActor> m_Actor;
+	TObjPtr<AActor*> m_Actor;
 };
 
 class DSeqPolyNode : public DSeqNode
@@ -203,7 +203,7 @@ struct FSoundSequencePtrArray : public TArray<FSoundSequence *>
 
 static void AssignTranslations (FScanner &sc, int seq, seqtype_t type);
 static void AssignHexenTranslations (void);
-static void AddSequence (int curseq, FName seqname, FName slot, int stopsound, const TArray<DWORD> &ScriptTemp);
+static void AddSequence (int curseq, FName seqname, FName slot, int stopsound, const TArray<uint32_t> &ScriptTemp);
 static int FindSequence (const char *searchname);
 static int FindSequence (FName seqname);
 static bool TwiddleSeqNum (int &sequence, seqtype_t type);
@@ -559,7 +559,7 @@ void S_ClearSndSeq()
 
 void S_ParseSndSeq (int levellump)
 {
-	TArray<DWORD> ScriptTemp;
+	TArray<uint32_t> ScriptTemp;
 	int lastlump, lump;
 	char seqtype = ':';
 	FName seqname;
@@ -785,13 +785,13 @@ void S_ParseSndSeq (int levellump)
 		AssignHexenTranslations ();
 }
 
-static void AddSequence (int curseq, FName seqname, FName slot, int stopsound, const TArray<DWORD> &ScriptTemp)
+static void AddSequence (int curseq, FName seqname, FName slot, int stopsound, const TArray<uint32_t> &ScriptTemp)
 {
-	Sequences[curseq] = (FSoundSequence *)M_Malloc (sizeof(FSoundSequence) + sizeof(DWORD)*ScriptTemp.Size());
+	Sequences[curseq] = (FSoundSequence *)M_Malloc (sizeof(FSoundSequence) + sizeof(uint32_t)*ScriptTemp.Size());
 	Sequences[curseq]->SeqName = seqname;
 	Sequences[curseq]->Slot = slot;
 	Sequences[curseq]->StopSound = FSoundID(stopsound);
-	memcpy (Sequences[curseq]->Script, &ScriptTemp[0], sizeof(DWORD)*ScriptTemp.Size());
+	memcpy (Sequences[curseq]->Script, &ScriptTemp[0], sizeof(uint32_t)*ScriptTemp.Size());
 	Sequences[curseq]->Script[ScriptTemp.Size()] = MakeCommand(SS_CMD_END, 0);
 }
 
@@ -1390,7 +1390,7 @@ void SN_StopAllSequences (void)
 //
 //==========================================================================
 
-ptrdiff_t SN_GetSequenceOffset (int sequence, SDWORD *sequencePtr)
+ptrdiff_t SN_GetSequenceOffset (int sequence, int32_t *sequencePtr)
 {
 	return sequencePtr - Sequences[sequence]->Script;
 }

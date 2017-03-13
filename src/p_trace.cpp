@@ -41,6 +41,7 @@
 #include "r_defs.h"
 #include "p_spec.h"
 #include "g_levellocals.h"
+#include "p_terrain.h"
 
 //==========================================================================
 //
@@ -53,7 +54,7 @@ struct FTraceInfo
 	DVector3 Start;
 	DVector3 Vec;
 	ActorFlags ActorMask;
-	DWORD WallMask;
+	uint32_t WallMask;
 	AActor *IgnoreThis;
 	FTraceResults *Results;
 	sector_t *CurSector;
@@ -61,7 +62,7 @@ struct FTraceInfo
 	double EnterDist;
 	ETraceStatus (*TraceCallback)(FTraceResults &res, void *data);
 	void *TraceCallbackData;
-	DWORD TraceFlags;
+	uint32_t TraceFlags;
 	int inshootthrough;
 	double startfrac;
 	double limitz;
@@ -102,7 +103,7 @@ struct FTraceInfo
 
 };
 
-static bool EditTraceResult (DWORD flags, FTraceResults &res);
+static bool EditTraceResult (uint32_t flags, FTraceResults &res);
 
 
 
@@ -135,6 +136,13 @@ static void GetPortalTransition(DVector3 &pos, sector_t *&sec)
 	}
 }
 
+static bool isLiquid(F3DFloor *ff)
+{
+	if (ff->flags & FF_SWIMMABLE) return true;
+	auto terrain = ff->model->GetTerrain(ff->flags & FF_INVERTPLANES ? sector_t::floor : sector_t::ceiling);
+	return Terrains[terrain].IsLiquid && Terrains[terrain].Splash != -1;
+}
+
 //==========================================================================
 //
 // Trace entry point
@@ -142,7 +150,7 @@ static void GetPortalTransition(DVector3 &pos, sector_t *&sec)
 //==========================================================================
 
 bool Trace(const DVector3 &start, sector_t *sector, const DVector3 &direction, double maxDist,
-	ActorFlags actorMask, DWORD wallMask, AActor *ignore, FTraceResults &res, DWORD flags,
+	ActorFlags actorMask, uint32_t wallMask, AActor *ignore, FTraceResults &res, uint32_t flags,
 	ETraceStatus(*callback)(FTraceResults &res, void *), void *callbackdata)
 {
 	FTraceInfo inf;
@@ -300,9 +308,9 @@ void FTraceInfo::Setup3DFloors()
 			if (!(rover->flags&FF_EXISTS))
 				continue;
 
-			if (rover->flags&FF_SWIMMABLE && Results->Crossed3DWater == NULL)
+			if (Results->Crossed3DWater == NULL)
 			{
-				if (Check3DFloorPlane(rover, false))
+				if (Check3DFloorPlane(rover, false) && isLiquid(rover))
 				{
 					// only consider if the plane is above the actual floor.
 					if (rover->top.plane->ZatPoint(Results->HitPos) > bf)
@@ -767,7 +775,7 @@ bool FTraceInfo::TraceTraverse (int ptflags)
 		{
 			for (auto rover : CurSector->e->XFloor.ffloors)
 			{
-				if ((rover->flags & FF_EXISTS) && (rover->flags&FF_SWIMMABLE))
+				if ((rover->flags & FF_EXISTS) && isLiquid(rover))
 				{
 					if (Check3DFloorPlane(rover, false))
 					{
@@ -915,7 +923,7 @@ bool FTraceInfo::CheckPlane (const secplane_t &plane)
 //
 //==========================================================================
 
-static bool EditTraceResult (DWORD flags, FTraceResults &res)
+static bool EditTraceResult (uint32_t flags, FTraceResults &res)
 {
 	if (flags & TRACE_NoSky)
 	{ // Throw away sky hits

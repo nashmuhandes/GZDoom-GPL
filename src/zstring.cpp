@@ -368,15 +368,15 @@ FString &FString::CopyCStrPart(const char *tail, size_t tailLen)
 	return *this;
 }
 
-void FString::Truncate(long newlen)
+void FString::Truncate(size_t newlen)
 {
-	if (newlen <= 0)
+	if (newlen == 0)
 	{
 		Data()->Release();
 		NullString.RefCount++;
 		Chars = &NullString.Nothing[0];
 	}
-	else if (newlen < (long)Len())
+	else if (newlen < Len())
 	{
 		ReallocBuffer (newlen);
 		Chars[newlen] = '\0';
@@ -393,7 +393,6 @@ void FString::Remove(size_t index, size_t remlen)
 		}
 		else
 		{
-			remlen = Len() - remlen < remlen ? Len() - remlen : remlen;
 			if (Data()->RefCount == 1)
 			{ // Can do this in place
 				memmove(Chars + index, Chars + index + remlen, Len() - index - remlen);

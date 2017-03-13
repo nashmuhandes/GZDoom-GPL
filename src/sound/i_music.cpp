@@ -279,6 +279,10 @@ void MusInfo::TimidityVolumeChanged()
 {
 }
 
+void MusInfo::GMEDepthChanged(float val)
+{
+}
+
 void MusInfo::FluidSettingInt(const char *, int)
 {
 }
@@ -595,7 +599,7 @@ static bool ungzip(BYTE *data, int complen, TArray<BYTE> &newdata)
 	// Find start of compressed data stream
 	if (flags & GZIP_FEXTRA)
 	{
-		compstart += 2 + LittleShort(*(WORD *)(data + 10));
+		compstart += 2 + LittleShort(*(uint16_t *)(data + 10));
 	}
 	if (flags & GZIP_FNAME)
 	{

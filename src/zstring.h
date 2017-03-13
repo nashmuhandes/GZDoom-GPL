@@ -301,7 +301,7 @@ public:
 	bool IsEmpty() const { return Len() == 0; }
 	bool IsNotEmpty() const { return Len() != 0; }
 
-	void Truncate (long newlen);
+	void Truncate (size_t newlen);
 	void Remove(size_t index, size_t remlen);
 
 	int Compare (const FString &other) const { return strcmp (Chars, other.Chars); }
@@ -448,15 +448,6 @@ template<> struct THashTraits<FString>
 	hash_t Hash(const FString &key) { return (hash_t)SuperFastHash(key.GetChars(), key.Len()); }
 	// Compares two keys, returning zero if they are the same.
 	int Compare(const FString &left, const FString &right) { return left.Compare(right); }
-};
-
-class FStringNoInit
-{
-	char mem[sizeof(FString)];
-	operator FString&() 
-	{
-		return *reinterpret_cast<FString*>(&mem);
-	}
 };
 
 #endif

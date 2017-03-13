@@ -223,13 +223,14 @@ enum ELevelFlags : unsigned int
 	
 	// More flags!
 	LEVEL3_FORCEFAKECONTRAST	= 0x00000001,	// forces fake contrast even with fog enabled
+	LEVEL3_REMOVEITEMS		= 0x00000002,	// kills all INVBAR items on map change.
 };
 
 
 struct FSpecialAction
 {
 	FName Type;					// this is initialized before the actors...
-	BYTE Action;
+	uint8_t Action;
 	int Args[5];				// must allow 16 bit tags for 666 & 667!
 };
 
@@ -287,33 +288,35 @@ struct level_info_t
 	int			cluster;
 	int			partime;
 	int			sucktime;
-	DWORD		flags;
-	DWORD		flags2;
-	DWORD		flags3;
+	uint32_t		flags;
+	uint32_t		flags2;
+	uint32_t		flags3;
 
 	FString		Music;
 	FString		LevelName;
-	SBYTE		WallVertLight, WallHorizLight;
+	int8_t		WallVertLight, WallHorizLight;
 	int			musicorder;
 	FCompressedBuffer	Snapshot;
 	TArray<acsdefered_t> deferred;
 	float		skyspeed1;
 	float		skyspeed2;
-	DWORD		fadeto;
-	DWORD		outsidefog;
+	uint32_t		fadeto;
+	uint32_t		outsidefog;
 	int			cdtrack;
 	unsigned int cdid;
 	double		gravity;
 	double		aircontrol;
 	int			WarpTrans;
 	int			airsupply;
-	DWORD		compatflags, compatflags2;
-	DWORD		compatmask, compatmask2;
+	uint32_t		compatflags, compatflags2;
+	uint32_t		compatmask, compatmask2;
 	FString		Translator;	// for converting Doom-format linedef and sector types.
 	int			DefaultEnvironment;	// Default sound environment for the map.
 	FName		Intermission;
 	FName		deathsequence;
 	FName		slideshow;
+	uint32_t		hazardcolor;
+	uint32_t		hazardflash;
 
 	// Redirection: If any player is carrying the specified item, then
 	// you go to the RedirectMap instead of this one.
@@ -324,6 +327,7 @@ struct level_info_t
 	FString		ExitPic;
 	FString 	InterMusic;
 	int			intermusicorder;
+	TMap <FName, std::pair<FString, int> > MapInterMusic;
 
 	FString		SoundInfo;
 	FString		SndSeq;
@@ -338,6 +342,8 @@ struct level_info_t
 	TArray<FSoundID> PrecacheSounds;
 	TArray<FString> PrecacheTextures;
 	TArray<FName> PrecacheClasses;
+	
+	TArray<FString> EventHandlers;
 
 	level_info_t() 
 	{ 
@@ -493,6 +499,7 @@ enum EFSkillProperty	// floating point properties
 	SKILLP_Aggressiveness,
 	SKILLP_MonsterHealth,
 	SKILLP_FriendlyHealth,
+	SKILLP_KickbackFactor,
 };
 
 int G_SkillProperty(ESkillProperty prop);
@@ -510,6 +517,7 @@ struct FSkillInfo
 	double DamageFactor;
 	double ArmorFactor;
 	double HealthFactor;
+	double KickbackFactor;
 
 	bool FastMonsters;
 	bool SlowMonsters;
@@ -518,6 +526,7 @@ struct FSkillInfo
 
 	bool EasyBossBrain;
 	bool EasyKey;
+	bool NoMenu;
 	int RespawnCounter;
 	int RespawnLimit;
 	double Aggressiveness;

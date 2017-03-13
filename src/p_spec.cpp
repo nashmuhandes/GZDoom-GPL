@@ -40,6 +40,7 @@
 #include "d_event.h"
 #include "g_level.h"
 #include "gstrings.h"
+#include "events.h"
 
 #include "i_system.h"
 #include "m_argv.h"
@@ -146,7 +147,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType, DVe
 	int lineActivation;
 	INTBOOL repeat;
 	INTBOOL buttonSuccess;
-	BYTE special;
+	uint8_t special;
 
 	if (!P_TestActivateLine (line, mo, side, activationType, optpos))
 	{
@@ -336,7 +337,7 @@ bool P_PredictLine(line_t *line, AActor *mo, int side, int activationType)
 {
 	int lineActivation;
 	INTBOOL buttonSuccess;
-	BYTE special;
+	uint8_t special;
 
 	// Only predict a very specifc section of specials
 	if (line->special != Teleport_Line &&
@@ -466,7 +467,8 @@ static void DoSectorDamage(AActor *actor, sector_t *sec, int amount, FName type,
 			return;
 	}
 
-	P_DamageMobj (actor, NULL, NULL, amount, type);
+	int dflags = (flags & DAMAGE_NO_ARMOR) ? DMG_NO_ARMOR : 0;
+	P_DamageMobj (actor, NULL, NULL, amount, type, dflags);
 }
 
 void P_SectorDamage(int tag, int amount, FName type, PClassActor *protectClass, int flags)
@@ -748,17 +750,17 @@ class DWallLightTransfer : public DThinker
 	DECLARE_CLASS (DWallLightTransfer, DThinker)
 	DWallLightTransfer() {}
 public:
-	DWallLightTransfer (sector_t *srcSec, int target, BYTE flags);
+	DWallLightTransfer (sector_t *srcSec, int target, uint8_t flags);
 	void Serialize(FSerializer &arc);
 	void Tick ();
 
 protected:
-	static void DoTransfer (short level, int target, BYTE flags);
+	static void DoTransfer (short level, int target, uint8_t flags);
 
 	sector_t *Source;
 	int TargetID;
 	short LastLight;
-	BYTE Flags;
+	uint8_t Flags;
 };
 
 IMPLEMENT_CLASS(DWallLightTransfer, false, false)
@@ -772,7 +774,7 @@ void DWallLightTransfer::Serialize(FSerializer &arc)
 		("flags", Flags);
 }
 
-DWallLightTransfer::DWallLightTransfer (sector_t *srcSec, int target, BYTE flags)
+DWallLightTransfer::DWallLightTransfer (sector_t *srcSec, int target, uint8_t flags)
 {
 	int linenum;
 	int wallflags;
@@ -818,7 +820,7 @@ void DWallLightTransfer::Tick ()
 	}
 }
 
-void DWallLightTransfer::DoTransfer (short lightlevel, int target, BYTE flags)
+void DWallLightTransfer::DoTransfer (short lightlevel, int target, uint8_t flags)
 {
 	int linenum;
 
@@ -1203,7 +1205,7 @@ void P_InitSectorSpecial(sector_t *sector, int special)
 		if (sector->special >= Scroll_North_Slow &&
 			sector->special <= Scroll_SouthWest_Fast)
 		{ // Hexen scroll special
-			static const SBYTE hexenScrollies[24][2] =
+			static const int8_t hexenScrollies[24][2] =
 			{
 				{  0,  1 }, {  0,  2 }, {  0,  4 },
 				{ -1,  0 }, { -2,  0 }, { -4,  0 },

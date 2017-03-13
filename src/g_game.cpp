@@ -92,6 +92,7 @@
 
 #include "g_hub.h"
 #include "g_levellocals.h"
+#include "events.h"
 
 
 static FRandom pr_dmspawn ("DMSpawn");
@@ -180,13 +181,13 @@ bool 			demorecording;
 bool 			demoplayback;
 bool			demonew;				// [RH] Only used around G_InitNew for demos
 int				demover;
-BYTE*			demobuffer;
-BYTE*			demo_p;
-BYTE*			democompspot;
-BYTE*			demobodyspot;
+uint8_t*			demobuffer;
+uint8_t*			demo_p;
+uint8_t*			democompspot;
+uint8_t*			demobodyspot;
 size_t			maxdemosize;
-BYTE*			zdemformend;			// end of FORM ZDEM chunk
-BYTE*			zdembodyend;			// end of ZDEM BODY chunk
+uint8_t*			zdemformend;			// end of FORM ZDEM chunk
+uint8_t*			zdembodyend;			// end of ZDEM BODY chunk
 bool 			singledemo; 			// quit after playing a demo from cmdline 
  
 bool 			precache = true;		// if true, load all graphics at start 
@@ -226,7 +227,7 @@ int 			mousex;
 int 			mousey; 		
 
 FString			savegamefile;
-char			savedescription[SAVESTRINGSIZE];
+FString			savedescription;
 
 // [RH] Name of screenshot file to generate (usually NULL)
 FString			shotfile;
@@ -241,6 +242,7 @@ FString BackupSaveName;
 
 bool SendLand;
 const AInventory *SendItemUse, *SendItemDrop;
+int SendItemDropAmount;
 
 EXTERN_CVAR (Int, team)
 
@@ -346,6 +348,10 @@ CCMD (weapnext)
 		StatusBar->AttachMessage(new DHUDMessageFadeOut(SmallFont, SendItemUse->GetTag(),
 			1.5f, 0.90f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
 	}
+	if (SendItemUse != players[consoleplayer].ReadyWeapon)
+	{
+		S_Sound(CHAN_AUTO, "misc/weaponchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (weapprev)
@@ -357,6 +363,10 @@ CCMD (weapprev)
 		StatusBar->AttachMessage(new DHUDMessageFadeOut(SmallFont, SendItemUse->GetTag(),
 			1.5f, 0.90f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
 	}
+	if (SendItemUse != players[consoleplayer].ReadyWeapon)
+	{
+		S_Sound(CHAN_AUTO, "misc/weaponchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (invnext)
@@ -366,6 +376,7 @@ CCMD (invnext)
 	if (who == NULL)
 		return;
 
+	auto old = who->InvSel;
 	if (who->InvSel != NULL)
 	{
 		if ((next = who->InvSel->NextInv()) != NULL)
@@ -389,6 +400,10 @@ CCMD (invnext)
 			1.5f, 0.80f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
 	}
 	who->player->inventorytics = 5*TICRATE;
+	if (old != who->InvSel)
+	{
+		S_Sound(CHAN_AUTO, "misc/invchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (invprev)
@@ -398,6 +413,7 @@ CCMD (invprev)
 	if (who == NULL)
 		return;
 
+	auto old = who->InvSel;
 	if (who->InvSel != NULL)
 	{
 		if ((item = who->InvSel->PrevInv()) != NULL)
@@ -419,6 +435,10 @@ CCMD (invprev)
 			1.5f, 0.80f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
 	}
 	who->player->inventorytics = 5*TICRATE;
+	if (old != who->InvSel)
+	{
+		S_Sound(CHAN_AUTO, "misc/invchange", 1.0, ATTN_NONE);
+	}
 }
 
 CCMD (invuseall)
@@ -457,12 +477,14 @@ CCMD (invdrop)
 	if (players[consoleplayer].mo)
 	{
 		SendItemDrop = players[consoleplayer].mo->InvSel;
+		SendItemDropAmount = -1;
 	}
 }
 
 CCMD (weapdrop)
 {
 	SendItemDrop = players[consoleplayer].ReadyWeapon;
+	SendItemDropAmount = -1;
 }
 
 CCMD (drop)
@@ -470,6 +492,7 @@ CCMD (drop)
 	if (argv.argc() > 1 && who != NULL)
 	{
 		SendItemDrop = who->FindInventory(argv[1]);
+		SendItemDropAmount = argv.argc() > 2 ? atoi(argv[2]) : -1;
 	}
 }
 
@@ -762,6 +785,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	{
 		Net_WriteByte (DEM_INVDROP);
 		Net_WriteLong (SendItemDrop->InventoryID);
+		Net_WriteLong(SendItemDropAmount);
 		SendItemDrop = NULL;
 	}
 
@@ -1081,7 +1105,7 @@ void G_Ticker ()
 			G_DoSaveGame (true, savegamefile, savedescription);
 			gameaction = ga_nothing;
 			savegamefile = "";
-			savedescription[0] = '\0';
+			savedescription = "";
 			break;
 		case ga_autosave:
 			G_DoAutoSave ();
@@ -1139,7 +1163,7 @@ void G_Ticker ()
 
 	// [RH] Include some random seeds and player stuff in the consistancy
 	// check, not just the player's x position like BOOM.
-	DWORD rngsum = FRandom::StaticSumSeeds ();
+	uint32_t rngsum = FRandom::StaticSumSeeds ();
 
 	//Added by MC: For some of that bot stuff. The main bot function.
 	bglobal.Main ();
@@ -1188,7 +1212,7 @@ void G_Ticker ()
 				}
 				if (players[i].mo)
 				{
-					DWORD sum = rngsum + int((players[i].mo->X() + players[i].mo->Y() + players[i].mo->Z())*257) + players[i].mo->Angles.Yaw.BAMs() + players[i].mo->Angles.Pitch.BAMs();
+					uint32_t sum = rngsum + int((players[i].mo->X() + players[i].mo->Y() + players[i].mo->Z())*257) + players[i].mo->Angles.Yaw.BAMs() + players[i].mo->Angles.Pitch.BAMs();
 					sum ^= players[i].health;
 					consistancy[i][buf] = sum;
 				}
@@ -1199,6 +1223,9 @@ void G_Ticker ()
 			}
 		}
 	}
+
+	// [ZZ] also tick the UI part of the events
+	E_UiTick();
 
 	// do main actions
 	switch (gamestate)
@@ -1320,12 +1347,24 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 
 	if (mode == FINISH_NoHub && !(level.flags2 & LEVEL2_KEEPFULLINVENTORY))
 	{ // Reduce all owned (visible) inventory to defined maximum interhub amount
+		TArray<AInventory*> todelete;
 		for (item = p->mo->Inventory; item != NULL; item = item->Inventory)
 		{
 			// If the player is carrying more samples of an item than allowed, reduce amount accordingly
 			if (item->ItemFlags & IF_INVBAR && item->Amount > item->InterHubAmount)
 			{
 				item->Amount = item->InterHubAmount;
+				if ((level.flags3 & LEVEL3_REMOVEITEMS) && !(item->ItemFlags & IF_UNDROPPABLE))
+				{
+					todelete.Push(item);
+				}
+			}
+		}
+		for (auto it : todelete)
+		{
+			if (!(it->ObjectFlags & OF_EuthanizeMe))
+			{
+				it->DepleteOrDestroy();
 			}
 		}
 	}
@@ -1359,7 +1398,7 @@ void G_PlayerReborn (int player)
 	int 		itemcount;
 	int 		secretcount;
 	int			chasecam;
-	BYTE		currclass;
+	uint8_t		currclass;
 	userinfo_t  userinfo;	// [RH] Save userinfo
 	APlayerPawn *actor;
 	PClassActor *cls;
@@ -1695,7 +1734,7 @@ static void G_QueueBody (AActor *body)
 	{
 		// Apply skin's scale to actor's scale, it will be lost otherwise
 		const AActor *const defaultActor = body->GetDefault();
-		const FPlayerSkin &skin = skins[skinidx];
+		const FPlayerSkin &skin = Skins[skinidx];
 
 		body->Scale.X *= skin.Scale.X / defaultActor->Scale.X;
 		body->Scale.Y *= skin.Scale.Y / defaultActor->Scale.Y;
@@ -1792,6 +1831,8 @@ void G_DoPlayerPop(int playernum)
 
 	// [RH] Make the player disappear
 	FBehavior::StaticStopMyScripts(players[playernum].mo);
+	// [ZZ] fire player disconnect hook
+	E_PlayerDisconnected(playernum);
 	// [RH] Let the scripts know the player left
 	FBehavior::StaticStartTypedScripts(SCRIPT_Disconnect, players[playernum].mo, true, playernum, true);
 	if (players[playernum].mo != NULL)
@@ -1997,11 +2038,11 @@ void G_DoLoadGame ()
 	arc("importantcvars", cvar);
 	if (!cvar.IsEmpty())
 	{
-		BYTE *vars_p = (BYTE *)cvar.GetChars();
+		uint8_t *vars_p = (uint8_t *)cvar.GetChars();
 		C_ReadCVars(&vars_p);
 	}
 
-	DWORD time[2] = { 1,0 };
+	uint32_t time[2] = { 1,0 };
 
 	arc("ticrate", time[0])
 		("leveltime", time[1]);
@@ -2066,8 +2107,7 @@ void G_SaveGame (const char *filename, const char *description)
 	else
 	{
 		savegamefile = filename;
-		strncpy (savedescription, description, sizeof(savedescription)-1);
-		savedescription[sizeof(savedescription)-1] = '\0';
+		savedescription = description;
 		sendsave = true;
 	}
 }
@@ -2117,7 +2157,7 @@ extern void P_CalcHeight (player_t *);
 
 void G_DoAutoSave ()
 {
-	char description[SAVESTRINGSIZE];
+	FString description;
 	FString file;
 	// Keep up to four autosaves at a time
 	UCVarValue num;
@@ -2145,10 +2185,7 @@ void G_DoAutoSave ()
 	}
 
 	readableTime = myasctime ();
-	strcpy (description, "Autosave ");
-	strncpy (description+9, readableTime+4, 12);
-	description[9+12] = 0;
-
+	description.Format("Autosave %.12s", readableTime + 4);
 	G_DoSaveGame (false, file, description);
 }
 
@@ -2173,7 +2210,7 @@ static void PutSaveComment (FSerializer &arc)
 {
 	char comment[256];
 	const char *readableTime;
-	WORD len;
+	uint16_t len;
 	int levelTime;
 
 	// Get the current date and time
@@ -2189,7 +2226,7 @@ static void PutSaveComment (FSerializer &arc)
 	// Get level name
 	//strcpy (comment, level.level_name);
 	mysnprintf(comment, countof(comment), "%s - %s", level.MapName.GetChars(), level.LevelName.GetChars());
-	len = (WORD)strlen (comment);
+	len = (uint16_t)strlen (comment);
 	comment[len] = '\n';
 
 	// Append elapsed time
@@ -2237,7 +2274,29 @@ void G_DoSaveGame (bool okForQuicksave, FString filename, const char *descriptio
 		I_FreezeTime(true);
 
 	insave = true;
-	G_SnapshotLevel ();
+	try
+	{
+		G_SnapshotLevel();
+	}
+	catch(CRecoverableError &err)
+	{
+		// delete the snapshot. Since the save failed it is broken.
+		insave = false;
+		level.info->Snapshot.Clean();
+		Printf(PRINT_HIGH, "Save failed\n");
+		Printf(PRINT_HIGH, "%s\n", err.GetMessage());
+		// The time freeze must be reset if the save fails.
+		if (cl_waitforsave)
+			I_FreezeTime(false);
+		return;
+	}
+	catch (...)
+	{
+		insave = false;
+		if (cl_waitforsave)
+			I_FreezeTime(false);
+		throw;
+	}
 
 	BufferWriter savepic;
 	FSerializer savegameinfo;		// this is for displayable info about the savegame
@@ -2308,7 +2367,7 @@ void G_DoSaveGame (bool okForQuicksave, FString filename, const char *descriptio
 
 	WriteZip(filename, savegame_filenames, savegame_content);
 
-	M_NotifyNewSave (filename.GetChars(), description, okForQuicksave);
+	savegameManager.NotifyNewSave (filename, description, okForQuicksave);
 
 	// delete the JSON buffers we created just above. Everything else will
 	// either still be needed or taken care of automatically.
@@ -2374,7 +2433,7 @@ void G_ReadDemoTiccmd (ticcmd_t *cmd, int player)
 
 		case DEM_DROPPLAYER:
 			{
-				BYTE i = ReadByte (&demo_p);
+				uint8_t i = ReadByte (&demo_p);
 				if (i < MAXPLAYERS)
 				{
 					playeringame[i] = false;
@@ -2396,11 +2455,11 @@ CCMD (stop)
 	stoprecording = true;
 }
 
-extern BYTE *lenspot;
+extern uint8_t *lenspot;
 
 void G_WriteDemoTiccmd (ticcmd_t *cmd, int player, int buf)
 {
-	BYTE *specdata;
+	uint8_t *specdata;
 	int speclen;
 
 	if (stoprecording)
@@ -2433,7 +2492,7 @@ void G_WriteDemoTiccmd (ticcmd_t *cmd, int player, int buf)
 		ptrdiff_t body = demobodyspot - demobuffer;
 		// [RH] Allocate more space for the demo
 		maxdemosize += 0x20000;
-		demobuffer = (BYTE *)M_Realloc (demobuffer, maxdemosize);
+		demobuffer = (uint8_t *)M_Realloc (demobuffer, maxdemosize);
 		demo_p = demobuffer + pos;
 		lenspot = demobuffer + spot;
 		democompspot = demobuffer + comp;
@@ -2453,7 +2512,7 @@ void G_RecordDemo (const char* name)
 	FixPathSeperator (demoname);
 	DefaultExtension (demoname, ".lmp");
 	maxdemosize = 0x20000;
-	demobuffer = (BYTE *)M_Malloc (maxdemosize);
+	demobuffer = (uint8_t *)M_Malloc (maxdemosize);
 	demorecording = true; 
 }
 
@@ -2494,7 +2553,7 @@ void G_BeginRecording (const char *startmap)
 		if (playeringame[i])
 		{
 			StartChunk (UINF_ID, &demo_p);
-			WriteByte ((BYTE)i, &demo_p);
+			WriteByte ((uint8_t)i, &demo_p);
 			D_WriteUserInfoStrings (i, &demo_p);
 			FinishChunk (&demo_p);
 		}
@@ -2580,7 +2639,7 @@ bool G_ProcessIFFDemo (FString &mapname)
 	int numPlayers = 0;
 	int id, len, i;
 	uLong uncompSize = 0;
-	BYTE *nextchunk;
+	uint8_t *nextchunk;
 
 	demoplayback = true;
 
@@ -2708,7 +2767,7 @@ bool G_ProcessIFFDemo (FString &mapname)
 
 	if (uncompSize > 0)
 	{
-		BYTE *uncompressed = (BYTE*)M_Malloc(uncompSize);
+		uint8_t *uncompressed = (uint8_t*)M_Malloc(uncompSize);
 		int r = uncompress (uncompressed, &uncompSize, demo_p, uLong(zdembodyend - demo_p));
 		if (r != Z_OK)
 		{
@@ -2736,7 +2795,7 @@ void G_DoPlayDemo (void)
 	if (demolump >= 0)
 	{
 		int demolen = Wads.LumpLength (demolump);
-		demobuffer = (BYTE *)M_Malloc(demolen);
+		demobuffer = (uint8_t *)M_Malloc(demolen);
 		Wads.ReadLump (demolump, demobuffer);
 	}
 	else
@@ -2882,7 +2941,7 @@ bool G_CheckDemoStatus (void)
 
 	if (demorecording)
 	{
-		BYTE *formlen;
+		uint8_t *formlen;
 
 		WriteByte (DEM_STOP, &demo_p);
 

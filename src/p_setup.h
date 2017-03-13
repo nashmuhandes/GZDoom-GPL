@@ -83,7 +83,7 @@ struct MapData
 		}
 	}
 
-	DWORD Size(unsigned int lumpindex)
+	uint32_t Size(unsigned int lumpindex)
 	{
 		if (lumpindex<countof(MapLumps) && MapLumps[lumpindex].Reader)
 		{
@@ -92,7 +92,7 @@ struct MapData
 		return 0;
 	}
 
-	void GetChecksum(BYTE cksum[16]);
+	void GetChecksum(uint8_t cksum[16]);
 };
 
 MapData * P_OpenMapData(const char * mapname, bool justcheck);
@@ -119,8 +119,8 @@ void P_LoadTranslator(const char *lumpname);
 void P_TranslateLineDef (line_t *ld, maplinedef_t *mld, int lineindexforid = -1);
 int P_TranslateSectorSpecial (int);
 
-int GetUDMFInt(int type, int index, const char *key);
-double GetUDMFFloat(int type, int index, const char *key);
+int GetUDMFInt(int type, int index, FName key);
+double GetUDMFFloat(int type, int index, FName key);
 
 bool P_LoadGLNodes(MapData * map);
 bool P_CheckNodes(MapData * map, bool rebuilt, int buildtime);
@@ -138,13 +138,13 @@ struct sidei_t	// [RH] Only keep BOOM sidedef init stuff around for init
 		{
 			short tag, special;
 			short alpha;
-			DWORD map;
+			uint32_t map;
 		} a;
 
 		// Used when grouping sidedefs into loops.
 		struct
 		{
-			DWORD first, next;
+			uint32_t first, next;
 			char lineside;
 		} b;
 	};

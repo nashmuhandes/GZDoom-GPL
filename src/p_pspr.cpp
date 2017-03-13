@@ -536,6 +536,7 @@ void P_FireWeapon (player_t *player, FState *state)
 		return;
 	}
 
+	player->WeaponState &= ~WF_WEAPONBOBBING;
 	player->mo->PlayAttacking ();
 	weapon->bAltFire = false;
 	if (state == nullptr)
@@ -572,6 +573,7 @@ void P_FireWeaponAlt (player_t *player, FState *state)
 		return;
 	}
 
+	player->WeaponState &= ~WF_WEAPONBOBBING;
 	player->mo->PlayAttacking ();
 	weapon->bAltFire = true;
 
@@ -1381,7 +1383,7 @@ void DPSprite::Tick()
 			Tics--;
 
 			// [BC] Apply double firing speed.
-			if ((Flags & PSPF_POWDOUBLE) && Tics && (Owner->cheats & CF_DOUBLEFIRINGSPEED))
+			if ((Flags & PSPF_POWDOUBLE) && Tics && (Owner->mo->FindInventory (PClass::FindActor(NAME_PowerDoubleFiringSpeed), true)))
 				Tics--;
 
 			if (!Tics)

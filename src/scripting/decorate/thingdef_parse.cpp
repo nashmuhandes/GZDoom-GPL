@@ -52,7 +52,6 @@
 #include "backend/codegen.h"
 #include "w_wad.h"
 #include "v_video.h"
-#include "version.h"
 #include "v_text.h"
 #include "m_argv.h"
 
@@ -70,6 +69,10 @@ EXTERN_CVAR(Bool, strictdecorate);
 
 PClassActor *DecoDerivedClass(const FScriptPosition &sc, PClassActor *parent, FName typeName)
 {
+	if (parent->mVersion > MakeVersion(2, 0))
+	{
+		sc.Message(MSG_ERROR, "Parent class %s of %s not accessible to DECORATE", parent->GetClass()->TypeName.GetChars(), typeName.GetChars());
+	}
 	PClassActor *type = static_cast<PClassActor *>(parent->CreateDerivedClass(typeName, parent->Size));
 	if (type == nullptr)
 	{
@@ -94,6 +97,13 @@ PClassActor *DecoDerivedClass(const FScriptPosition &sc, PClassActor *parent, FN
 			sc.Message(MSG_FATAL, "Tried to define class '%s' more than twice in the same file.", typeName.GetChars());
 		}
 	}
+	
+	if (type != nullptr)
+	{
+		// [ZZ] DECORATE classes are always play
+		type->ObjectFlags = FScopeBarrier::ChangeSideInObjectFlags(type->ObjectFlags, FScopeBarrier::Side_Play);
+	}
+
 	return type;
 }
 
@@ -828,7 +838,7 @@ static void DispatchScriptProperty(FScanner &sc, PProperty *prop, AActor *defaul
 		if (i > 0) sc.MustGetStringName(",");
 		if (f->Flags & VARF_Meta)
 		{
-			addr = ((char*)bag.Info) + f->Offset;
+			addr = ((char*)bag.Info->Meta) + f->Offset;
 		}
 		else
 		{
@@ -839,6 +849,21 @@ static void DispatchScriptProperty(FScanner &sc, PProperty *prop, AActor *defaul
 		{
 			bool val = sc.CheckNumber() ? !!sc.Number : true;
 			static_cast<PBool*>(f->Type)->SetValue(addr, !!val);
+		}
+		else if (f->Type == TypeName)
+		{
+			sc.MustGetString();
+			*(FName*)addr = sc.String;
+		}
+		else if (f->Type == TypeSound)
+		{
+			sc.MustGetString();
+			*(FSoundID*)addr = sc.String;
+		}
+		else if (f->Type == TypeColor)
+		{
+			if (sc.CheckNumber()) *(int*)addr = sc.Number;
+			else *(PalEntry*)addr = V_GetColor(nullptr, sc);
 		}
 		else if (f->Type->IsKindOf(RUNTIME_CLASS(PInt)))
 		{
@@ -853,7 +878,7 @@ static void DispatchScriptProperty(FScanner &sc, PProperty *prop, AActor *defaul
 		else if (f->Type->IsKindOf(RUNTIME_CLASS(PString)))
 		{
 			sc.MustGetString();
-			*(FString*)addr = sc.String;
+			*(FString*)addr = strbin1(sc.String);
 		}
 		else if (f->Type->IsKindOf(RUNTIME_CLASS(PClassPointer)))
 		{
@@ -1111,6 +1136,7 @@ static void ParseActor(FScanner &sc, PNamespace *ns)
 	Baggage bag;
 
 	bag.Namespace = ns;
+	bag.Version = { 2, 0, 0 };	
 	bag.fromDecorate = true;
 	info = ParseActorHeader(sc, &bag);
 	sc.MustGetToken('{');

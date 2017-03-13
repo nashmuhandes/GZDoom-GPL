@@ -48,7 +48,6 @@ TArray<VMFunction *> VMFunction::AllFunctions;
 
 VMScriptFunction::VMScriptFunction(FName name)
 {
-	Native = false;
 	Name = name;
 	LineInfo = nullptr;
 	Code = NULL;
@@ -438,7 +437,7 @@ int VMFrameStack::Call(VMFunction *func, VMValue *params, int numparams, VMRetur
 	bool allocated = false;
 	try
 	{	
-		if (func->Native)
+		if (func->VarFlags & VARF_Native)
 		{
 			return static_cast<VMNativeFunction *>(func)->NativeCall(params, func->DefaultArgs, numparams, results, numresults);
 		}
@@ -446,7 +445,8 @@ int VMFrameStack::Call(VMFunction *func, VMValue *params, int numparams, VMRetur
 		{
 			auto code = static_cast<VMScriptFunction *>(func)->Code;
 			// handle empty functions consisting of a single return explicitly so that empty virtual callbacks do not need to set up an entire VM frame.
-			if (code->word == 0x0080804e)
+			// code cann be null here in case of some non-fatal DECORATE errors.
+			if (code == nullptr || code->word == 0x0080804e)
 			{
 				return 0;
 			}

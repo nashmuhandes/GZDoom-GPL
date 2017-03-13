@@ -46,6 +46,7 @@
 
 #include "doomstat.h"
 #include "templates.h"
+#include "gstrings.h"
 
 int ListGetInt(VMVa_List &tags);
 
@@ -131,7 +132,7 @@ DEFINE_ACTION_FUNCTION(_Screen, DrawChar)
 void DCanvas::DrawTextCommon(FFont *font, int normalcolor, double x, double y, const char *string, DrawParms &parms)
 {
 	int 		w;
-	const BYTE *ch;
+	const uint8_t *ch;
 	int 		c;
 	double 		cx;
 	double 		cy;
@@ -139,6 +140,8 @@ void DCanvas::DrawTextCommon(FFont *font, int normalcolor, double x, double y, c
 	FRemapTable *range;
 	int			kerning;
 	FTexture *pic;
+
+	assert(string[0] != '$');
 
 	if (parms.celly == 0) parms.celly = font->GetHeight() + 1;
 	parms.celly *= parms.scaley;
@@ -151,7 +154,7 @@ void DCanvas::DrawTextCommon(FFont *font, int normalcolor, double x, double y, c
 
 	kerning = font->GetDefaultKerning();
 
-	ch = (const BYTE *)string;
+	ch = (const uint8_t *)string;
 	cx = x;
 	cy = y;
 
@@ -239,7 +242,8 @@ DEFINE_ACTION_FUNCTION(_Screen, DrawText)
 	PARAM_STRING(chr);
 
 	VMVa_List args = { param + 5, 0, numparam - 5 };
-	screen->DrawText(font, cr, x, y, chr, args);
+	const char *txt = chr[0] == '$' ? GStrings(&chr[1]) : chr.GetChars();
+	screen->DrawText(font, cr, x, y, txt, args);
 	return 0;
 }
 
@@ -250,7 +254,7 @@ DEFINE_ACTION_FUNCTION(_Screen, DrawText)
 //
 //==========================================================================
 
-static void breakit (FBrokenLines *line, FFont *font, const BYTE *start, const BYTE *stop, FString &linecolor)
+static void breakit (FBrokenLines *line, FFont *font, const uint8_t *start, const uint8_t *stop, FString &linecolor)
 {
 	if (!linecolor.IsEmpty())
 	{
@@ -261,11 +265,11 @@ static void breakit (FBrokenLines *line, FFont *font, const BYTE *start, const B
 	line->Width = font->StringWidth (line->Text);
 }
 
-FBrokenLines *V_BreakLines (FFont *font, int maxwidth, const BYTE *string, bool preservecolor, unsigned int *count)
+FBrokenLines *V_BreakLines (FFont *font, int maxwidth, const uint8_t *string, bool preservecolor, unsigned int *count)
 {
 	TArray<FBrokenLines> Lines(128);
 
-	const BYTE *space = NULL, *start = string;
+	const uint8_t *space = NULL, *start = string;
 	int c, w, nw;
 	FString lastcolor, linecolor;
 	bool lastWasSpace = false;
@@ -281,7 +285,7 @@ FBrokenLines *V_BreakLines (FFont *font, int maxwidth, const BYTE *string, bool 
 			{
 				if (*string == '[')
 				{
-					const BYTE *start = string;
+					const uint8_t *start = string;
 					while (*string != ']' && *string != '\0')
 					{
 						string++;
@@ -351,7 +355,7 @@ FBrokenLines *V_BreakLines (FFont *font, int maxwidth, const BYTE *string, bool 
 	// String here is pointing one character after the '\0'
 	if (--string - start >= 1)
 	{
-		const BYTE *s = start;
+		const uint8_t *s = start;
 
 		while (s < string)
 		{
