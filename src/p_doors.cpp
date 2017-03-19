@@ -616,6 +616,7 @@ void DAnimatedDoor::Tick ()
 				}
 
 				m_Timer = m_Delay;
+				m_Status = Waiting;
 			}
 			else
 			{

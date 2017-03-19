@@ -1898,7 +1898,7 @@ DEFINE_ACTION_FUNCTION(AStateProvider, A_FireProjectile)
 
 		// Temporarily adjusts the pitch
 		DAngle saved_player_pitch = self->Angles.Pitch;
-		self->Angles.Pitch -= pitch;
+		self->Angles.Pitch += pitch;
 		AActor * misl=P_SpawnPlayerMissile (self, ofs.X, ofs.Y, spawnheight, ti, shootangle, &t, NULL, false, (flags & FPF_NOAUTOAIM) != 0);
 		self->Angles.Pitch = saved_player_pitch;
 
@@ -6851,4 +6851,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_SetMugshotState)
 	if (self->CheckLocalView(consoleplayer))
 		StatusBar->SetMugShotState(name);
 	return 0;
+}
+
+// This needs to account for the fact that internally renderstyles are stored as a series of operations, 
+// but the script side only cares about symbolic constants.
+DEFINE_ACTION_FUNCTION(AActor, GetRenderStyle)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	for(unsigned i=0;i<STYLE_Count;i++)
+	{
+		if (self->RenderStyle == LegacyRenderStyles[i]) ACTION_RETURN_INT(i);
+	}
+	ACTION_RETURN_INT(-1);	// no symbolic constant exists to handle this style.
 }
