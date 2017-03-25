@@ -1,7 +1,11 @@
 The original Doom source code was released by id Software under the
 Doom Source Code License. See doomlic.txt.
 
-The majority of original code uses a BSD-like license. See bsd.txt.
+Parts of the voxel code in the software renderer use code from the
+BUILD engine by Ken Silverman. Permission has been obtained to use this code
+under the terms of the GNU General Public License v3.0. See r_voxel.cpp.
+
+The majority of original code uses a BSD-like lincese. See bsd.txt.
 
 The OpenGL renderer is released under the LGPL v3, except some bits
 of code that were inherited from ZDoomGL.
